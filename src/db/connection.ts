@@ -66,7 +66,10 @@ export const supabaseAdmin = createClient(
       persistSession: false,
     },
     realtime: {
-      transport: ws as unknown as typeof WebSocket,
+      // `ws` structurally satisfies the WebSocketLikeConstructor the client
+      // needs, but its DOM-typed signatures don't line up nominally, so cast.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      transport: ws as any,
     },
   },
 );
