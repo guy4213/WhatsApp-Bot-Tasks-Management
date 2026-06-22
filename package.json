@@ -33,12 +33,14 @@
     "openai": "^6.42.0",
     "pg": "^8.21.0",
     "pino": "^10.3.1",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
     "@types/node-cron": "^3.0.11",
     "@types/pg": "^8.20.0",
+    "@types/ws": "^8.18.1",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",

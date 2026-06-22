@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 import dotenv from 'dotenv';
 import { moduleLogger } from '../utils/logger';
 
@@ -52,6 +53,10 @@ pool.on('error', (err) => {
 });
 
 // ── Supabase admin client — service-role key bypasses RLS ────────────────────
+// `createClient` eagerly constructs a RealtimeClient, which needs a global
+// WebSocket. Node < 22 has none, so it throws on import (breaks tests/CI on
+// Node 20). We never use realtime here, but the client still builds it, so we
+// hand it the `ws` implementation explicitly to keep construction Node-agnostic.
 export const supabaseAdmin = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -59,6 +64,9 @@ export const supabaseAdmin = createClient(
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    realtime: {
+      transport: ws as unknown as typeof WebSocket,
     },
   },
 );
