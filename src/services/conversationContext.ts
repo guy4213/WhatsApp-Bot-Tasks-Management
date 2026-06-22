@@ -4,13 +4,18 @@ import type { AIIntentResult } from '../types';
 const TTL_MINUTES = parseInt(process.env.CONVERSATION_CONTEXT_TTL_MINUTES ?? '10', 10);
 
 // What the bot is waiting for from the user's next message.
-export type AwaitingKind = 'intent_confirm' | 'missing_field' | 'task_disambig' | 'read_confirm' | 'create_date';
+export type AwaitingKind =
+  | 'intent_confirm' | 'missing_field' | 'task_disambig' | 'read_confirm'
+  | 'create_date' | 'owner_disambig' | 'link_disambig';
 
 export interface ConversationState {
   awaiting: AwaitingKind;
   intent: AIIntentResult;            // the partially-resolved intent
   missingField?: string;             // which field we asked for (missing_field)
   candidateTaskIds?: string[];       // options offered (task_disambig)
+  candidateUserIds?: string[];       // options offered (owner_disambig)
+  candidateLinkIds?: string[];       // options offered (link_disambig: customer/lead/project ids)
+  linkField?: string;                // which link FK we're resolving (customerId/leadId/projectId)
 }
 
 export async function getContext(phone: string): Promise<ConversationState | null> {

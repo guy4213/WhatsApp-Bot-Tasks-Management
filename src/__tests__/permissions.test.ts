@@ -3,6 +3,7 @@ import {
   getFieldEditPermission,
   canViewAllTasks,
   canCreateForOthers,
+  canEditTask,
   canApprove,
 } from '../auth/permissions';
 import type { ResolvedUser } from '../types';
@@ -45,16 +46,16 @@ describe('getFieldEditPermission', () => {
     expect(getFieldEditPermission(manager, 'dueDate')).toBe('REQUIRES_MANAGER_APPROVAL');
   });
 
-  it('admin-only fields return ADMIN_ONLY for ADMIN role', () => {
-    expect(getFieldEditPermission(admin, 'ownerId')).toBe('ADMIN_ONLY');
-    expect(getFieldEditPermission(admin, 'customerId')).toBe('ADMIN_ONLY');
-    expect(getFieldEditPermission(admin, 'leadId')).toBe('ADMIN_ONLY');
-    expect(getFieldEditPermission(admin, 'projectId')).toBe('ADMIN_ONLY');
+  it('reassign/relink fields return ELEVATED_ONLY for MANAGER/ADMIN', () => {
+    for (const f of ['ownerId', 'customerId', 'leadId', 'projectId']) {
+      expect(getFieldEditPermission(admin,   f)).toBe('ELEVATED_ONLY');
+      expect(getFieldEditPermission(manager, f)).toBe('ELEVATED_ONLY');
+    }
   });
 
-  it('admin-only fields return FORBIDDEN for non-ADMIN roles', () => {
-    expect(getFieldEditPermission(sales,   'ownerId')).toBe('FORBIDDEN');
-    expect(getFieldEditPermission(manager, 'customerId')).toBe('FORBIDDEN');
+  it('reassign/relink fields return FORBIDDEN for a regular employee', () => {
+    expect(getFieldEditPermission(sales, 'ownerId')).toBe('FORBIDDEN');
+    expect(getFieldEditPermission(sales, 'customerId')).toBe('FORBIDDEN');
   });
 
   it('unknown fields are FORBIDDEN', () => {
@@ -63,17 +64,11 @@ describe('getFieldEditPermission', () => {
 });
 
 describe('canViewAllTasks', () => {
-  it('returns true for MANAGER/ADMIN', () => {
+  it('viewing is open to everyone — returns true for any authenticated user', () => {
     expect(canViewAllTasks(manager)).toBe(true);
     expect(canViewAllTasks(admin)).toBe(true);
-  });
-
-  it('returns true for user with canViewAllRecords flag', () => {
-    expect(canViewAllTasks(makeUser({ canViewAllRecords: true }))).toBe(true);
-  });
-
-  it('returns false for regular employee', () => {
-    expect(canViewAllTasks(sales)).toBe(false);
+    expect(canViewAllTasks(sales)).toBe(true);
+    expect(canViewAllTasks(makeUser({ canViewAllRecords: false }))).toBe(true);
   });
 });
 
@@ -83,12 +78,32 @@ describe('canCreateForOthers', () => {
     expect(canCreateForOthers(admin)).toBe(true);
   });
 
-  it('returns true when canManageUsers flag is set', () => {
-    expect(canCreateForOthers(makeUser({ canManageUsers: true }))).toBe(true);
+  it('canManageUsers flag does NOT grant create-for-others (ADMIN/MANAGER only)', () => {
+    expect(canCreateForOthers(makeUser({ canManageUsers: true }))).toBe(false);
   });
 
   it('returns false for regular employee', () => {
     expect(canCreateForOthers(sales)).toBe(false);
+  });
+});
+
+describe('canEditTask', () => {
+  it('owner can edit their own task', () => {
+    expect(canEditTask(sales, { ownerId: 'u1' })).toBe(true);
+  });
+
+  it('regular employee CANNOT edit another user\'s task', () => {
+    expect(canEditTask(sales, { ownerId: 'someone-else' })).toBe(false);
+  });
+
+  it('canViewAllRecords does NOT grant edit rights on others\' tasks', () => {
+    const viewer = makeUser({ canViewAllRecords: true });
+    expect(canEditTask(viewer, { ownerId: 'someone-else' })).toBe(false);
+  });
+
+  it('manager/admin can edit any task', () => {
+    expect(canEditTask(manager, { ownerId: 'someone-else' })).toBe(true);
+    expect(canEditTask(admin, { ownerId: 'someone-else' })).toBe(true);
   });
 });
 

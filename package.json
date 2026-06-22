@@ -8,6 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "ts-node src/db/migrate.ts",
+    "summary:now": "ts-node src/scripts/sendDailySummary.ts",
+    "check:recipients": "ts-node src/scripts/checkRecipients.ts",
     "test": "vitest run"
   },
   "repository": {

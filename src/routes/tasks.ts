@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { resolveUserByPhone } from '../auth/userResolver';
-import { getFieldEditPermission, canCreateForOthers } from '../auth/permissions';
+import { getFieldEditPermission, canCreateForOthers, canEditTask } from '../auth/permissions';
 import {
   listTasks,
   getTaskById,
@@ -28,8 +28,31 @@ import { writeAuditLog } from '../utils/auditLog';
 import { sendTextMessage, sendButtonMessage } from '../whatsapp/sender';
 import { notify } from '../whatsapp/templates';
 import { pool } from '../db/connection';
+import { userName, customerName, leadName, projectName } from '../utils/displayNames';
 import { TASK_TYPE_LABELS } from '../types';
 import type { TaskFilter } from '../types';
+
+// Hebrew labels for field keys, shown in confirmation messages instead of the
+// raw column name (e.g. "ownerId").
+const FIELD_LABELS: Record<string, string> = {
+  ownerId: 'אחראי/בעלים',
+  customerId: 'לקוח',
+  leadId: 'ליד',
+  projectId: 'פרויקט',
+  title: 'כותרת',
+  description: 'תיאור',
+  priority: 'עדיפות',
+  type: 'סוג',
+  dueDate: 'מועד יעד',
+};
+
+// For id-valued fields, resolve the id to a human display name.
+const FIELD_NAME_RESOLVERS: Record<string, (id: string) => Promise<string>> = {
+  ownerId: userName,
+  customerId: customerName,
+  leadId: leadName,
+  projectId: projectName,
+};
 
 // ── Internal auth ─────────────────────────────────────────────────────────────
 // Task routes are called internally from the webhook handler via callInternal.
@@ -167,9 +190,9 @@ export async function taskRoutes(app: FastifyInstance) {
     const setsLinkFields = (['customerId', 'leadId', 'projectId'] as const).some(
       (f) => input[f] !== undefined,
     );
-    if (setsLinkFields && auth.user.role !== 'ADMIN') {
-      await auditDenied(auth.user.id, phone, 'CREATE_TASK', null, 'set link fields (ADMIN only)');
-      return reply.code(403).send({ error: 'Only ADMIN users can set customerId, leadId, or projectId' });
+    if (setsLinkFields && !auth.user.isElevated) {
+      await auditDenied(auth.user.id, phone, 'CREATE_TASK', null, 'set link fields (manager/admin only)');
+      return reply.code(403).send({ error: 'Only managers or admins can set customerId, leadId, or projectId' });
     }
 
     // Normalize + validate type (accepts enum value OR a plain-Hebrew description)
@@ -193,11 +216,12 @@ export async function taskRoutes(app: FastifyInstance) {
       payload: { ...input, ownerId: targetOwnerId },
     });
 
+    const ownerLabel = targetOwnerId === auth.user.id ? 'עצמך' : await userName(targetOwnerId);
     const summary =
       `אנא אשר יצירת משימה:\n` +
       `כותרת: ${input.title}\n` +
       `סוג: ${TASK_TYPE_LABELS[input.type] ?? input.type}\n` +
-      `עבור: ${targetOwnerId === auth.user.id ? 'עצמך' : targetOwnerId}\n` +
+      `עבור: ${ownerLabel}\n` +
       `השב "כן" לאישור או "לא" לביטול.`;
 
     await sendButtonMessage({
@@ -233,9 +257,9 @@ export async function taskRoutes(app: FastifyInstance) {
       await auditDenied(auth.user.id, phone, 'EDIT_FIELD', req.params.id, `field "${field}" not editable (${permission})`);
       return reply.code(403).send({ error: `Field "${field}" cannot be edited` });
     }
-    if (permission === 'ADMIN_ONLY' && auth.user.role !== 'ADMIN') {
-      await auditDenied(auth.user.id, phone, 'EDIT_FIELD', req.params.id, `field "${field}" is ADMIN only`);
-      return reply.code(403).send({ error: 'Admin only' });
+    if (permission === 'ELEVATED_ONLY' && !auth.user.isElevated) {
+      await auditDenied(auth.user.id, phone, 'EDIT_FIELD', req.params.id, `field "${field}" is manager/admin only`);
+      return reply.code(403).send({ error: 'Manager or Admin role required' });
     }
 
     // Validate dueDate value
@@ -263,6 +287,15 @@ export async function taskRoutes(app: FastifyInstance) {
     const task = await getTaskById(auth.user, req.params.id);
     if (!task) return reply.code(404).send({ error: 'Task not found or access denied' });
 
+    // Ownership gate: a regular employee may edit ONLY their own tasks. The
+    // canViewAllRecords flag (consulted by getTaskById) grants read visibility
+    // but not edit rights, so re-check write authorization explicitly here —
+    // only the owner or a MANAGER/ADMIN may proceed.
+    if (!canEditTask(auth.user, task)) {
+      await auditDenied(auth.user.id, phone, 'EDIT_FIELD', req.params.id, 'edit task owned by another user');
+      return reply.code(403).send({ error: 'אפשר לערוך רק את המשימות שלך.' });
+    }
+
     if (permission === 'REQUIRES_MANAGER_APPROVAL') {
       const pending = await createPendingAction({
         requesterUserId: auth.user.id,
@@ -277,7 +310,10 @@ export async function taskRoutes(app: FastifyInstance) {
           `אנא אשר בקשת שינוי מועד למשימה "${task.title}":\n` +
           `מועד נוכחי: ${task.dueDate ?? 'לא הוגדר'}\n` +
           `מועד חדש: ${value}\n` +
-          `השב "כן" לאישור (הבקשה תועבר למנהל) או "לא" לביטול.`,
+          // Elevated requesters self-approve (no manager step), so don't promise one.
+          (auth.user.isElevated
+            ? `השב "כן" לאישור או "לא" לביטול.`
+            : `השב "כן" לאישור (הבקשה תועבר למנהל) או "לא" לביטול.`),
         buttons: [
           { id: `כן ${pending.id}`, title: 'כן' },
           { id: `לא ${pending.id}`, title: 'לא' },
@@ -311,10 +347,19 @@ export async function taskRoutes(app: FastifyInstance) {
       },
     });
 
-    const displayValue = field === 'type' ? (TASK_TYPE_LABELS[String(value)] ?? value) : value;
+    // Build a human-readable value: id fields → name, type → label, else raw.
+    let displayValue: unknown;
+    if (field === 'type') {
+      displayValue = TASK_TYPE_LABELS[String(value)] ?? value;
+    } else if (FIELD_NAME_RESOLVERS[field] && typeof value === 'string') {
+      displayValue = await FIELD_NAME_RESOLVERS[field](value);
+    } else {
+      displayValue = value;
+    }
+    const fieldLabel = FIELD_LABELS[field] ?? field;
     await sendButtonMessage({
       to: auth.user.phone,
-      body: `אנא אשר עדכון שדה "${field}" ל-"${displayValue}" במשימה "${task.title}".\nהשב "כן" לאישור או "לא" לביטול.`,
+      body: `אנא אשר עדכון שדה "${fieldLabel}" ל-"${displayValue}" במשימה "${task.title}".\nהשב "כן" לאישור או "לא" לביטול.`,
       buttons: [
         { id: `כן ${pending.id}`, title: 'כן' },
         { id: `לא ${pending.id}`, title: 'לא' },
@@ -418,13 +463,39 @@ export async function taskRoutes(app: FastifyInstance) {
     }
 
     if (action.actionType === 'EDIT_DUEDATE') {
+      const { new_value, taskTitle } = action.payload as { new_value: string; taskTitle: string };
+
+      // Self-approval: the confirmer IS the requester (enforced above). A MANAGER/
+      // ADMIN has no one above them to approve a dueDate change, so execute it
+      // immediately instead of broadcasting an approval request to managers.
+      if (auth.user.isElevated) {
+        try {
+          await transitionState(pendingActionId, 'EXECUTED', auth.user.id, 'PENDING_EMPLOYEE_CONFIRM');
+        } catch {
+          return reply.code(409).send({ error: 'Request already confirmed' });
+        }
+        const task = await updateDueDate(action.targetTaskId!, new_value);
+        await writeAuditLog({
+          userId: auth.user.id, whatsappNumber: phone,
+          originalMessage: null, transcribedMessage: null,
+          detectedIntent: 'edit_task_field', detectedAction: 'EDIT_DUEDATE',
+          confidence: null, targetTaskId: action.targetTaskId,
+          oldValues: { dueDate: (action.payload as Record<string, unknown>).old_value },
+          newValues: { dueDate: new_value },
+          confirmationStatus: 'CONFIRMED', approvalStatus: 'APPROVED',
+          approverUserId: auth.user.id, managerNotified: false,
+          executionStatus: 'SUCCESS', errorMessage: null, pendingActionId,
+        });
+        await sendTextMessage({ to: auth.user.phone, text: `מועד המשימה "${task.title}" עודכן ל-${new_value}.` });
+        return reply.send({ message: 'Due date updated (self-approved)', task });
+      }
+
       try {
         await transitionState(pendingActionId, 'PENDING_MANAGER_APPROVAL', undefined, 'PENDING_EMPLOYEE_CONFIRM');
       } catch {
         return reply.code(409).send({ error: 'Request already confirmed' });
       }
 
-      const { new_value, taskTitle } = action.payload as { new_value: string; taskTitle: string };
       const managers = await getManagersForBroadcast();
 
       const managerMsg =
@@ -507,8 +578,9 @@ export async function taskRoutes(app: FastifyInstance) {
           fallbackText: `בקשתך לשינוי מועד המשימה נדחתה על ידי ${auth.user.name}.`,
         });
       }
-      // Confirm back to the approving manager.
+      // Confirm back to the approving manager, and tell the other managers it's handled.
       await sendTextMessage({ to: phone, text: `דחית את בקשת שינוי המועד של המשימה "${rejTitle}". העובד עודכן.` });
+      await notifyOtherManagers(auth.user.id, auth.user.name, rejTitle, 'נדחתה');
       return reply.send({ message: 'Request rejected' });
     }
 
@@ -529,8 +601,9 @@ export async function taskRoutes(app: FastifyInstance) {
         fallbackText: `מועד המשימה "${task.title}" שונה ל-${new_value} — אושר על ידי ${auth.user.name}.`,
       });
     }
-    // Confirm back to the approving manager.
+    // Confirm back to the approving manager, and tell the other managers it's handled.
     await sendTextMessage({ to: phone, text: `אושר. מועד המשימה "${task.title}" עודכן ל-${new_value}. העובד עודכן.` });
+    await notifyOtherManagers(auth.user.id, auth.user.name, task.title, 'אושרה');
 
     await writeAuditLog({
       userId: action.requesterUserId, whatsappNumber: phone,
@@ -553,6 +626,24 @@ export async function taskRoutes(app: FastifyInstance) {
 async function getUserById(userId: string): Promise<{ phone: string } | null> {
   const r = await pool.query<{ phone: string }>(`SELECT phone FROM "User" WHERE id = $1`, [userId]);
   return r.rowCount === 0 ? null : r.rows[0];
+}
+
+/**
+ * After one manager/admin resolves a dueDate approval request, tell the OTHER
+ * managers/admins it was already handled (by whom + outcome), so they don't act
+ * on a now-stale request. The acting manager is excluded.
+ */
+async function notifyOtherManagers(
+  actedByUserId: string,
+  actedByName: string,
+  taskTitle: string,
+  outcome: 'אושרה' | 'נדחתה',
+): Promise<void> {
+  const others = (await getManagersForBroadcast()).filter((m) => m.id !== actedByUserId);
+  if (others.length === 0) return;
+  const text =
+    `בקשת שינוי המועד של המשימה "${taskTitle}" כבר ${outcome} על ידי ${actedByName}. אין צורך בפעולה נוספת.`;
+  await Promise.allSettled(others.map((m) => sendTextMessage({ to: m.phone, text })));
 }
 
 /**

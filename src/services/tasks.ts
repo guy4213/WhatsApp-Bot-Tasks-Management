@@ -36,6 +36,49 @@ export async function findUsersByName(name: string): Promise<Array<{ id: string;
   return result.rows;
 }
 
+/**
+ * Find customers whose name contains the given text (for "link task to <name>").
+ * Used to resolve a customer NAME to its id before a relink: the customerId column
+ * is an FK, so a raw name would fail the update. Returns id + display label.
+ */
+export async function findCustomersByName(name: string): Promise<Array<{ id: string; label: string }>> {
+  const result = await pool.query<{ id: string; label: string }>(
+    `SELECT id, name AS label FROM "Customer"
+     WHERE name ILIKE '%' || $1 || '%'
+     ORDER BY name
+     LIMIT 10`,
+    [name],
+  );
+  return result.rows;
+}
+
+/** Find leads whose name contains the given text (FK resolution for relink). */
+export async function findLeadsByName(name: string): Promise<Array<{ id: string; label: string }>> {
+  const result = await pool.query<{ id: string; label: string }>(
+    `SELECT id, "fullName" AS label FROM "Lead"
+     WHERE "fullName" ILIKE '%' || $1 || '%'
+     ORDER BY "fullName"
+     LIMIT 10`,
+    [name],
+  );
+  return result.rows;
+}
+
+/** Find projects whose name contains the given text (FK resolution for relink). */
+export async function findProjectsByName(name: string): Promise<Array<{ id: string; label: string }>> {
+  const result = await pool.query<{ id: string; projectNumber: string | null; name: string }>(
+    `SELECT id, "projectNumber", name FROM "Project"
+     WHERE name ILIKE '%' || $1 || '%'
+     ORDER BY name
+     LIMIT 10`,
+    [name],
+  );
+  return result.rows.map((r) => ({
+    id: r.id,
+    label: (r.projectNumber ? `#${r.projectNumber} ` : '') + r.name,
+  }));
+}
+
 export async function listTasks(
   user: ResolvedUser,
   opts: ListTasksOptions = {},
