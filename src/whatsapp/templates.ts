@@ -24,43 +24,13 @@
  *   REQUEST_EXPIRED_MANAGER  : {{1}} requester   {{2}} task title
  */
 import { sendTextMessage, sendTemplateMessage } from './sender';
+import { type NotificationKey, templateName, templateLang } from './templateNames';
 
-export type NotificationKey =
-  | 'DUEDATE_APPROVAL_REQUEST'
-  | 'DUEDATE_APPROVED'
-  | 'DUEDATE_REJECTED'
-  | 'DUE_REMINDER'
-  | 'DEADLINE_EXCEEDED'
-  | 'DEADLINE_APPROACHING'
-  | 'DAILY_SUMMARY'
-  | 'TASK_COMPLETED'
-  | 'REQUEST_EXPIRED'
-  | 'REQUEST_EXPIRED_MANAGER';
-
-// Default template names (override individually via WHATSAPP_TEMPLATE_<KEY>).
-const DEFAULT_NAMES: Record<NotificationKey, string> = {
-  DUEDATE_APPROVAL_REQUEST: 'duedate_approval_request',
-  DUEDATE_APPROVED:         'duedate_approved',
-  DUEDATE_REJECTED:         'duedate_rejected',
-  DUE_REMINDER:             'due_reminder',
-  DEADLINE_EXCEEDED:        'deadline_exceeded',
-  DEADLINE_APPROACHING:     'deadline_approaching',
-  DAILY_SUMMARY:            'daily_summary',
-  TASK_COMPLETED:           'task_completed',
-  REQUEST_EXPIRED:          'request_expired',
-  REQUEST_EXPIRED_MANAGER:  'request_expired_manager',
-};
+// Re-export so existing importers of NotificationKey from this module keep working.
+export type { NotificationKey };
 
 function templatesEnabled(): boolean {
   return process.env.WHATSAPP_TEMPLATES_ENABLED === 'true';
-}
-
-function templateLang(): string {
-  return process.env.WHATSAPP_TEMPLATE_LANG ?? 'he';
-}
-
-function templateName(key: NotificationKey): string {
-  return process.env[`WHATSAPP_TEMPLATE_${key}`] ?? DEFAULT_NAMES[key];
 }
 
 export interface NotifyArgs {

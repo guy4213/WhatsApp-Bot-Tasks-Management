@@ -62,8 +62,7 @@ export function startScheduler(): void {
   cron.schedule('*/5 * * * *', safe('dueDateReminder',     JOB_LOCK_IDS.dueDateReminder,    runDueDateReminder),          { timezone: TZ });
   cron.schedule('0 8 * * *',   safe('deadlineExceeded',    JOB_LOCK_IDS.deadlineExceeded,   runDeadlineExceededAlert),    { timezone: TZ });
   cron.schedule('0 9 * * *',   safe('deadlineApproaching', JOB_LOCK_IDS.deadlineApproaching, runDeadlineApproachingAlert), { timezone: TZ });
-  // TEMPORARY (testing): daily summary moved 17:00 → 13:00. Revert to '0 17 * * *' when done.
-  cron.schedule('0 13 * * *',  safe('dailySummary',        JOB_LOCK_IDS.dailySummary,       runDailySummary),             { timezone: TZ });
+  cron.schedule('0 17 * * *',  safe('dailySummary',        JOB_LOCK_IDS.dailySummary,       runDailySummary),             { timezone: TZ });
   cron.schedule('*/2 * * * *', safe('completionNotifier',  JOB_LOCK_IDS.completionNotifier, runCompletionNotifier),       { timezone: TZ });
 
   // Every 5 minutes — reprocess any inbound messages left pending by a crash

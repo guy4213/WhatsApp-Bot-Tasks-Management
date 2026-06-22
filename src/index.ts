@@ -4,10 +4,14 @@
 import { buildApp, buildAndStartScheduler } from './app';
 import { pool } from './db/connection';
 import { recoverInboundQueue } from './routes/webhook';
+import { runPreflight } from './config/preflight';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 async function main() {
+  // Fail fast on missing/invalid production config before we start serving.
+  runPreflight();
+
   const app = await buildApp();
 
   try {

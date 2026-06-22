@@ -65,12 +65,12 @@ async function sendChunked(to: string, text: string): Promise<void> {
 // "כן"/"לא" never matched. Use a negative lookahead for a following letter/digit
 // (Hebrew or Latin) instead — matches "כן", "כן בבקשה", "yes" but not "yesterday"
 // or "לאט".
-const YES_RE = /^(כן|אישור|אשר|תאשר|מאשר|בצע|בטח|אוקיי|אוקי|סבבה|yes|y|ok)(?![א-תa-z0-9])/i;
-const NO_RE  = /^(לא|ביטול|בטל|עצור|אל\s+תבצע|no|n)(?![א-תa-z0-9])/i;
+export const YES_RE = /^(כן|אישור|אשר|תאשר|מאשר|בצע|בטח|אוקיי|אוקי|סבבה|yes|y|ok)(?![א-תa-z0-9])/i;
+export const NO_RE  = /^(לא|ביטול|בטל|עצור|אל\s+תבצע|no|n)(?![א-תa-z0-9])/i;
 // Correction: user wants to revise (not approve, not cancel). Only genuine
 // correction words — NOT "שנה"/"תקן", which begin real edit commands
 // ("שנה את הכותרת", "תקן את התיאור") and must stay fresh requests.
-const CORRECTION_RE = /^(תיקון|רגע|לא לזה התכוונתי|לא לזה)(?![א-תa-z0-9])/i;
+export const CORRECTION_RE = /^(תיקון|רגע|לא לזה התכוונתי|לא לזה)(?![א-תa-z0-9])/i;
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 

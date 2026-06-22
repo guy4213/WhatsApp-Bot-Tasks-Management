@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import ws from 'ws';
@@ -18,18 +19,32 @@ if (missing.length) {
 }
 
 // ── SSL config ────────────────────────────────────────────────────────────────
-// In production, Supabase provides a valid CA-signed cert so we enforce
-// certificate verification. In development we relax this to simplify local
-// tunneling / self-signed cert setups.
-// DATABASE_SSL=disable turns SSL off entirely — required for a plain local /
-// CI Postgres (e.g. the integration-test service container) that speaks no TLS.
+// Supabase's DIRECT connection (db.<ref>.supabase.co:5432) presents a cert that
+// is NOT in the system trust store, so `rejectUnauthorized: true` fails with
+// SELF_SIGNED_CERT_IN_CHAIN. Resolution order:
+//   1. DATABASE_SSL=disable        → no TLS at all (plain local / CI Postgres).
+//   2. DATABASE_CA_CERT=<pem path> → full verification against the Supabase CA
+//                                    (RECOMMENDED for production — download it from
+//                                    Supabase → Project Settings → Database → SSL).
+//   3. otherwise                   → TLS encrypted but cert chain NOT verified.
+//                                    In production we log a warning recommending #2.
 const isProduction = process.env.NODE_ENV === 'production';
-const sslConfig =
-  process.env.DATABASE_SSL === 'disable'
-    ? false
-    : isProduction
-      ? { rejectUnauthorized: true }      // Enforce CA verification in prod
-      : { rejectUnauthorized: false };    // Relaxed for dev (never in prod)
+const caCertPath = process.env.DATABASE_CA_CERT;
+
+let sslConfig: false | { rejectUnauthorized: boolean; ca?: string };
+if (process.env.DATABASE_SSL === 'disable') {
+  sslConfig = false;
+} else if (caCertPath) {
+  sslConfig = { rejectUnauthorized: true, ca: fs.readFileSync(caCertPath, 'utf8') };
+} else {
+  if (isProduction) {
+    log.warn(
+      'DATABASE_CA_CERT not set — DB TLS is encrypted but the server certificate is NOT verified. ' +
+        'Set DATABASE_CA_CERT to the Supabase CA cert path for full verification.',
+    );
+  }
+  sslConfig = { rejectUnauthorized: false };
+}
 
 // ── pg Pool — used for all raw SQL queries ────────────────────────────────────
 // The session timezone is pinned to Asia/Jerusalem as a connection STARTUP
