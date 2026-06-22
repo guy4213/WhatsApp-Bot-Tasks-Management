@@ -1,0 +1,807 @@
+/**
+ * AI router — orchestrates: parse → threshold-route → clarify → resolve task →
+ * dispatch to the existing routes (which keep confirm-before-write intact).
+ *
+ * Reads (list/get) call the service layer directly. Writes go through the HTTP
+ * routes via dispatchInternal so validation, pending-action creation, the
+ * confirm prompt, and audit logging all run exactly as in Phase 2/3.
+ */
+import type { AIIntentResult, ResolvedUser, TaskFilter, TaskListItem } from '../types';
+import { TASK_TYPE_LABELS } from '../types';
+import { getProvider } from './provider';
+import { parseIntent } from './intentParser';
+import { resolveTask } from './taskResolver';
+import {
+  getContext, setContext, clearContext, type ConversationState,
+} from '../services/conversationContext';
+import { setViewOwners, getViewOwners, clearViewOwners } from '../services/viewContext';
+import { getHistory, appendTurn } from '../services/chatHistory';
+import {
+  listTasks, getTaskById, getAllowedTaskTypes, getAllowedPriorities, getTeamWorkload, findUsersByName,
+} from '../services/tasks';
+import { getLatestPendingForUser, getPendingApprovals } from '../services/pendingActions';
+import { dispatchInternal } from '../utils/internalApi';
+import { sendTextMessage } from '../whatsapp/sender';
+import { writeAuditLog } from '../utils/auditLog';
+import { moduleLogger } from '../utils/logger';
+
+const log = moduleLogger('ai-router');
+
+const CONF_HIGH = parseFloat(process.env.AI_CONFIDENCE_HIGH ?? '0.85');
+const CONF_LOW  = parseFloat(process.env.AI_CONFIDENCE_LOW  ?? '0.60');
+
+// How many tasks to fetch/show in a list (override with LIST_TASKS_LIMIT).
+const LIST_LIMIT = parseInt(process.env.LIST_TASKS_LIMIT ?? '100', 10);
+// WhatsApp rejects text bodies over 4096 chars; chunk safely below that.
+const WA_MAX_CHARS = 3500;
+
+/**
+ * Send a possibly-long message as several WhatsApp messages, splitting on line
+ * boundaries so a long task list is never truncated by Meta's 4096-char cap.
+ */
+async function sendChunked(to: string, text: string): Promise<void> {
+  if (text.length <= WA_MAX_CHARS) {
+    await sendTextMessage({ to, text });
+    return;
+  }
+  let buf = '';
+  for (const line of text.split('\n')) {
+    if (buf && buf.length + line.length + 1 > WA_MAX_CHARS) {
+      await sendTextMessage({ to, text: buf });
+      buf = '';
+    }
+    buf = buf ? `${buf}\n${line}` : line;
+    while (buf.length > WA_MAX_CHARS) {
+      await sendTextMessage({ to, text: buf.slice(0, WA_MAX_CHARS) });
+      buf = buf.slice(WA_MAX_CHARS);
+    }
+  }
+  if (buf) await sendTextMessage({ to, text: buf });
+}
+
+// NOTE: \b (ASCII word boundary) does NOT work after Hebrew letters, so a bare
+// "כן"/"לא" never matched. Use a negative lookahead for a following letter/digit
+// (Hebrew or Latin) instead — matches "כן", "כן בבקשה", "yes" but not "yesterday"
+// or "לאט".
+const YES_RE = /^(כן|אישור|אשר|תאשר|מאשר|בצע|בטח|אוקיי|אוקי|סבבה|yes|y|ok)(?![א-תa-z0-9])/i;
+const NO_RE  = /^(לא|ביטול|בטל|עצור|אל\s+תבצע|no|n)(?![א-תa-z0-9])/i;
+// Correction: user wants to revise (not approve, not cancel). Kept short so a real
+// new "שנה את הכותרת…" command is still treated as a fresh request, not a correction.
+const CORRECTION_RE = /^(שנה|תיקון|תקן|רגע|לא לזה התכוונתי|לא לזה)(?![א-תa-z0-9])/i;
+
+// ── Entry point ────────────────────────────────────────────────────────────────
+
+export async function handleAIMessage(user: ResolvedUser, text: string): Promise<void> {
+  if (!getProvider()) {
+    await sendTextMessage({ to: user.phone, text: 'שירות ה-AI אינו מוגדר עדיין. נסה שוב מאוחר יותר.' });
+    return;
+  }
+
+  // Mid-conversation? Continue the clarification flow.
+  const ctx = await getContext(user.phone);
+  if (ctx) {
+    await continueConversation(user, text, ctx);
+    return;
+  }
+
+  // Fresh message → parse, with the recent rolling window for reference resolution.
+  let intent: AIIntentResult;
+  try {
+    const [allowedTypes, allowedPriorities, history] = await Promise.all([
+      getAllowedTaskTypes(),
+      safePriorities(),
+      getHistory(user.phone),
+    ]);
+    intent = await parseIntent(text, { user, allowedTypes, allowedPriorities, history });
+  } catch (err) {
+    log.error({ err }, 'Intent parse failed');
+    await sendTextMessage({ to: user.phone, text: 'שגיאה בעיבוד הבקשה. נסה שוב או נסח מחדש.' });
+    return;
+  }
+
+  // Record the user's turn AFTER parsing (so it isn't fed back into its own parse).
+  await appendTurn(user.phone, 'user', text);
+
+  await routeIntent(user, intent);
+}
+
+// ── Threshold routing ──────────────────────────────────────────────────────────
+
+async function routeIntent(user: ResolvedUser, intent: AIIntentResult): Promise<void> {
+  // 0. Approval/decline of a pending action — resolve to the user's latest pending
+  //    action and act immediately (no confirm gate; this IS the confirmation).
+  if (intent.intent === 'confirm_pending_action' || intent.intent === 'decline_pending_action') {
+    await executeIntent(user, intent);
+    return;
+  }
+
+  // 1. Unknown or very low confidence → use the model's Hebrew clarification when it
+  //    provided one (status-change / out-of-scope answers), else ask to rephrase.
+  //    Either way, record the event in the audit log.
+  if (intent.intent === 'unknown' || intent.confidence < CONF_LOW) {
+    await auditEvent(user, 'unknown', null, 'SKIPPED', intent.clarification ?? 'unrecognized request');
+    await sendTextMessage({
+      to: user.phone,
+      text: intent.clarification
+        ?? 'לא הצלחתי להבין את הבקשה. נסה לנסח מחדש, למשל: "צור משימה תיאום ללקוח X" או "הצג את המשימות שלי להיום".',
+    });
+    return;
+  }
+
+  // 2. Missing required info → ask for the first missing field
+  if (intent.missing_fields.length > 0) {
+    const field = intent.missing_fields[0];
+    await setContext(user.phone, { awaiting: 'missing_field', intent, missingField: field });
+    await sendTextMessage({
+      to: user.phone,
+      text: intent.clarification ?? `אנא ציין ${field}.`,
+    });
+    return;
+  }
+
+  // 3. Medium confidence → confirm intent before acting
+  if (intent.confidence < CONF_HIGH) {
+    await setContext(user.phone, { awaiting: 'intent_confirm', intent });
+    await sendTextMessage({
+      to: user.phone,
+      text: `${describeIntent(intent)}\nהאם להמשיך? השב "כן" או "לא".`,
+    });
+    return;
+  }
+
+  // 4. High confidence → execute
+  await executeIntent(user, intent);
+}
+
+// ── Continuation (clarification loop) ───────────────────────────────────────────
+
+async function continueConversation(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const trimmed = text.trim();
+
+  // Correction request — pause the pending action and ask the user to restate.
+  // Only when it's a short standalone correction (so "שנה את הכותרת…" stays a new request).
+  if (CORRECTION_RE.test(trimmed) && trimmed.split(/\s+/).length <= 4) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בסדר, לא ביצעתי כלום. נסח מחדש מה לתקן ואטפל בזה.' });
+    return;
+  }
+
+  if (ctx.awaiting === 'intent_confirm') {
+    if (YES_RE.test(trimmed)) {
+      await clearContext(user.phone);
+      await executeIntent(user, ctx.intent);
+    } else if (NO_RE.test(trimmed)) {
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    } else {
+      // Treated as a new request
+      await clearContext(user.phone);
+      await handleAIMessage(user, text);
+    }
+    return;
+  }
+
+  if (ctx.awaiting === 'missing_field' && ctx.missingField) {
+    const intent = applyFieldValue(ctx.intent, ctx.missingField, trimmed);
+    const remaining = intent.missing_fields.filter((f) => f !== ctx.missingField);
+    intent.missing_fields = remaining;
+
+    if (remaining.length > 0) {
+      const next = remaining[0];
+      await setContext(user.phone, { awaiting: 'missing_field', intent, missingField: next });
+      await sendTextMessage({ to: user.phone, text: `אנא ציין ${next}.` });
+    } else {
+      await clearContext(user.phone);
+      await executeIntent(user, intent);
+    }
+    return;
+  }
+
+  if (ctx.awaiting === 'read_confirm') {
+    if (YES_RE.test(trimmed)) {
+      await clearContext(user.phone);
+      await runListTasks(user, resolveListQuery(user, ctx.intent));
+    } else if (NO_RE.test(trimmed)) {
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    } else {
+      // Treat as a new request
+      await clearContext(user.phone);
+      await handleAIMessage(user, text);
+    }
+    return;
+  }
+
+  if (ctx.awaiting === 'task_disambig' && ctx.candidateTaskIds) {
+    const idx = parseInt(trimmed, 10);
+    if (!Number.isInteger(idx) || idx < 1 || idx > ctx.candidateTaskIds.length) {
+      await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${ctx.candidateTaskIds.length}.` });
+      return;
+    }
+    const taskId = ctx.candidateTaskIds[idx - 1];
+    await clearContext(user.phone);
+    await executeIntent(user, ctx.intent, taskId);
+    return;
+  }
+
+  if (ctx.awaiting === 'create_date') {
+    await clearContext(user.phone);
+    const intent = ctx.intent;
+    const title = String(intent.params.title ?? 'משימה');
+
+    // Resolve the reply to an ISO date via the AI ("מחר"/"יום ראשון ב-3" → ISO).
+    // If nothing date-like is found (e.g. "ללא תאריך"), create without a due date.
+    try {
+      const [allowedTypes, allowedPriorities] = await Promise.all([getAllowedTaskTypes(), safePriorities()]);
+      const probe = await parseIntent(`צור משימה ${title} ל${trimmed}`, { user, allowedTypes, allowedPriorities });
+      if (probe.intent === 'create_task' && typeof probe.params.dueDate === 'string') {
+        intent.params.dueDate = probe.params.dueDate;
+      }
+    } catch (err) {
+      log.error({ err }, 'create_date re-parse failed (creating without date)');
+    }
+
+    await executeIntent(user, intent); // _dateAsked already true → no re-ask loop
+    return;
+  }
+
+  // Unknown state — reset
+  await clearContext(user.phone);
+  await handleAIMessage(user, text);
+}
+
+// ── Execution ────────────────────────────────────────────────────────────────
+
+async function executeIntent(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+  resolvedTaskId?: string,
+): Promise<void> {
+  switch (intent.intent) {
+    case 'confirm_pending_action':
+    case 'decline_pending_action': {
+      const approve = intent.intent === 'confirm_pending_action';
+
+      // Always act on the single MOST-RECENT pending action this user can resolve —
+      // their own action awaiting confirmation, or (for managers) an employee request
+      // awaiting approval. Latest wins; older ones are ignored. No "which one?" prompts.
+      const own = await getLatestPendingForUser(user.id);
+      const approvals = user.isElevated ? await getPendingApprovals() : [];
+
+      const candidates = [
+        ...(own ? [{ kind: 'own' as const, action: own }] : []),
+        ...approvals.map((a) => ({ kind: 'approval' as const, action: a })),
+      ];
+      if (candidates.length === 0) {
+        await sendTextMessage({ to: user.phone, text: 'אין כרגע פעולה הממתינה לאישור.' });
+        return;
+      }
+
+      candidates.sort(
+        (a, b) => new Date(b.action.createdAt).getTime() - new Date(a.action.createdAt).getTime(),
+      );
+      const latest = candidates[0];
+
+      if (latest.kind === 'own') {
+        const decision = approve ? 'CONFIRM' : 'CANCEL';
+        await dispatchInternal(user.phone, '/tasks/confirm', { pendingActionId: latest.action.id, decision }, 'POST');
+      } else {
+        const decision = approve ? 'APPROVE' : 'REJECT';
+        await dispatchInternal(user.phone, '/tasks/approve', { pendingActionId: latest.action.id, decision }, 'POST');
+      }
+      return;
+    }
+
+    case 'help':
+      await sendTextMessage({ to: user.phone, text: helpText() });
+      return;
+
+    case 'team_workload':
+      await doTeamWorkload(user);
+      return;
+
+    case 'list_tasks':
+      await doListTasks(user, intent);
+      return;
+
+    case 'get_task': {
+      const id = await resolveOrAsk(user, intent, resolvedTaskId);
+      if (!id) return;
+      await doGetTask(user, id);
+      return;
+    }
+
+    case 'create_task':
+      // Creating a task asks for a date/time first when none was given. The user
+      // can answer with a date, or explicitly opt out ("ללא תאריך").
+      if (!intent.params.dueDate && !intent.params._dateAsked) {
+        intent.params._dateAsked = true;
+        await setContext(user.phone, { awaiting: 'create_date', intent });
+        await sendTextMessage({
+          to: user.phone,
+          text: 'לאיזה תאריך ושעה לפתוח את המשימה? (אפשר לכתוב "ללא תאריך")',
+        });
+        return;
+      }
+      await dispatchInternal(user.phone, '/tasks', buildCreateBody(intent), 'POST');
+      return;
+
+    case 'edit_field': {
+      const id = await resolveOrAsk(user, intent, resolvedTaskId);
+      if (!id) return;
+      await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: intent.field, value: intent.new_value }, 'PATCH');
+      return;
+    }
+
+    case 'edit_duedate': {
+      const id = await resolveOrAsk(user, intent, resolvedTaskId);
+      if (!id) return;
+      await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: 'dueDate', value: intent.new_value }, 'PATCH');
+      return;
+    }
+
+    case 'reassign_task': {
+      const id = await resolveOrAsk(user, intent, resolvedTaskId);
+      if (!id) return;
+      await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: 'ownerId', value: intent.params.ownerId }, 'PATCH');
+      return;
+    }
+
+    case 'relink_task': {
+      const id = await resolveOrAsk(user, intent, resolvedTaskId);
+      if (!id) return;
+      const linkField = (['customerId', 'leadId', 'projectId'] as const).find((f) => intent.params[f] !== undefined);
+      if (!linkField) {
+        await sendTextMessage({ to: user.phone, text: 'לא צוין לקוח/ליד/פרויקט לקישור.' });
+        return;
+      }
+      await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: linkField, value: intent.params[linkField] }, 'PATCH');
+      return;
+    }
+
+    default:
+      await sendTextMessage({ to: user.phone, text: helpText() });
+  }
+}
+
+/** Resolve the intent's task_reference to an id, or ask the user. Returns null when it has handled messaging itself. */
+async function resolveOrAsk(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+  resolvedTaskId?: string,
+): Promise<string | null> {
+  if (resolvedTaskId) return resolvedTaskId;
+
+  const ref = intent.task_reference;
+  if (!ref) {
+    await setContext(user.phone, { awaiting: 'missing_field', intent, missingField: 'task_reference' });
+    await sendTextMessage({ to: user.phone, text: 'לאיזו משימה הכוונה? ציין שם או תיאור.' });
+    return null;
+  }
+
+  // If we're currently viewing a specific employee's tasks, narrow the name search
+  // to them so "details on X" doesn't pull look-alike titles from other people.
+  const viewed = getViewOwners(user.phone);
+  const res = await resolveTask(user, ref, viewed?.ownerIds);
+  if (res.match) return res.match.id;
+
+  if (res.ambiguous && res.candidates.length > 0) {
+    // Show owner + date so near-identical titles can be told apart.
+    const lines = res.candidates.map((t, i) => {
+      const owner = t.ownerName ? ` — ${t.ownerName}` : '';
+      const stamp = t.dueDate ?? t.createdAt;
+      const when = stamp ? ` (${fmtDate(stamp)})` : '';
+      return `${i + 1}. ${t.title}${owner}${when}`;
+    });
+    await setContext(user.phone, {
+      awaiting: 'task_disambig',
+      intent,
+      candidateTaskIds: res.candidates.map((t) => t.id),
+    });
+    await sendTextMessage({ to: user.phone, text: `נמצאו כמה משימות. לאיזו הכוונה?\n${lines.join('\n')}\nהשב במספר.` });
+    return null;
+  }
+
+  await sendTextMessage({ to: user.phone, text: `לא מצאתי משימה התואמת ל"${ref}".` });
+  return null;
+}
+
+// ── Read helpers (call services directly) ───────────────────────────────────────
+
+interface ListQuery {
+  filter: TaskFilter;
+  scope: 'own' | 'all';
+  dateField: 'dueDate' | 'createdAt';
+  dateFrom?: string;
+  dateTo?: string;
+  ownerIds?: string[];    // resolved employee filter (elevated only)
+  ownerNames?: string[];  // for display
+}
+
+/**
+ * Resolve a named-employee filter on intent.params.owners (one or more names) to
+ * user ids stored back on intent.params.owner_ids/owner_names. Returns false when it
+ * has already replied to the user (denied / not-found / ambiguous) and routing should stop.
+ */
+async function resolveOwnerFilter(user: ResolvedUser, intent: AIIntentResult): Promise<boolean> {
+  const p = intent.params;
+  if (Array.isArray(p.owner_ids)) return true; // already resolved (read_confirm re-entry)
+
+  const raw = Array.isArray(p.owners) ? p.owners : typeof p.owner === 'string' ? [p.owner] : [];
+  const refs = raw.map((s) => String(s).trim()).filter(Boolean);
+  if (refs.length === 0) return true; // no employee filter requested
+
+  if (!user.isElevated) {
+    await auditEvent(user, 'list_tasks', null, 'SKIPPED', 'non-elevated requested other employees');
+    await sendTextMessage({ to: user.phone, text: 'אין לך הרשאה לצפות במשימות של עובדים אחרים. אפשר לבקש "המשימות שלי".' });
+    return false;
+  }
+
+  const ids: string[] = [];
+  const names: string[] = [];
+  const notFound: string[] = [];
+  let ambiguous: { ref: string; options: string[] } | null = null;
+
+  for (const ref of refs) {
+    const matches = await findUsersByName(ref);
+    if (matches.length === 0) notFound.push(ref);
+    else if (matches.length > 1 && !ambiguous) ambiguous = { ref, options: matches.map((m) => m.name) };
+    else if (matches.length === 1) { ids.push(matches[0].id); names.push(matches[0].name); }
+  }
+
+  if (notFound.length > 0) {
+    await sendTextMessage({ to: user.phone, text: `לא מצאתי עובד פעיל בשם: ${notFound.join(', ')}.` });
+    return false;
+  }
+  if (ambiguous) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `נמצאו כמה עובדים בשם "${ambiguous.ref}":\n${ambiguous.options.map((n) => `• ${n}`).join('\n')}\nציין שם מלא יותר.`,
+    });
+    return false;
+  }
+
+  p.owner_ids = ids;
+  p.owner_names = names;
+  return true;
+}
+
+/** Resolve the AI params into a concrete, validated list query. */
+function resolveListQuery(user: ResolvedUser, intent: AIIntentResult): ListQuery {
+  const p = intent.params;
+  const validFilters = ['today', 'this_week', 'open', 'next_deadline', 'overdue', 'unlinked', 'all'];
+  const filterRaw = String(p.filter ?? 'all');
+  const filter = (validFilters.includes(filterRaw) ? filterRaw : 'all') as ListQuery['filter'];
+
+  // Scope: managers/admins default to TEAM-WIDE; own-only when they intentionally ask
+  // ("שלי"). Non-elevated users are always own-scoped (the service re-clamps anyway).
+  const rawScope = p.scope == null ? undefined : String(p.scope);
+  const scope: 'own' | 'all' =
+    rawScope === 'own' ? 'own'
+    : rawScope === 'all' ? 'all'
+    : user.isElevated ? 'all' : 'own';
+
+  // Default to createdAt — only use dueDate when the user intentionally asked about deadlines.
+  const dateField = String(p.date_field ?? 'createdAt') === 'dueDate' ? 'dueDate' : 'createdAt';
+
+  const strOrUndef = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const dateFrom = strOrUndef(p.date_from);
+  let dateTo = strOrUndef(p.date_to);
+  if (dateFrom && !dateTo) dateTo = dateFrom; // single explicit day
+
+  // Employee filter already resolved to ids (see doListTasks) — persists across a
+  // read_confirm round-trip because it lives in intent.params.
+  const ownerIds = Array.isArray(p.owner_ids) ? p.owner_ids.map(String) : undefined;
+  const ownerNames = Array.isArray(p.owner_names) ? p.owner_names.map(String) : undefined;
+
+  return { filter, scope, dateField, dateFrom, dateTo, ownerIds, ownerNames };
+}
+
+async function doListTasks(user: ResolvedUser, intent: AIIntentResult): Promise<void> {
+  // Resolve a named-employee filter ("המשימות של יאיר ויורם") to user ids once,
+  // baking them into intent.params so they survive a read_confirm round-trip.
+  if (!(await resolveOwnerFilter(user, intent))) return;
+
+  const q = resolveListQuery(user, intent);
+
+  // Date-scoped reads: describe the action in plain Hebrew and wait for approval.
+  if (q.dateFrom || q.dateTo) {
+    await setContext(user.phone, { awaiting: 'read_confirm', intent });
+    await sendTextMessage({ to: user.phone, text: `${describeListQuery(q)}\nלהציג? השב "כן" או "לא".` });
+    return;
+  }
+
+  await runListTasks(user, q);
+}
+
+/** Actually fetch + render the list (called directly, or after read_confirm approval). */
+async function runListTasks(user: ResolvedUser, q: ListQuery): Promise<void> {
+  log.info(
+    { userId: user.id, scope: q.scope, filter: q.filter, dateField: q.dateField, owners: q.ownerIds?.length ?? 0 },
+    'Listing tasks',
+  );
+
+  const { tasks, truncated } = await listTasks(user, {
+    filter: q.filter, scope: q.scope, ownerIds: q.ownerIds, dateField: q.dateField,
+    dateFrom: q.dateFrom, dateTo: q.dateTo, limit: LIST_LIMIT,
+  });
+
+  await auditEvent(user, 'list_tasks', null, 'SUCCESS');
+
+  // Remember a specific-employee view so follow-up "details on X" narrows to them;
+  // a whole-team / own list clears the hint.
+  if (q.ownerIds?.length && q.ownerNames?.length) {
+    setViewOwners(user.phone, q.ownerIds, q.ownerNames);
+  } else {
+    clearViewOwners(user.phone);
+  }
+
+  if (tasks.length === 0) {
+    await appendTurn(user.phone, 'assistant', 'לא נמצאו משימות התואמות לבקשה.');
+    const scopeTxt = q.scope === 'all' ? 'של הצוות' : 'שלך';
+    const options = [
+      '"המשימות שלי"',
+      '"מה באיחור"',
+      '"המשימות שלי השבוע"',
+      ...(user.isElevated ? ['"כל המשימות"', '"עומס משימות בצוות"'] : []),
+    ].join(' · ');
+    await sendTextMessage({
+      to: user.phone,
+      text:
+        `לא מצאתי משימות ${scopeTxt} שתואמות לבקשה.\n` +
+        `למה התכוונת? אפשר לנסות: ${options}\n` +
+        `או לציין תאריך / עובד / סטטוס מדויק יותר.`,
+    });
+    return;
+  }
+
+  const now = new Date();
+  const more = truncated ? `\n…מוצגות ${LIST_LIMIT} הראשונות. ניתן לצמצם את החיפוש.` : '';
+
+  // Group by owner for a team view OR when more than one employee was requested —
+  // and send ONE message per worker so a manager can read each separately.
+  const groupByOwner = q.scope === 'all' || (q.ownerIds?.length ?? 0) > 1;
+
+  if (groupByOwner) {
+    const groups = new Map<string, TaskListItem[]>();
+    for (const t of tasks) {
+      const key = t.ownerName ?? '—';
+      const arr = groups.get(key);
+      if (arr) arr.push(t); else groups.set(key, [t]);
+    }
+
+    // 1. Team overview message.
+    const header = q.ownerNames?.length ? `👥 משימות של: ${q.ownerNames.join(', ')}\n` : '';
+    await sendTextMessage({
+      to: user.phone,
+      text: `${header}${buildPulse(tasks, truncated, now)} · 👥 ${groups.size} עובדים${more}`,
+    });
+
+    // 2. One message per worker (own mini-summary + their tasks).
+    for (const [owner, ts] of groups) {
+      const block =
+        `👤 *${owner}*\n${buildPulse(ts, false, now)}\n\n` +
+        ts.map((t) => renderTaskLine(t, q, now)).join('\n');
+      await sendChunked(user.phone, block);
+    }
+  } else {
+    const body = tasks.map((t) => renderTaskLine(t, q, now)).join('\n');
+    await sendChunked(user.phone, `${buildPulse(tasks, truncated, now)}\n\n${body}${more}`);
+  }
+
+  // Store a COMPACT, numbered summary (built by code, not the AI) so a follow-up
+  // like "details on the third one" can be resolved against these titles.
+  const summaryItems = tasks
+    .slice(0, 30)
+    .map((t, i) => `${i + 1}) ${t.title}${t.ownerName ? ` [${t.ownerName}]` : ''}`)
+    .join('; ');
+  const ownerNote = q.ownerNames?.length ? ` של ${q.ownerNames.join(', ')}` : '';
+  await appendTurn(user.phone, 'assistant', `הצגתי ${tasks.length} משימות${ownerNote}: ${summaryItems}`);
+}
+
+/** Team workload view (manager/admin): open-task load per employee. */
+async function doTeamWorkload(user: ResolvedUser): Promise<void> {
+  if (!user.isElevated) {
+    await auditEvent(user, 'team_workload', null, 'SKIPPED', 'not elevated');
+    await sendTextMessage({ to: user.phone, text: 'התצוגה הזו זמינה למנהלים בלבד.' });
+    return;
+  }
+
+  const rows = await getTeamWorkload();
+  await auditEvent(user, 'team_workload', null, 'SUCCESS');
+
+  if (rows.length === 0) {
+    await sendTextMessage({ to: user.phone, text: 'אין כרגע משימות פתוחות לאף עובד.' });
+    return;
+  }
+
+  const lines = rows.map((r) => {
+    const flags: string[] = [];
+    if (r.overdueCount)  flags.push(`⚠️ ${r.overdueCount} באיחור`);
+    if (r.dueTodayCount) flags.push(`🔴 ${r.dueTodayCount} להיום`);
+    const extra = flags.length ? ` (${flags.join(', ')})` : '';
+    return `👤 ${r.ownerName}: ${r.openCount} פתוחות${extra}`;
+  });
+
+  await sendTextMessage({ to: user.phone, text: `📊 עומס משימות בצוות:\n${lines.join('\n')}` });
+  await appendTurn(user.phone, 'assistant', `הצגתי עומס משימות בצוות (${rows.length} עובדים).`);
+}
+
+/** One-line pulse summary shown above a task list. */
+function buildPulse(tasks: TaskListItem[], truncated: boolean, now: Date): string {
+  let overdue = 0, today = 0, inProgress = 0, done = 0;
+  const todayStr = fmtDate(now);
+  for (const t of tasks) {
+    if (t.status === 'DONE') { done++; continue; }
+    if (t.status === 'IN_PROGRESS') inProgress++;
+    if (t.dueDate) {
+      const d = new Date(t.dueDate);
+      if (d < now) overdue++;
+      else if (fmtDate(d) === todayStr) today++;
+    }
+  }
+  const segs = [`📊 סה״כ ${tasks.length}${truncated ? '+' : ''}`];
+  if (overdue)    segs.push(`⚠️ ${overdue} באיחור`);
+  if (today)      segs.push(`🔴 ${today} להיום`);
+  if (inProgress) segs.push(`🔄 ${inProgress} בתהליך`);
+  if (done)       segs.push(`✅ ${done} הושלמו`);
+  return segs.join(' · ');
+}
+
+/** Render a single task line: status + priority + title, then due date (always),
+ *  linked context, an aging marker, and creation time when sorted by it. */
+function renderTaskLine(t: TaskListItem, q: ListQuery, now: Date): string {
+  const icon = t.status === 'DONE' ? '✅' : t.status === 'IN_PROGRESS' ? '🔄' : '📋';
+  const prio = String(t.priority ?? '').toUpperCase();
+  const prioBadge = prio === 'URGENT' ? ' 🔴' : prio === 'HIGH' ? ' 🟠' : '';
+
+  const due = t.dueDate ? `${fmtDate(t.dueDate)} ${fmtTime(t.dueDate)}` : 'ללא מועד';
+  const overdue = t.dueDate && t.status !== 'DONE' && new Date(t.dueDate) < now ? ' ⚠️ באיחור' : '';
+
+  let line = `${icon}${prioBadge} ${t.title}\n   📅 יעד: ${due}${overdue}`;
+
+  const ctx = t.customerName ?? t.leadName ?? t.projectName;
+  if (ctx) line += `\n   🏢 ${ctx}`;
+
+  // Aging — open and untouched for a while (helps spot stuck work).
+  if (t.status !== 'DONE' && t.createdAt) {
+    const ageDays = Math.floor((now.getTime() - new Date(t.createdAt).getTime()) / 86_400_000);
+    if (ageDays >= 14) line += `\n   🐌 פתוחה ${ageDays} ימים`;
+  }
+
+  if (q.dateField === 'createdAt' && t.createdAt) {
+    line += `\n   🕓 נוצר: ${fmtDate(t.createdAt)} ${fmtTime(t.createdAt)}`;
+  }
+  return line;
+}
+
+/** A plain-Hebrew description of the read about to run (no SQL). */
+function describeListQuery(q: ListQuery): string {
+  const scopeTxt = q.scope === 'all' ? 'של כל המשתמשים' : 'שלך';
+  const fieldTxt = q.dateField === 'createdAt' ? 'שנוצרו' : 'עם תאריך יעד';
+  const timeTxt  = q.dateField === 'createdAt' ? ' (כולל שעת יצירה)' : ' (כולל שעה)';
+  const statusTxt = q.filter === 'open' ? ' (פתוחות בלבד)' : '';
+
+  let dateTxt: string;
+  if (q.dateFrom && q.dateTo && q.dateFrom === q.dateTo) dateTxt = `בתאריך ${fmtDateStr(q.dateFrom)}`;
+  else if (q.dateFrom && q.dateTo) dateTxt = `בין ${fmtDateStr(q.dateFrom)} ל-${fmtDateStr(q.dateTo)}`;
+  else if (q.dateFrom) dateTxt = `מתאריך ${fmtDateStr(q.dateFrom)}`;
+  else dateTxt = `עד תאריך ${fmtDateStr(q.dateTo as string)}`;
+
+  return `אציג את המשימות ${scopeTxt} ${fieldTxt} ${dateTxt}${statusTxt}${timeTxt}.`;
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  OPEN: 'פתוח', IN_PROGRESS: 'בתהליך', DONE: 'בוצע',
+};
+const statusLabel = (s: string) => STATUS_LABELS[s] ?? s;
+
+const fmtDate = (d: Date | string) =>
+  new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(d));
+const fmtTime = (d: Date | string) =>
+  new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d));
+/** Format an ISO date label (YYYY-MM-DD…) as DD/MM/YYYY without timezone shifts. */
+function fmtDateStr(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+
+async function doGetTask(user: ResolvedUser, taskId: string): Promise<void> {
+  const task = await getTaskById(user, taskId);
+  if (!task) {
+    await auditEvent(user, 'get_task', taskId, 'SKIPPED', 'not found or no permission');
+    await sendTextMessage({ to: user.phone, text: 'המשימה לא נמצאה או שאין לך הרשאה.' });
+    return;
+  }
+  await auditEvent(user, 'get_task', taskId, 'SUCCESS');
+  const due = task.dueDate ? `${fmtDate(task.dueDate)} ${fmtTime(task.dueDate)}` : 'ללא מועד';
+  const overdue = task.dueDate && task.status !== 'DONE' && new Date(task.dueDate) < new Date() ? ' ⚠️ באיחור' : '';
+  const parts = [
+    `📋 ${task.title}`,
+    `סטטוס: ${statusLabel(task.status)}`,
+    `סוג: ${TASK_TYPE_LABELS[task.type] ?? task.type}`,
+    `עדיפות: ${task.priority ?? '—'}`,
+    `📅 מועד יעד: ${due}${overdue}`,
+    `🕓 נוצר: ${fmtDate(task.createdAt)} ${fmtTime(task.createdAt)}`,
+  ];
+  if (task.customer) parts.push(`לקוח: ${task.customer.name}`);
+  if (task.lead) parts.push(`ליד: ${task.lead.fullName}`);
+  if (task.project) parts.push(`פרויקט: ${task.project.name}`);
+  await sendTextMessage({ to: user.phone, text: parts.join('\n') });
+  await appendTurn(user.phone, 'assistant', `הצגתי פרטים על המשימה "${task.title}".`);
+}
+
+// ── Misc helpers ────────────────────────────────────────────────────────────────
+
+function buildCreateBody(intent: AIIntentResult): Record<string, unknown> {
+  const p = intent.params;
+  const body: Record<string, unknown> = { title: p.title, type: p.type };
+  if (p.dueDate)  body.dueDate  = p.dueDate;
+  if (p.priority) body.priority = p.priority;
+  if (p.ownerId)  body.ownerId  = p.ownerId;
+  return body;
+}
+
+function applyFieldValue(intent: AIIntentResult, field: string, value: string): AIIntentResult {
+  if (field === 'new_value') intent.new_value = value;
+  else if (field === 'task_reference') intent.task_reference = value;
+  else intent.params[field] = value;
+  return intent;
+}
+
+function describeIntent(intent: AIIntentResult): string {
+  switch (intent.intent) {
+    case 'create_task':   return `הבנתי שברצונך ליצור משימה "${intent.params.title ?? ''}" (סוג: ${intent.params.type ?? '?'}).`;
+    case 'edit_field':    return `הבנתי שברצונך לעדכן את השדה "${intent.field}" למשימה "${intent.task_reference ?? ''}".`;
+    case 'edit_duedate':  return `הבנתי שברצונך לשנות את מועד המשימה "${intent.task_reference ?? ''}".`;
+    case 'reassign_task': return `הבנתי שברצונך להעביר בעלות על המשימה "${intent.task_reference ?? ''}".`;
+    case 'relink_task':   return `הבנתי שברצונך לשנות את הקישור של המשימה "${intent.task_reference ?? ''}".`;
+    case 'list_tasks':    return 'הבנתי שברצונך לראות את רשימת המשימות.';
+    case 'team_workload': return 'הבנתי שברצונך לראות את עומס המשימות בצוות.';
+    case 'get_task':      return `הבנתי שברצונך לראות פרטי משימה "${intent.task_reference ?? ''}".`;
+    default:              return 'הבנתי את בקשתך.';
+  }
+}
+
+/** Record a read / non-write event in the audit log (never throws). */
+function auditEvent(
+  user: ResolvedUser,
+  intent: string,
+  taskId: string | null,
+  status: 'SUCCESS' | 'SKIPPED' | 'FAILED',
+  error?: string,
+): Promise<void> {
+  return writeAuditLog({
+    userId: user.id, whatsappNumber: user.phone,
+    originalMessage: null, transcribedMessage: null,
+    detectedIntent: intent, detectedAction: null, confidence: null,
+    targetTaskId: taskId, oldValues: null, newValues: null,
+    confirmationStatus: null, approvalStatus: null, approverUserId: null,
+    managerNotified: false, executionStatus: status, errorMessage: error ?? null,
+    pendingActionId: null,
+  });
+}
+
+function helpText(): string {
+  return [
+    'אני עוזר לנהל משימות. אפשר לבקש למשל:',
+    '• "הצג את המשימות שלי" / "מה המשימות להיום"',
+    '• "מה באיחור?" — משימות שעבר זמנן',
+    '• "צור משימה תיאום ללקוח X למחר"',
+    '• "שנה את הכותרת של משימה Y ל..."',
+    '• "שנה מועד למשימה Y ל..." (דורש אישור מנהל)',
+    '• למנהלים: "כל המשימות" / "עומס משימות בצוות"',
+  ].join('\n');
+}
+
+async function safePriorities(): Promise<string[]> {
+  try {
+    return await getAllowedPriorities();
+  } catch {
+    return [];
+  }
+}
