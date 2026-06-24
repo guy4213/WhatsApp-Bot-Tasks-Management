@@ -92,7 +92,11 @@ describe('HTTP endpoints (M-1.1, M-1.2, M-1.3, M-15.3)', () => {
 
   it('GET /webhook with correct verify token echoes the challenge (M-1.3)', async () => {
     const app = await buildApp();
-    const token = process.env.WHATSAPP_VERIFY_TOKEN ?? '';
+    // Mirror the webhook handler's own fallback (webhook.ts: `?? 'changeme'`) so
+    // the test matches whether or not WHATSAPP_VERIFY_TOKEN is set in the env
+    // (it is unset in CI; provided via .env locally). Using a different default
+    // here ('') could never match the handler and 403'd in CI.
+    const token = process.env.WHATSAPP_VERIFY_TOKEN ?? 'changeme';
     const res = await app.inject({
       method: 'GET',
       url: `/webhook?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(token)}&hub.challenge=test-challenge-123`,
