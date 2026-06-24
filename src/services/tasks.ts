@@ -135,6 +135,14 @@ export async function listTasks(
       case 'today':
         conditions.push(`t."${dateCol}"::date = CURRENT_DATE`);
         break;
+      case 'today_overdue':
+        // Due today OR overdue carry-over, excluding DONE — the digest "today"
+        // view ("my/team tasks for today"). Always keyed off dueDate regardless
+        // of the active date field, so it means the same thing everywhere.
+        conditions.push(
+          `t.status != 'DONE' AND t."dueDate" IS NOT NULL AND t."dueDate"::date <= CURRENT_DATE`,
+        );
+        break;
       case 'this_week':
         conditions.push(
           `t."${dateCol}" >= date_trunc('week', now()) AND t."${dateCol}" < date_trunc('week', now()) + interval '7 days'`,
@@ -225,6 +233,203 @@ export async function getTeamWorkload(limit = 15): Promise<WorkloadRow[]> {
     [limit],
   );
   return result.rows;
+}
+
+// ── Read: digest summaries (morning plan / end-of-day status) ─────────────────
+// V1 has NO reliable completedAt/status-history column, so the evening report is
+// strictly CURRENT end-of-day status (not a "completed during today" claim). All
+// classification is by the task's CURRENT status + dueDate, with CURRENT_DATE in
+// the pool's pinned Asia/Jerusalem session tz. See BOT_V1_DESIGN_UPDATE_PLAN §1/§5.
+
+/** Employee morning ("opening day plan") counts — that employee's own tasks only. */
+export interface EmployeeMorningCounts {
+  dueToday: number;
+  overdue: number;
+  open: number;
+}
+
+/** Employee end-of-day ("current status") counts + unfinished titles for the in-window list. */
+export interface EmployeeEndOfDay {
+  dueToday: number;       // ALL tasks due today (completed + notCompleted === dueToday)
+  completed: number;      // due today AND status = 'DONE'
+  notCompleted: number;   // due today AND status <> 'DONE'
+  overdue: number;        // dueDate before today AND status <> 'DONE'
+  openCarry: number;      // OPEN / IN_PROGRESS backlog rolling to tomorrow
+  unfinishedTitles: string[];
+}
+
+/** One employee's row inside the company-wide morning picture. */
+export interface CompanyMorningEmployee {
+  ownerId: string;
+  ownerName: string;
+  dueToday: number;
+  overdue: number;
+  open: number;
+}
+
+export interface CompanyMorning {
+  dueToday: number;
+  overdue: number;
+  open: number;
+  employeesWithOverdue: number;
+  employees: CompanyMorningEmployee[];
+}
+
+/** One employee's row inside the company-wide end-of-day picture. */
+export interface CompanyEndOfDayEmployee {
+  ownerId: string;
+  ownerName: string;
+  dueToday: number;
+  completed: number;
+  notCompleted: number;
+  overdue: number;
+  openCarry: number;
+}
+
+export interface CompanyEndOfDay {
+  dueToday: number;
+  completed: number;
+  notCompleted: number;
+  overdue: number;
+  openCarry: number;
+  employeesWithUnfinishedOrOverdue: number;
+  employees: CompanyEndOfDayEmployee[];
+}
+
+/** Morning plan counts for ONE employee — restricted to tasks they own. */
+export async function getEmployeeMorningCounts(ownerId: string): Promise<EmployeeMorningCounts> {
+  const result = await pool.query<{ due_today: number; overdue: number; open: number }>(
+    `SELECT
+       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE AND t.status <> 'DONE')::int AS due_today,
+       COUNT(*) FILTER (WHERE t."dueDate"::date < CURRENT_DATE AND t.status <> 'DONE')::int AS overdue,
+       COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS'))::int                      AS open
+     FROM "Task" t
+     WHERE t."ownerId" = $1`,
+    [ownerId],
+  );
+  const r = result.rows[0];
+  return { dueToday: r.due_today, overdue: r.overdue, open: r.open };
+}
+
+/** End-of-day (current status) counts + unfinished titles for ONE employee — own tasks only. */
+export async function getEmployeeEndOfDay(ownerId: string): Promise<EmployeeEndOfDay> {
+  const counts = await pool.query<{
+    due_today: number; completed: number; not_completed: number; overdue: number; open_carry: number;
+  }>(
+    `SELECT
+       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE)::int                      AS due_today,
+       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE AND t.status = 'DONE')::int  AS completed,
+       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE AND t.status <> 'DONE')::int AS not_completed,
+       COUNT(*) FILTER (WHERE t."dueDate"::date < CURRENT_DATE AND t.status <> 'DONE')::int AS overdue,
+       COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS'))::int                      AS open_carry
+     FROM "Task" t
+     WHERE t."ownerId" = $1`,
+    [ownerId],
+  );
+
+  const titles = await pool.query<{ title: string }>(
+    `SELECT t.title
+     FROM "Task" t
+     WHERE t."ownerId" = $1
+       AND t."dueDate"::date = CURRENT_DATE
+       AND t.status <> 'DONE'
+     ORDER BY t."dueDate" ASC NULLS LAST
+     LIMIT 10`,
+    [ownerId],
+  );
+
+  const c = counts.rows[0];
+  return {
+    dueToday: c.due_today,
+    completed: c.completed,
+    notCompleted: c.not_completed,
+    overdue: c.overdue,
+    openCarry: c.open_carry,
+    unfinishedTitles: titles.rows.map((t) => t.title),
+  };
+}
+
+/** Company-wide morning picture (manager/admin) — totals + per-employee + #overdue. */
+export async function getCompanyMorning(): Promise<CompanyMorning> {
+  const result = await pool.query<{
+    owner_id: string; owner_name: string; due_today: number; overdue: number; open: number;
+  }>(
+    `SELECT
+       u.id   AS owner_id,
+       u.name AS owner_name,
+       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE AND t.status <> 'DONE')::int AS due_today,
+       COUNT(*) FILTER (WHERE t."dueDate"::date < CURRENT_DATE AND t.status <> 'DONE')::int AS overdue,
+       COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS'))::int                      AS open
+     FROM "User" u
+     JOIN "Task" t ON t."ownerId" = u.id
+     WHERE upper(u.status::text) = 'ACTIVE'
+     GROUP BY u.id, u.name
+     HAVING COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE AND t.status <> 'DONE') > 0
+         OR COUNT(*) FILTER (WHERE t."dueDate"::date < CURRENT_DATE AND t.status <> 'DONE') > 0
+         OR COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS')) > 0
+     ORDER BY overdue DESC, due_today DESC, open DESC`,
+  );
+
+  const employees: CompanyMorningEmployee[] = result.rows.map((r) => ({
+    ownerId: r.owner_id,
+    ownerName: r.owner_name,
+    dueToday: r.due_today,
+    overdue: r.overdue,
+    open: r.open,
+  }));
+
+  return {
+    dueToday: employees.reduce((s, e) => s + e.dueToday, 0),
+    overdue: employees.reduce((s, e) => s + e.overdue, 0),
+    open: employees.reduce((s, e) => s + e.open, 0),
+    employeesWithOverdue: employees.filter((e) => e.overdue > 0).length,
+    employees,
+  };
+}
+
+/** Company-wide end-of-day picture (manager/admin) — totals + per-employee + #behind. */
+export async function getCompanyEndOfDay(): Promise<CompanyEndOfDay> {
+  const result = await pool.query<{
+    owner_id: string; owner_name: string;
+    due_today: number; completed: number; not_completed: number; overdue: number; open_carry: number;
+  }>(
+    `SELECT
+       u.id   AS owner_id,
+       u.name AS owner_name,
+       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE)::int                      AS due_today,
+       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE AND t.status = 'DONE')::int  AS completed,
+       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE AND t.status <> 'DONE')::int AS not_completed,
+       COUNT(*) FILTER (WHERE t."dueDate"::date < CURRENT_DATE AND t.status <> 'DONE')::int AS overdue,
+       COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS'))::int                      AS open_carry
+     FROM "User" u
+     JOIN "Task" t ON t."ownerId" = u.id
+     WHERE upper(u.status::text) = 'ACTIVE'
+     GROUP BY u.id, u.name
+     HAVING COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE) > 0
+         OR COUNT(*) FILTER (WHERE t."dueDate"::date < CURRENT_DATE AND t.status <> 'DONE') > 0
+         OR COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS')) > 0
+     ORDER BY overdue DESC, not_completed DESC, due_today DESC`,
+  );
+
+  const employees: CompanyEndOfDayEmployee[] = result.rows.map((r) => ({
+    ownerId: r.owner_id,
+    ownerName: r.owner_name,
+    dueToday: r.due_today,
+    completed: r.completed,
+    notCompleted: r.not_completed,
+    overdue: r.overdue,
+    openCarry: r.open_carry,
+  }));
+
+  return {
+    dueToday: employees.reduce((s, e) => s + e.dueToday, 0),
+    completed: employees.reduce((s, e) => s + e.completed, 0),
+    notCompleted: employees.reduce((s, e) => s + e.notCompleted, 0),
+    overdue: employees.reduce((s, e) => s + e.overdue, 0),
+    openCarry: employees.reduce((s, e) => s + e.openCarry, 0),
+    employeesWithUnfinishedOrOverdue: employees.filter((e) => e.notCompleted > 0 || e.overdue > 0).length,
+    employees,
+  };
 }
 
 // ── Read: single task with joined entities ────────────────────────────────────

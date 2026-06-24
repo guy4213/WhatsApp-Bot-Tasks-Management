@@ -218,6 +218,7 @@ export interface ChatTurn {
 
 export type TaskFilter =
   | 'today'
+  | 'today_overdue' // due today OR overdue carry-over, excluding DONE (digest "today" view)
   | 'this_week'
   | 'open'
   | 'next_deadline'

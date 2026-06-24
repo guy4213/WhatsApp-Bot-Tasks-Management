@@ -23,11 +23,15 @@
  *   REQUEST_EXPIRED          : {{1}} task title
  *   REQUEST_EXPIRED_MANAGER  : {{1}} requester   {{2}} task title
  */
-import { sendTextMessage, sendTemplateMessage } from './sender';
+import { sendTextMessage, sendTemplateMessage, sendButtonMessage } from './sender';
 import { type NotificationKey, templateName, templateLang } from './templateNames';
 
 // Re-export so existing importers of NotificationKey from this module keep working.
 export type { NotificationKey };
+
+// Interactive button-message bodies are capped (Meta limit ~1024). Above this we
+// send the full text first, then a short message that carries the buttons.
+const BUTTON_BODY_MAX = 1000;
 
 function templatesEnabled(): boolean {
   return process.env.WHATSAPP_TEMPLATES_ENABLED === 'true';
@@ -38,17 +42,40 @@ export interface NotifyArgs {
   key: NotificationKey;
   bodyParams: string[];   // ordered template variables
   fallbackText: string;   // sent when templates are disabled / no name configured
+  /**
+   * Optional quick-reply buttons for the IN-WINDOW (fallback) free-form path. When
+   * the approved template is used instead, its own quick-reply buttons apply (these
+   * are ignored), so the template definition must declare matching button payloads.
+   */
+  buttons?: Array<{ id: string; title: string }>;
 }
 
 /**
  * Send a proactive notification. Uses the approved template when templates are
  * enabled; otherwise sends free-form text (dev, or when the recipient is in-window).
+ * When `buttons` are supplied and we're on the free-form path, the message is sent
+ * as an interactive reply-button message so the user can act without typing.
  */
-export async function notify({ to, key, bodyParams, fallbackText }: NotifyArgs): Promise<void> {
+export async function notify({ to, key, bodyParams, fallbackText, buttons }: NotifyArgs): Promise<void> {
   const name = templateName(key);
   if (templatesEnabled() && name) {
+    // Template path: quick-reply buttons (if any) live in the approved template,
+    // not in this call. Body params unchanged.
     await sendTemplateMessage({ to, name, languageCode: templateLang(), bodyParams });
-  } else {
-    await sendTextMessage({ to, text: fallbackText });
+    return;
   }
+
+  if (buttons && buttons.length > 0) {
+    if (fallbackText.length <= BUTTON_BODY_MAX) {
+      await sendButtonMessage({ to, body: fallbackText, buttons });
+    } else {
+      // Body too long for an interactive message — send the full text, then the
+      // buttons on a compact follow-up so nothing is truncated.
+      await sendTextMessage({ to, text: fallbackText });
+      await sendButtonMessage({ to, body: 'בחר פעולה:', buttons });
+    }
+    return;
+  }
+
+  await sendTextMessage({ to, text: fallbackText });
 }

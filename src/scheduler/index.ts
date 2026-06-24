@@ -7,6 +7,7 @@ import { runDueDateReminder }           from './jobs/dueDateReminder';
 import { runDeadlineExceededAlert,
          runDeadlineApproachingAlert }  from './jobs/deadlineAlerts';
 import { runCompletionNotifier }        from './jobs/completionNotifier';
+import { runDigestDispatcher }          from './jobs/digestDispatcher';
 import { recoverInboundQueue }          from '../routes/webhook';
 
 const log = moduleLogger('scheduler');
@@ -24,6 +25,7 @@ const JOB_LOCK_IDS = {
   dailySummary:         1005,
   completionNotifier:   1006,
   queueRecovery:        1007,
+  digestDispatcher:     1008,
 } as const;
 
 async function withJobLock(lockId: number, name: string, fn: () => Promise<void>): Promise<void> {
@@ -62,8 +64,21 @@ export function startScheduler(): void {
   cron.schedule('*/5 * * * *', safe('dueDateReminder',     JOB_LOCK_IDS.dueDateReminder,    runDueDateReminder),          { timezone: TZ });
   cron.schedule('0 8 * * *',   safe('deadlineExceeded',    JOB_LOCK_IDS.deadlineExceeded,   runDeadlineExceededAlert),    { timezone: TZ });
   cron.schedule('0 9 * * *',   safe('deadlineApproaching', JOB_LOCK_IDS.deadlineApproaching, runDeadlineApproachingAlert), { timezone: TZ });
-  cron.schedule('0 17 * * *',  safe('dailySummary',        JOB_LOCK_IDS.dailySummary,       runDailySummary),             { timezone: TZ });
   cron.schedule('*/2 * * * *', safe('completionNotifier',  JOB_LOCK_IDS.completionNotifier, runCompletionNotifier),       { timezone: TZ });
+
+  // Per-user scheduled digests — replaces the fixed 17:00 broadcast. Runs every
+  // 5 minutes and fires each user's morning/evening digest when their local time
+  // falls in the window (default ON for everyone; opt-out/retime via the menu).
+  cron.schedule('*/5 * * * *', safe('digestDispatcher', JOB_LOCK_IDS.digestDispatcher, runDigestDispatcher), { timezone: TZ });
+
+  // Legacy fixed 17:00 daily summary — OFF by default. Its replacement is the
+  // evening digest above. Re-enable only via LEGACY_DAILY_SUMMARY_ENABLED=true.
+  if (process.env.LEGACY_DAILY_SUMMARY_ENABLED === 'true') {
+    cron.schedule('0 17 * * *', safe('dailySummary', JOB_LOCK_IDS.dailySummary, runDailySummary), { timezone: TZ });
+    log.warn('LEGACY_DAILY_SUMMARY_ENABLED=true — legacy 17:00 dailySummary is ACTIVE (may overlap the evening digest)');
+  } else {
+    log.info('Legacy 17:00 dailySummary is DISABLED (LEGACY_DAILY_SUMMARY_ENABLED!=true) — superseded by the evening digest');
+  }
 
   // Every 5 minutes — reprocess any inbound messages left pending by a crash
   cron.schedule('*/5 * * * *', safe('queueRecovery', JOB_LOCK_IDS.queueRecovery, recoverInboundQueue), { timezone: TZ });

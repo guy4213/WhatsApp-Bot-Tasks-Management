@@ -163,6 +163,18 @@ In `handleAIMessage`, order:
 
 (None start/end with a variable — passes our validator. ADMIN reuses `manager_*`. Counts only — the **per-employee breakdown + unfinished titles live in the in-window free-form** message, not the template.) Until approved, digests deliver **in-window only** (rich free-form via fallback).
 
+### 6a. Quick-reply buttons (proposed — NOT submitted)
+Each of the 4 templates gets **2 Quick Reply buttons** whose payloads must equal the in-window button IDs (`src/ai/digestCommands.ts → DIGEST_PAYLOAD_IDS`), so a tapped button routes the same deterministically whether it came from a template (out-of-window) or the free-form fallback (in-window). The CTA text was updated to `👇 לחץ על הכפתור לפירוט, או כתוב "<command>" / "כתיבה חופשית".`
+
+| Template | Button 1 (title → payload) | Button 2 (title → payload) |
+|---|---|---|
+| `employee_morning_digest` | `משימות להיום` → `digest_emp_today` | `כתיבה חופשית` → `digest_free_text` |
+| `employee_end_of_day_report` | `דוח סוף יום שלי` → `digest_emp_eod` | `כתיבה חופשית` → `digest_free_text` |
+| `manager_morning_digest` | `משימות להיום בצוות` → `digest_team_today` | `כתיבה חופשית` → `digest_free_text` |
+| `manager_end_of_day_report` | `דוח סוף יום צוות` → `digest_team_eod` | `כתיבה חופשית` → `digest_free_text` |
+
+> Meta quick-reply payloads are returned as `interactive.button_reply.id`, which the webhook already forwards as message text — so the existing deterministic matcher handles both template-button taps and in-window taps with no extra parsing. **Still NOT submitted; `WHATSAPP_TEMPLATES_ENABLED` stays false.**
+
 ---
 
 ## 7. Env vars to add

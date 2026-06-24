@@ -17,7 +17,14 @@ export type NotificationKey =
   | 'DAILY_SUMMARY'
   | 'TASK_COMPLETED'
   | 'REQUEST_EXPIRED'
-  | 'REQUEST_EXPIRED_MANAGER';
+  | 'REQUEST_EXPIRED_MANAGER'
+  // Per-user scheduled digests (V1). Names only — these templates are NOT yet
+  // submitted to Meta and stay disabled (WHATSAPP_TEMPLATES_ENABLED=false), so
+  // digests deliver in-window free-form until the templates are approved.
+  | 'EMPLOYEE_MORNING_DIGEST'
+  | 'MANAGER_MORNING_DIGEST'
+  | 'EMPLOYEE_END_OF_DAY_REPORT'
+  | 'MANAGER_END_OF_DAY_REPORT';
 
 // Default Meta template names (override individually via WHATSAPP_TEMPLATE_<KEY>).
 export const DEFAULT_TEMPLATE_NAMES: Record<NotificationKey, string> = {
@@ -31,6 +38,10 @@ export const DEFAULT_TEMPLATE_NAMES: Record<NotificationKey, string> = {
   TASK_COMPLETED:           'task_completed',
   REQUEST_EXPIRED:          'request_expired',
   REQUEST_EXPIRED_MANAGER:  'request_expired_manager',
+  EMPLOYEE_MORNING_DIGEST:     'employee_morning_digest',
+  MANAGER_MORNING_DIGEST:      'manager_morning_digest',
+  EMPLOYEE_END_OF_DAY_REPORT:  'employee_end_of_day_report',
+  MANAGER_END_OF_DAY_REPORT:   'manager_end_of_day_report',
 };
 
 /** Resolved template name for a key — overridable via WHATSAPP_TEMPLATE_<KEY>. */

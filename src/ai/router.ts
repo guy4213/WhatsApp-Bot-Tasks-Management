@@ -26,6 +26,18 @@ import { dispatchInternal } from '../utils/internalApi';
 import { sendTextMessage } from '../whatsapp/sender';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
+import {
+  MENU_TRIGGER_RE, menuItemsFor, renderMenu, type MenuRoute,
+} from './menu';
+import {
+  matchDigestCommand, planDigestCommand, type DigestCommand,
+} from './digestCommands';
+import {
+  getEffectiveDigestPreference, upsertDigestPreference, parseTimeInput,
+  type DigestPreference,
+} from '../services/digestPreferences';
+import { getEmployeeEndOfDay, getCompanyEndOfDay } from '../services/tasks';
+import { formatEmployeeEndOfDay, formatManagerEndOfDay } from '../whatsapp/digestContent';
 
 const log = moduleLogger('ai-router');
 
@@ -75,6 +87,16 @@ export const CORRECTION_RE = /^(תיקון|רגע|לא לזה התכוונתי|�
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 export async function handleAIMessage(user: ResolvedUser, text: string): Promise<void> {
+  // Deterministic digest follow-up commands / quick-reply button taps. Handled
+  // FIRST — before the AI provider check, before context, before NLU — so a
+  // tapped digest button (its payload id arrives here as text) or the exact text
+  // command always routes the same way and never depends on the AI parser.
+  const digestCmd = matchDigestCommand(text);
+  if (digestCmd) {
+    await handleDigestCommand(user, digestCmd);
+    return;
+  }
+
   if (!getProvider()) {
     await sendTextMessage({ to: user.phone, text: 'שירות ה-AI אינו מוגדר עדיין. נסה שוב מאוחר יותר.' });
     return;
@@ -84,6 +106,14 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   const ctx = await getContext(user.phone);
   if (ctx) {
     await continueConversation(user, text, ctx);
+    return;
+  }
+
+  // Fresh message that is exactly a menu trigger (menu/תפריט/עזרה/היי/שלום) →
+  // open the role-based numbered menu. Any other text falls through to the AI
+  // parser unchanged, so existing free-text behavior is fully preserved.
+  if (MENU_TRIGGER_RE.test(text.trim())) {
+    await showMenu(user);
     return;
   }
 
@@ -183,10 +213,34 @@ async function continueConversation(
     return;
   }
 
+  // ── Numbered menu + digest-settings flows (these states carry NO AI intent) ──
+  if (ctx.awaiting === 'menu') {
+    await handleMenuReply(user, trimmed);
+    return;
+  }
+  if (ctx.awaiting === 'digest_settings') {
+    await handleDigestSettingsReply(user, trimmed);
+    return;
+  }
+  if (ctx.awaiting === 'digest_set_time') {
+    await handleDigestTimeReply(user, trimmed, ctx);
+    return;
+  }
+
+  // Every remaining state carries a parsed intent. (Captured into a const so the
+  // not-undefined narrowing survives the awaits in the branches below.)
+  const ctxIntent = ctx.intent;
+  if (!ctxIntent) {
+    // Unknown / corrupt state with no intent — reset and treat as a fresh message.
+    await clearContext(user.phone);
+    await handleAIMessage(user, text);
+    return;
+  }
+
   if (ctx.awaiting === 'intent_confirm') {
     if (YES_RE.test(trimmed)) {
       await clearContext(user.phone);
-      await executeIntent(user, ctx.intent);
+      await executeIntent(user, ctxIntent);
     } else if (NO_RE.test(trimmed)) {
       await clearContext(user.phone);
       await sendTextMessage({ to: user.phone, text: 'בוטל.' });
@@ -199,7 +253,7 @@ async function continueConversation(
   }
 
   if (ctx.awaiting === 'missing_field' && ctx.missingField) {
-    const intent = applyFieldValue(ctx.intent, ctx.missingField, trimmed);
+    const intent = applyFieldValue(ctxIntent, ctx.missingField, trimmed);
     const remaining = intent.missing_fields.filter((f) => f !== ctx.missingField);
     intent.missing_fields = remaining;
 
@@ -217,7 +271,7 @@ async function continueConversation(
   if (ctx.awaiting === 'read_confirm') {
     if (YES_RE.test(trimmed)) {
       await clearContext(user.phone);
-      await runListTasks(user, resolveListQuery(user, ctx.intent));
+      await runListTasks(user, resolveListQuery(user, ctxIntent));
     } else if (NO_RE.test(trimmed)) {
       await clearContext(user.phone);
       await sendTextMessage({ to: user.phone, text: 'בוטל.' });
@@ -237,7 +291,7 @@ async function continueConversation(
     }
     const taskId = ctx.candidateTaskIds[idx - 1];
     await clearContext(user.phone);
-    await executeIntent(user, ctx.intent, taskId);
+    await executeIntent(user, ctxIntent, taskId);
     return;
   }
 
@@ -247,7 +301,7 @@ async function continueConversation(
       await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${ctx.candidateUserIds.length}.` });
       return;
     }
-    const intent = ctx.intent;
+    const intent = ctxIntent;
     intent.params.ownerId = ctx.candidateUserIds[idx - 1];
     intent.params._ownerResolved = true;   // concrete id now — skip re-resolution
     await clearContext(user.phone);
@@ -261,7 +315,7 @@ async function continueConversation(
       await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${ctx.candidateLinkIds.length}.` });
       return;
     }
-    const intent = ctx.intent;
+    const intent = ctxIntent;
     intent.params[ctx.linkField] = ctx.candidateLinkIds[idx - 1];
     intent.params._linkResolved = true;    // concrete id now — skip re-resolution
     await clearContext(user.phone);
@@ -271,7 +325,7 @@ async function continueConversation(
 
   if (ctx.awaiting === 'create_date') {
     await clearContext(user.phone);
-    const intent = ctx.intent;
+    const intent = ctxIntent;
     const title = String(intent.params.title ?? 'משימה');
 
     // Resolve the reply to an ISO date via the AI ("מחר"/"יום ראשון ב-3" → ISO).
@@ -713,6 +767,218 @@ async function doTeamWorkload(user: ResolvedUser): Promise<void> {
 
   await sendTextMessage({ to: user.phone, text: `📊 עומס משימות בצוות:\n${lines.join('\n')}` });
   await appendTurn(user.phone, 'assistant', `הצגתי עומס משימות בצוות (${rows.length} עובדים).`);
+}
+
+// ── Role-based numbered menu ────────────────────────────────────────────────────
+// V1 is a numbered TEXT menu only (no WhatsApp interactive list messages). It is
+// opened ONLY by an exact trigger word; all other free text still goes straight to
+// the AI parser, so the existing NLU behavior is unchanged.
+
+/** Open the role-based menu and remember that we're awaiting a numeric choice. */
+async function showMenu(user: ResolvedUser): Promise<void> {
+  await setContext(user.phone, { awaiting: 'menu' });
+  await sendTextMessage({ to: user.phone, text: renderMenu(user) });
+}
+
+/** Handle a reply while the main menu is open: a valid number routes, else re-prompt. */
+async function handleMenuReply(user: ResolvedUser, trimmed: string): Promise<void> {
+  const items = menuItemsFor(user);
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
+    await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${items.length}.` });
+    return; // keep the menu context so the next number still works
+  }
+  await handleMenuRoute(user, items[idx - 1]);
+}
+
+/** Map a chosen menu route to existing behavior. */
+async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<void> {
+  const action = route.action;
+  switch (action.kind) {
+    case 'list_tasks':
+      await clearContext(user.phone);
+      await runListTasks(user, { filter: action.filter, scope: action.scope, dateField: action.dateField });
+      return;
+    case 'team_workload':
+      await clearContext(user.phone);
+      await doTeamWorkload(user);
+      return;
+    case 'pending_approvals':
+      await clearContext(user.phone);
+      await doPendingApprovals(user);
+      return;
+    case 'digest_settings':
+      await showDigestSettings(user);
+      return;
+    case 'free_text':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'בטח! כתוב את הבקשה שלך בלשון חופשית ואטפל בה.' });
+      return;
+    case 'guide':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: action.guide });
+      return;
+  }
+}
+
+/** Pending dueDate-change approvals (manager/admin) — confirm via "אשר <id>" / "דחה <id>". */
+async function doPendingApprovals(user: ResolvedUser): Promise<void> {
+  if (!user.isElevated) {
+    await sendTextMessage({ to: user.phone, text: 'אישורים ממתינים זמינים למנהלים בלבד.' });
+    return;
+  }
+  const approvals = await getPendingApprovals();
+  if (approvals.length === 0) {
+    await sendTextMessage({ to: user.phone, text: 'אין כרגע אישורים ממתינים.' });
+    return;
+  }
+  const lines = approvals.map((a, i) => {
+    const title = typeof a.payload?.taskTitle === 'string' ? a.payload.taskTitle : '';
+    const nv = a.payload?.new_value;
+    const what = title ? `"${title}"` : (a.targetTaskId ?? a.id);
+    const detail = nv != null ? ` → ${String(nv)}` : '';
+    return `${i + 1}. ${what}${detail}\n   לאישור: "אשר ${a.id}" · לדחייה: "דחה ${a.id}"`;
+  });
+  await sendTextMessage({ to: user.phone, text: `⏳ אישורים ממתינים (${approvals.length}):\n${lines.join('\n')}` });
+}
+
+// ── Deterministic digest follow-up commands (buttons + exact text) ──────────────
+// Routes a tapped digest quick-reply (its payload id) or the exact Hebrew command
+// to a fixed action WITHOUT the AI parser. Team views are elevated-only, so an
+// employee can never reach other employees' tasks through a digest button.
+
+async function handleDigestCommand(user: ResolvedUser, cmd: DigestCommand): Promise<void> {
+  // A digest command is an explicit fresh navigation — drop any half-finished
+  // clarification context so it routes cleanly.
+  await clearContext(user.phone);
+
+  const plan = planDigestCommand(cmd, user);
+  switch (plan.kind) {
+    case 'list':
+      await runListTasks(user, { filter: plan.filter, scope: plan.scope, dateField: 'dueDate' });
+      return;
+    case 'employee_eod':
+      await doEmployeeEndOfDayReport(user);
+      return;
+    case 'team_eod':
+      await doTeamEndOfDayReport(user);
+      return;
+    case 'free_text':
+      await sendTextMessage({ to: user.phone, text: 'כתוב את בקשתך בלשון חופשית ואטפל בה.' });
+      return;
+    case 'denied':
+      await auditEvent(user, 'digest_team_command', null, 'SKIPPED', 'not elevated');
+      await sendTextMessage({ to: user.phone, text: 'התצוגה הזו זמינה למנהלים בלבד.' });
+      return;
+  }
+}
+
+/** Employee on-demand end-of-day status report — reuses the digest builder (own tasks only). */
+async function doEmployeeEndOfDayReport(user: ResolvedUser): Promise<void> {
+  const eod = await getEmployeeEndOfDay(user.id);
+  const { text } = formatEmployeeEndOfDay(user.name, eod);
+  await auditEvent(user, 'digest_emp_eod', null, 'SUCCESS');
+  await sendChunked(user.phone, text);
+  await appendTurn(user.phone, 'assistant', 'הצגתי את דוח סוף היום שלך (סטטוס נוכחי).');
+}
+
+/** Manager/Admin on-demand company end-of-day report — reuses the digest builder. */
+async function doTeamEndOfDayReport(user: ResolvedUser): Promise<void> {
+  const co = await getCompanyEndOfDay();
+  const { text } = formatManagerEndOfDay(user.name, co);
+  await auditEvent(user, 'digest_team_eod', null, 'SUCCESS');
+  await sendChunked(user.phone, text);
+  await appendTurn(user.phone, 'assistant', 'הצגתי את דוח סוף היום של הצוות (סטטוס נוכחי).');
+}
+
+// ── Digest settings flow ────────────────────────────────────────────────────────
+
+/** Show the digest-settings sub-menu and await a numeric choice. */
+async function showDigestSettings(user: ResolvedUser): Promise<void> {
+  const pref = await getEffectiveDigestPreference(user.id);
+  await setContext(user.phone, { awaiting: 'digest_settings' });
+  await sendTextMessage({ to: user.phone, text: renderDigestSettings(pref) });
+}
+
+function renderDigestSettings(pref: DigestPreference): string {
+  const onOff = (b: boolean) => (b ? 'פעיל' : 'כבוי');
+  return [
+    'הגדרות סיכום בוקר / דוח סוף יום',
+    `מצב נוכחי: ☀️ סיכום בוקר ${onOff(pref.morningEnabled)} (${pref.morningTime}) · 🌆 דוח סוף יום ${onOff(pref.eveningEnabled)} (${pref.eveningTime})`,
+    '',
+    '1. הפעלת סיכום בוקר',
+    '2. כיבוי סיכום בוקר',
+    '3. שינוי שעת סיכום בוקר',
+    '4. הפעלת דוח סוף יום',
+    '5. כיבוי דוח סוף יום',
+    '6. שינוי שעת דוח סוף יום',
+    '7. חזרה לתפריט הראשי',
+    '',
+    'השב במספר.',
+  ].join('\n');
+}
+
+/** Handle a numeric choice in the digest-settings sub-menu. */
+async function handleDigestSettingsReply(user: ResolvedUser, trimmed: string): Promise<void> {
+  const audit = { phone: user.phone };
+  switch (parseInt(trimmed, 10)) {
+    case 1:
+      await upsertDigestPreference(user.id, { morningEnabled: true }, audit);
+      await sendTextMessage({ to: user.phone, text: '☀️ סיכום הבוקר הופעל.' });
+      await showDigestSettings(user);
+      return;
+    case 2:
+      await upsertDigestPreference(user.id, { morningEnabled: false }, audit);
+      await sendTextMessage({ to: user.phone, text: '☀️ סיכום הבוקר כובה.' });
+      await showDigestSettings(user);
+      return;
+    case 3:
+      await setContext(user.phone, { awaiting: 'digest_set_time', digestField: 'morning' });
+      await sendTextMessage({ to: user.phone, text: 'לאיזו שעה לקבוע את סיכום הבוקר? (למשל 8 או 08:30)' });
+      return;
+    case 4:
+      await upsertDigestPreference(user.id, { eveningEnabled: true }, audit);
+      await sendTextMessage({ to: user.phone, text: '🌆 דוח סוף היום הופעל.' });
+      await showDigestSettings(user);
+      return;
+    case 5:
+      await upsertDigestPreference(user.id, { eveningEnabled: false }, audit);
+      await sendTextMessage({ to: user.phone, text: '🌆 דוח סוף היום כובה.' });
+      await showDigestSettings(user);
+      return;
+    case 6:
+      await setContext(user.phone, { awaiting: 'digest_set_time', digestField: 'evening' });
+      await sendTextMessage({ to: user.phone, text: 'לאיזו שעה לקבוע את דוח סוף היום? (למשל 17 או 17:30)' });
+      return;
+    case 7:
+      await showMenu(user);
+      return;
+    default:
+      await sendTextMessage({ to: user.phone, text: 'אנא השב במספר בין 1 ל-7.' });
+  }
+}
+
+/** Handle a time reply while awaiting a digest time — validate, save, reshow. */
+async function handleDigestTimeReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const field = ctx.digestField;
+  if (field !== 'morning' && field !== 'evening') {
+    await showDigestSettings(user); // corrupt state — bounce back to settings
+    return;
+  }
+  const hhmm = parseTimeInput(trimmed);
+  if (!hhmm) {
+    await sendTextMessage({ to: user.phone, text: 'שעה לא תקינה. אנא כתוב שעה כמו 8, 8:30 או 08:00.' });
+    return; // keep awaiting:'digest_set_time' so the user can retry
+  }
+  const patch = field === 'morning' ? { morningTime: hhmm } : { eveningTime: hhmm };
+  await upsertDigestPreference(user.id, patch, { phone: user.phone });
+  const label = field === 'morning' ? 'סיכום הבוקר' : 'דוח סוף היום';
+  await sendTextMessage({ to: user.phone, text: `✅ שעת ${label} עודכנה ל-${hhmm}.` });
+  await showDigestSettings(user);
 }
 
 /** One-line pulse summary shown above a task list. */
