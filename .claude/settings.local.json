@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\guy42\\\\Documents\\\\WhatsApp-Bot-Tasks-Management\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "WebSearch",
+      "WebFetch(domain:developers.facebook.com)",
+      "Bash(findstr /i \".md\")"
+    ]
+  }
+}
