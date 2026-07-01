@@ -13,7 +13,7 @@ First the locked decision log — this is the contract everything was written ag
 - STARTED dropped — arrival = start of inspection. The flow: departed → arrived → finished.
 - `InspectionType` = a dictionary keyed by מק"ט (`code` = `productName`) with `family`; `InspectionChecklist` = equipment only, by family.
 - A Task becomes an inspection via a dropdown in the CRM that writes a flag field on `Task` → a `TaskField` row is created automatically.
-- Leads: source = the `lead incoming` table (not the CRM's `Lead`). The worker **does not touch the lead from the bot** — receives an alert only; all handling is done in the CRM. Sasha (MANAGER permission) performs the assignments. Yoram sees leads in the morning and evening summary.
+- Leads: source = the `IncomingLead` table (not the CRM's `Lead`). Assignment field: `ownerId` (UUID FK). No phone column — display `fromName`/`fromEmail`/`subject`/`body`. The worker **does not touch the lead from the bot** — receives an alert only; all handling is done in the CRM. Sasha (MANAGER permission) performs the assignments. Yoram sees leads in the morning and evening summary.
 
 ═══════════════════════════════════════
 
@@ -42,7 +42,7 @@ Identification by phone against `User` → ROLE. No separate screen; the same en
 
 **TaskField** — 1:1 with `Task` (`taskId` unique). Static metadata (address, contact, navigation) + the live operational status + an inline note/problem + a "missing info" flag. **A Task is a field inspection if and only if it has a row here.**
 
-Leads don't require a table on our side — reading from the existing `lead incoming` + alerts.
+Leads don't require a table on our side — reading from the existing `IncomingLead` table + alerts.
 
 **How a Task becomes an inspection:**
 1. In the office they choose the dropdown "field task = yes".
@@ -196,28 +196,28 @@ Computed in real time from the day's inspections' `fieldStatus`:
 
 ## 12. The leads stream (Sasha)
 
-**Source:** the `lead incoming` table. The bot reads from it only; all handling of a lead is done in the CRM.
+**Source:** the `IncomingLead` table (confirmed 2026-07-01). The bot reads from it only; all handling of a lead is done in the CRM. Columns: `id`, `subject`, `body`, `fromName`, `fromEmail`, `receivedAt`, `status`, `ownerId`, `taskId`, `notifiedAt`. No phone — display `fromName`/`fromEmail`/`subject`/`body`. Assignment field: `ownerId` (UUID FK to `User`; null = unassigned).
 
-**Morning digest — 9:30, to Sasha:** all leads that came in overnight (17:00 yesterday → 9:30 today) and still unassigned:
+**Morning digest — 9:30, to Sasha:** all leads that came in overnight (17:00 yesterday → 9:30 today) where `ownerId IS NULL`:
 ```
 לידים מהלילה (4):
-1. רונן לוי · 052-0000000 · "צריך בדיקת קרינה לדירה חדשה"
+1. רונן לוי · ronenlevi@example.com · "צריך בדיקת קרינה לדירה חדשה"
 2. ...
 שייכי ב-CRM. הצעת התאמה לכל ליד מצורפת.
 ```
 
-**Assignment:** Sasha assigns a lead to a worker **in the CRM**. The moment `assignedTo` goes from empty to a worker, the bot sends the worker an alert (the worker does nothing in the bot — only views):
+**Assignment:** Sasha assigns a lead to a worker **in the CRM** — sets `ownerId` from null to a `User.id`. The bot detects the transition and sends the worker an alert (the worker does nothing in the bot — only views):
 ```
 שויך אליך ליד חדש:
-לקוח: רונן לוי · 052-0000000
+מאת: רונן לוי · ronenlevi@example.com
 "צריך בדיקת קרינה לדירה חדשה"
 לטיפול ועדכון ב-CRM.
 ```
 
-**Escalation — a daytime lead that wasn't assigned:** a lead created between 9:30 and 22:00 and not assigned within **one hour of its creation** → one alert to Sasha (this is also the "no match found" case — one event, not two):
+**Escalation — a daytime lead that wasn't assigned:** a lead with `receivedAt` between 9:30 and 22:00 and `ownerId IS NULL` for more than **one hour** → one alert to Sasha (one event, not two):
 ```
 ליד לא שויך כבר שעה:
-רונן לוי · 052-0000000 · "בדיקת קרינה..."
+רונן לוי · ronenlevi@example.com · "בדיקת קרינה..."
 הצעת AI: דני (בודק קרינה)   [או: לא נמצאה התאמה לפי ROLE]
 אנא שייכי ידנית ב-CRM.
 ```
@@ -227,7 +227,7 @@ The AI suggests a match based on the lead's description against the workers' ROL
 
 ## 13. Alerts and summaries for the manager
 
-Relies on the existing digest/notifications infrastructure in the managers' bot, which will also read the new field tables and `lead incoming`.
+Relies on the existing digest/notifications infrastructure in the managers' bot, which will also read the new field tables and `IncomingLead`.
 
 **Yoram — summary (morning + evening), exceptions only:**
 ```
@@ -381,11 +381,11 @@ ON CONFLICT (family, code) DO NOTHING;
 COMMIT;
 ```
 
-**Two inputs still needed in order to finish the seed and the wiring (the final DDL):**
+**Both inputs resolved (2026-07-01):**
 
-1. **The `InspectionType` dictionary (~150 מק"טים)** — derived from the legend: category title = `family`, service name = `labelHe`, the מק"ט = `code`. As we discussed, there are **shielding** מק"טים in the radiation category that aren't measurement inspections; I'll generate a full first pass and you fix the borderline ones. Just say when.
+1. **The `InspectionType` dictionary (~150 מק"טים)** — proceed with the clear, field-relevant rows from the draft below. Shielding מק"טים and borderline non-inspection services are excluded from the initial seed; D1-T7 is now unblocked.
 
-2. **The `lead incoming` structure** — for the leads stream I need its column names (name, phone, message, when created, the assignment field/assignedTo). It's an existing source table, so it doesn't go into our migration — but without the columns the digest, the worker assignment alert, and the escalation to Sasha can't be wired.
+2. **The `IncomingLead` table** — resolved. Table: `IncomingLead`. Columns: `id`, `subject`, `body`, `fromName`, `fromEmail`, `receivedAt`, `status`, `ownerId`, `taskId`, `notifiedAt`. Assignment field: `ownerId` (UUID FK to `User`). No phone — use `fromName`/`fromEmail`/`subject`/`body`. `transferredToId` exists but is not used. All Domain 3 tasks are now unblocked.
 
 ---
 

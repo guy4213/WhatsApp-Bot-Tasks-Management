@@ -298,11 +298,11 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** YES (K2 only — B2 resolved).
 
 #### D3-T4 — 1-hour escalation to Sasha for unassigned daytime leads
-- **What to do:** add to the polling job from D3-T3: any `lead incoming` row created between 09:30-22:00 local that's still unassigned 1 hour after its creation → ONE alert to Sasha including the AI suggestion (D3-T5) or "לא נמצאה התאמה". Overnight leads (17:00-09:30) are skipped — they're covered by D3-T2. Dedup must guarantee exactly one event per lead.
-- **Definition of Done:** a lead created at 11:00 still unassigned at 12:00 triggers ONE Sasha alert; a lead created at 02:00 never triggers; restarts don't re-fire.
+- **What to do:** add to the polling job from D3-T3: any `IncomingLead` row where `ownerId IS NULL` and `receivedAt` is between 09:30-22:00 local and more than 1 hour ago → ONE alert to Sasha including the AI suggestion (D3-T5) or "לא נמצאה התאמה". Display: `fromName` / `fromEmail` / `subject` / `body`. Overnight leads (17:00-09:30) are skipped — covered by D3-T2. Dedup must guarantee exactly one event per lead.
+- **Definition of Done:** a lead with `receivedAt` at 11:00, still `ownerId IS NULL` at 12:00, triggers ONE Sasha alert; overnight leads never trigger; restarts don't re-fire.
 - **Reference:** GAP Domain 3 row 4. Spec §12.
 - **Dependencies:** D3-T1, D3-T3, D3-T5.
-- **Blocked:** YES (B2).
+- **Blocked:** NO (B2 resolved — D3-T3 still needs K2, but D3-T4 can be implemented in parallel once D3-T1 lands).
 
 #### D3-T5 — AI suggest-worker-by-role function
 - **Status:** DONE (local, uncommitted). Landed as new sibling file `src/ai/leadSuggester.ts` (not extended into `provider.ts`) exporting `suggestWorkerForLead(lead, candidates, provider?)`. Uses the existing `getProvider()` seam via `emitStructured`, strict JSON schema `{ userId: string|null, reason: string }`. Returns `{ userId: null, reason: 'לא נמצאה התאמה' }` on any of: empty candidates (no AI call), null provider, thrown error, hallucinated userId (not in candidate list). Never throws. Optional third `provider` param mirrors `parseIntent`'s pattern in `intentParser.ts:130-133` — real callers pass just two args; tests inject a mock directly. Per K1, inspector filtering (`role !== 'ADMIN'`) is the caller's responsibility. Tests: `src/__tests__/leadSuggester.test.ts` — 7/7 passing (empty candidates, disabled provider, valid pick, hallucinated id, provider throws, radiation sample, null-with-reason-kept).
@@ -320,7 +320,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Definition of Done:** Yoram's morning and evening messages match the §13 format; counts come from `TaskField` queries; open-exceptions list is sorted (suggested: by `managerNotifiedAt`); dispatcher uses the existing 08:00/17:00 default times unchanged for Yoram.
 - **Reference:** GAP Domain 4 rows 1, 3. Spec §13.
 - **Dependencies:** D1-T5, D3-T1 (for the leads counts).
-- **Blocked:** YES — leads counts portion blocked on B2; field-exceptions portion is NOT blocked.
+- **Blocked:** NO — B2 resolved (2026-07-01); leads portion now unblocked. `IncomingLead` columns: `id`, `subject`, `body`, `fromName`, `fromEmail`, `receivedAt`, `status`, `ownerId`, `taskId`, `notifiedAt`.
 
 #### D4-T2 — Dispatcher branch Yoram vs. Sasha vs. other elevated
 - **What to do:** per K3, extend `src/scheduler/jobs/digestDispatcher.ts isElevated` branching (line 119) so Yoram routes to D4-T1, Sasha routes to D3-T2, and the residual elevated path is handled per K4 (kept / removed / env-gated — see `X-T5`).
@@ -347,7 +347,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** no (technically; depends on Meta turnaround).
 
 #### D5-T6 — Polling-job template (shared by Task→inspection creation + lead-assignment detection)
-- **What to do:** if K2 resolves to option (b) polling, factor out a shared polling-job template (mirroring `completionNotifier.ts`). Used by D2-T2 (Task flag → create `TaskField`) and D3-T3 (lead `assignedTo` flip → alert worker).
+- **What to do:** if K2 resolves to option (b) polling, factor out a shared polling-job template (mirroring `completionNotifier.ts`). Used by D2-T2 (Task flag → create `TaskField`) and D3-T3 (`IncomingLead.ownerId` flip null→user → alert worker).
 - **Definition of Done:** one reusable polling helper exists; both consumers use it; dedup tables are isolated per consumer.
 - **Reference:** GAP Domain 1 row 4, Domain 3 row 3, Domain 5 cross-cutting. Spec §1.
 - **Dependencies:** K2.
@@ -428,7 +428,7 @@ Per Section 14 of the spec, deferred — NO tasks created for any of these:
 
 ## 6. Suggested execution order — milestones
 
-- **M1: External inputs received + decisions made.** Resolve B1 (InspectionType catalog) and B2 (`lead incoming` columns); close K1, K2, K3, K4, K5, K6, K7. Nothing else can fully ship without these.
+- **M1: External inputs received + decisions made.** ✅ B1 resolved (proceed with clear מק"טים). ✅ B2 resolved (`IncomingLead` table + columns confirmed). ✅ K1–K7 closed. **Only K2 remains** (Task→inspection mechanism).
 - **M2: DB foundation.** `D1-T1`, `D1-T2`, `D1-T3`, `D1-T4`, `D1-T5`, `D1-T6`. (Catalog seed `D1-T7` slides in as soon as B1 lands.)
 - **M3: Cross-cutting infra prerequisites.** `D5-T1` (inspector detection + role-based menu routing), `D5-T2` (voice), `D5-T3` (AI intents), `D5-T4` (button policy), `D5-T6` (shared polling template if K2 = polling).
 - **M4: Worker inspections menu + card + button replies.** `D2-T1`, `D2-T2`, `D2-T3`. End-to-end: a worker can confirm/decline/need-info on an assigned inspection.
