@@ -1,11 +1,11 @@
 /**
- * D4-T1 — Yoram (Galit v2) manager exceptions digest — FIELD portion only.
+ * D4-T1 — Yoram (Galit v2) manager exceptions digest — FIELD + LEADS portions.
  *
  * Pure formatter tests. Coverage:
  *  - formatGalitManagerMorning / formatGalitManagerEndOfDay:
  *      empty-exceptions single-liner, N exceptions numbered list,
  *      all-null worker/customer fallbacks, problemType-only note fallback,
- *      counts row formatting, leads TODO placeholder present in both.
+ *      counts row formatting, leads line rendered with real counts.
  *
  * Dispatcher routing (YORAM_PHONE match vs. legacy paths) lives in
  * `galitManagerDispatcher.test.ts` — kept in a separate file because
@@ -21,6 +21,7 @@ import type {
   FieldExceptionCounts,
   OpenFieldException,
 } from '../services/exceptionsQueries';
+import type { YoramLeadCounts } from '../services/incomingLeads';
 
 const ZERO_COUNTS: FieldExceptionCounts = {
   finishedFieldToday:  0,
@@ -38,6 +39,9 @@ const SAMPLE_COUNTS: FieldExceptionCounts = {
   notClosedDayToday:   1,
 };
 
+const ZERO_LEADS: YoramLeadCounts = { overnight: 0, unassigned: 0 };
+const SAMPLE_LEADS: YoramLeadCounts = { overnight: 5, unassigned: 3 };
+
 function makeException(overrides: Partial<OpenFieldException> = {}): OpenFieldException {
   return {
     taskFieldId:       'tf-x',
@@ -53,11 +57,12 @@ function makeException(overrides: Partial<OpenFieldException> = {}): OpenFieldEx
 }
 
 describe('formatGalitManagerMorning', () => {
-  it('renders header + counts row + leads TODO + empty-exceptions one-liner when no open exceptions', () => {
+  it('renders header + counts row + leads line + empty-exceptions one-liner when no open exceptions', () => {
     const { text, params, buttons } = formatGalitManagerMorning({
       counts: ZERO_COUNTS,
       exceptions: [],
       user: { name: 'יורם' },
+      leadCounts: ZERO_LEADS,
     });
     // Header (Hebrew, no emoji).
     expect(text).toContain('סיכום גלית');
@@ -68,20 +73,34 @@ describe('formatGalitManagerMorning', () => {
     expect(text).toContain('עם בעיה 0');
     expect(text).toContain('ממתינות למידע 0');
     expect(text).toContain('לא סגרו יום 0');
-    // Leads B2 TODO placeholder — must be visually distinct.
-    expect(text).toContain('לידים:');
-    expect(text).toContain('B2');
+    // Leads line with real counts (no longer a B2 placeholder).
+    expect(text).toContain('לידים: 0 מהלילה · 0 לא שויכו');
+    // No legacy B2 placeholder.
+    expect(text).not.toContain('B2');
     // Empty state.
     expect(text).toContain('אין חריגים פתוחים');
     expect(text).not.toContain('פתוחים:');
     expect(text).not.toContain('1.');
-    // Template params: name + 5 counts, in the declared order.
-    expect(params).toEqual(['יורם', '0', '0', '0', '0', '0']);
+    // Template params: name + 5 counts + 2 lead counts.
+    expect(params).toEqual(['יורם', '0', '0', '0', '0', '0', '0', '0']);
     // No CTA button — Yoram reacts in the CRM.
     expect(buttons).toEqual([]);
   });
 
-  it('renders N exceptions as a numbered "פתוחים:" list with counts and leads TODO', () => {
+  it('renders lead counts correctly when non-zero', () => {
+    const { text, params } = formatGalitManagerMorning({
+      counts: ZERO_COUNTS,
+      exceptions: [],
+      user: { name: 'יורם' },
+      leadCounts: SAMPLE_LEADS,
+    });
+    expect(text).toContain('לידים: 5 מהלילה · 3 לא שויכו');
+    // Params include the lead counts at positions 6 and 7.
+    expect(params[6]).toBe('5');
+    expect(params[7]).toBe('3');
+  });
+
+  it('renders N exceptions as a numbered "פתוחים:" list with counts and leads line', () => {
     const exceptions: OpenFieldException[] = [
       makeException({
         taskFieldId: 'tf-1', workerName: 'דני',  customerName: 'קוקה קולה',
@@ -101,12 +120,12 @@ describe('formatGalitManagerMorning', () => {
       counts: SAMPLE_COUNTS,
       exceptions,
       user: { name: 'יורם' },
+      leadCounts: SAMPLE_LEADS,
     });
 
     // Counts populated from SAMPLE_COUNTS.
     expect(text).toContain('שטח: בוצעו 8 · לא אושרו 1 · עם בעיה 2 · ממתינות למידע 3 · לא סגרו יום 1');
-    expect(text).toContain('לידים:');
-    expect(text).toContain('B2');
+    expect(text).toContain('לידים: 5 מהלילה · 3 לא שויכו');
     // Numbered list body.
     expect(text).toContain('פתוחים:');
     expect(text).toContain('1. דני — קוקה קולה: לקוח לא היה במקום');
@@ -117,8 +136,8 @@ describe('formatGalitManagerMorning', () => {
     expect(text.indexOf('2. חיים')).toBeLessThan(text.indexOf('3. יוסי'));
     // Not the empty one-liner.
     expect(text).not.toContain('אין חריגים פתוחים');
-    // Template params reflect the 5 counts.
-    expect(params).toEqual(['יורם', '8', '1', '2', '3', '1']);
+    // Template params reflect the 5 field counts + 2 lead counts.
+    expect(params).toEqual(['יורם', '8', '1', '2', '3', '1', '5', '3']);
   });
 
   it('degrades gracefully when workerName / customerName are null', () => {
@@ -132,6 +151,7 @@ describe('formatGalitManagerMorning', () => {
       counts: ZERO_COUNTS,
       exceptions,
       user: { name: 'יורם' },
+      leadCounts: ZERO_LEADS,
     });
     expect(text).toContain('עובד לא ידוע');
     expect(text).toContain('לקוח לא ידוע');
@@ -149,6 +169,7 @@ describe('formatGalitManagerMorning', () => {
       counts: ZERO_COUNTS,
       exceptions,
       user: { name: 'יורם' },
+      leadCounts: ZERO_LEADS,
     });
     // From problemTypeMenu()[0].label — 'הלקוח לא ענה'.
     expect(text).toContain('הלקוח לא ענה');
@@ -165,6 +186,7 @@ describe('formatGalitManagerMorning', () => {
       counts: ZERO_COUNTS,
       exceptions,
       user: { name: 'יורם' },
+      leadCounts: ZERO_LEADS,
     });
     expect(text).toContain('1. עובד — לקוח: —');
   });
@@ -174,6 +196,7 @@ describe('formatGalitManagerMorning', () => {
       counts: ZERO_COUNTS,
       exceptions: [],
       user: { name: null },
+      leadCounts: ZERO_LEADS,
     });
     expect(text).toContain('סיכום גלית');
     expect(params[0]).toBe('');
@@ -181,23 +204,36 @@ describe('formatGalitManagerMorning', () => {
 });
 
 describe('formatGalitManagerEndOfDay', () => {
-  it('renders end-of-day header + counts + leads TODO + empty exceptions one-liner', () => {
+  it('renders end-of-day header + counts + leads line + empty exceptions one-liner', () => {
     const { text, params, buttons } = formatGalitManagerEndOfDay({
       counts: ZERO_COUNTS,
       exceptions: [],
       user: { name: 'יורם' },
+      leadCounts: ZERO_LEADS,
     });
     expect(text).toContain('סיכום סוף יום');
     expect(text).toContain('יורם');
     expect(text).toContain('שטח: בוצעו 0');
-    expect(text).toContain('לידים:');
-    expect(text).toContain('B2');
+    expect(text).toContain('לידים: 0 מהלילה · 0 לא שויכו');
+    expect(text).not.toContain('B2');
     expect(text).toContain('אין חריגים פתוחים');
-    expect(params).toEqual(['יורם', '0', '0', '0', '0', '0']);
+    expect(params).toEqual(['יורם', '0', '0', '0', '0', '0', '0', '0']);
     expect(buttons).toEqual([]);
   });
 
-  it('renders N exceptions numbered with counts and leads TODO', () => {
+  it('renders lead counts correctly when non-zero', () => {
+    const { text, params } = formatGalitManagerEndOfDay({
+      counts: ZERO_COUNTS,
+      exceptions: [],
+      user: { name: 'יורם' },
+      leadCounts: SAMPLE_LEADS,
+    });
+    expect(text).toContain('לידים: 5 מהלילה · 3 לא שויכו');
+    expect(params[6]).toBe('5');
+    expect(params[7]).toBe('3');
+  });
+
+  it('renders N exceptions numbered with counts and leads line', () => {
     const exceptions: OpenFieldException[] = [
       makeException({ workerName: 'דני', customerName: 'ק', note: 'ל לא היה' }),
       makeException({ workerName: 'חיים', customerName: 'י', note: 'חסר טופס' }),
@@ -206,13 +242,14 @@ describe('formatGalitManagerEndOfDay', () => {
       counts: SAMPLE_COUNTS,
       exceptions,
       user: { name: 'יורם' },
+      leadCounts: SAMPLE_LEADS,
     });
     expect(text).toContain('סיכום סוף יום — יורם');
     expect(text).toContain('שטח: בוצעו 8');
-    expect(text).toContain('לידים:');
+    expect(text).toContain('לידים: 5 מהלילה · 3 לא שויכו');
     expect(text).toContain('1. דני — ק: ל לא היה');
     expect(text).toContain('2. חיים — י: חסר טופס');
-    expect(params).toEqual(['יורם', '8', '1', '2', '3', '1']);
+    expect(params).toEqual(['יורם', '8', '1', '2', '3', '1', '5', '3']);
   });
 
   it('degrades on null worker/customer/note+problemType', () => {
@@ -226,6 +263,7 @@ describe('formatGalitManagerEndOfDay', () => {
       counts: ZERO_COUNTS,
       exceptions,
       user: { name: 'יורם' },
+      leadCounts: ZERO_LEADS,
     });
     expect(text).toContain('עובד לא ידוע');
     expect(text).toContain('לקוח לא ידוע');
@@ -243,6 +281,7 @@ describe('formatGalitManagerEndOfDay', () => {
       counts: ZERO_COUNTS,
       exceptions,
       user: { name: 'יורם' },
+      leadCounts: ZERO_LEADS,
     });
     // From problemTypeMenu()[3].label.
     expect(text).toContain('חסר ציוד');

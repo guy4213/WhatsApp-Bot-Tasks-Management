@@ -29,6 +29,7 @@ const getEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
 
 const getFieldExceptionCountsMock = vi.hoisted(() => vi.fn());
 const getOpenFieldExceptionsMock = vi.hoisted(() => vi.fn());
+const getYoramLeadCountsMock = vi.hoisted(() => vi.fn());
 
 const formatInspectorMorningMock = vi.hoisted(() => vi.fn());
 const formatManagerMorningMock = vi.hoisted(() => vi.fn());
@@ -56,6 +57,14 @@ vi.mock('../services/inspectionsQueries', () => ({
 vi.mock('../services/exceptionsQueries', () => ({
   getFieldExceptionCounts: getFieldExceptionCountsMock,
   getOpenFieldExceptions:  getOpenFieldExceptionsMock,
+}));
+vi.mock('../services/incomingLeads', () => ({
+  findOvernightUnassignedLeads: vi.fn(async () => []),
+  findActiveInspectors: vi.fn(async () => []),
+  getYoramLeadCounts: getYoramLeadCountsMock,
+}));
+vi.mock('../ai/leadSuggester', () => ({
+  suggestWorkerForLead: vi.fn(async () => ({ userId: null, reason: 'לא נמצאה התאמה' })),
 }));
 vi.mock('../services/tasks', () => ({
   getCompanyMorning: getCompanyMorningMock,
@@ -143,11 +152,13 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
       waitingForInfoToday: 3, notClosedDayToday: 1,
     });
     getOpenFieldExceptionsMock.mockResolvedValue([]);
+    getYoramLeadCountsMock.mockResolvedValue({ overnight: 4, unassigned: 2 });
     claimDigestSendMock.mockResolvedValue(true);
   });
 
   afterEach(() => {
     delete process.env.YORAM_PHONE;
+    delete process.env.LEGACY_MANAGER_DIGEST_ENABLED;
     vi.clearAllMocks();
   });
 
@@ -166,12 +177,14 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
 
     expect(getFieldExceptionCountsMock).toHaveBeenCalledWith('2026-06-30');
     expect(getOpenFieldExceptionsMock).toHaveBeenCalledWith('2026-06-30');
+    expect(getYoramLeadCountsMock).toHaveBeenCalledWith('2026-06-30');
     expect(formatGalitManagerMorningMock).toHaveBeenCalledTimes(1);
-    // Body shape: { counts, exceptions, user: { name } }.
+    // Body shape: { counts, exceptions, user: { name }, leadCounts }.
     const call = formatGalitManagerMorningMock.mock.calls[0][0];
     expect(call.user).toEqual({ name: 'יורם' });
     expect(call.counts.finishedFieldToday).toBe(8);
     expect(Array.isArray(call.exceptions)).toBe(true);
+    expect(call.leadCounts).toEqual({ overnight: 4, unassigned: 2 });
     // Legacy and inspector formatters must NOT have run.
     expect(formatManagerMorningMock).not.toHaveBeenCalled();
     expect(formatInspectorMorningMock).not.toHaveBeenCalled();
@@ -195,15 +208,17 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
     expect(formatGalitManagerEndOfDayMock).toHaveBeenCalledTimes(1);
     const call = formatGalitManagerEndOfDayMock.mock.calls[0][0];
     expect(call.user).toEqual({ name: 'יורם' });
+    expect(call.leadCounts).toEqual({ overnight: 4, unassigned: 2 });
     expect(formatManagerEndOfDayMock).not.toHaveBeenCalled();
     expect(getCompanyEndOfDayMock).not.toHaveBeenCalled();
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
-  // ── YORAM_PHONE unset — legacy paths preserved ──
+  // ── YORAM_PHONE unset — legacy paths preserved (requires LEGACY_MANAGER_DIGEST_ENABLED=true) ──
 
-  it('MORNING — YORAM_PHONE unset → ADMIN falls through to formatManagerMorning (legacy path preserved)', async () => {
-    // No YORAM_PHONE in the env.
+  it('MORNING — YORAM_PHONE unset + flag on → ADMIN falls through to formatManagerMorning (legacy path preserved)', async () => {
+    // No YORAM_PHONE in the env. X-T5: flag must be on for ADMIN to reach legacy path.
+    process.env.LEGACY_MANAGER_DIGEST_ENABLED = 'true';
     await fire(rowFor({ role: 'ADMIN', phone: YORAM_DB_PHONE, hm: '08:00', evening: false }));
 
     expect(formatGalitManagerMorningMock).not.toHaveBeenCalled();
@@ -214,7 +229,8 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
-  it('EVENING — YORAM_PHONE unset → ADMIN falls through to formatManagerEndOfDay', async () => {
+  it('EVENING — YORAM_PHONE unset + flag on → ADMIN falls through to formatManagerEndOfDay', async () => {
+    process.env.LEGACY_MANAGER_DIGEST_ENABLED = 'true';
     await fire(rowFor({ role: 'ADMIN', phone: YORAM_DB_PHONE, hm: '17:00', morning: false }));
 
     expect(formatGalitManagerEndOfDayMock).not.toHaveBeenCalled();
@@ -223,8 +239,9 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
-  it('MORNING — YORAM_PHONE empty string → treated as unset; legacy path runs', async () => {
+  it('MORNING — YORAM_PHONE empty string + flag on → treated as unset; legacy path runs', async () => {
     process.env.YORAM_PHONE = '   ';
+    process.env.LEGACY_MANAGER_DIGEST_ENABLED = 'true';
     await fire(rowFor({ role: 'ADMIN', phone: YORAM_DB_PHONE, hm: '08:00', evening: false }));
     expect(formatGalitManagerMorningMock).not.toHaveBeenCalled();
     expect(formatManagerMorningMock).toHaveBeenCalledTimes(1);
@@ -232,8 +249,9 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
 
   // ── Non-Yoram ADMIN with YORAM_PHONE set ──
 
-  it('MORNING — different ADMIN phone with YORAM_PHONE set → still routes to legacy formatManagerMorning', async () => {
+  it('MORNING — different ADMIN phone with YORAM_PHONE set + flag on → still routes to legacy formatManagerMorning', async () => {
     process.env.YORAM_PHONE = YORAM_ENV_PHONE;
+    process.env.LEGACY_MANAGER_DIGEST_ENABLED = 'true';
     // Different admin: same 972 prefix, different suffix.
     await fire(rowFor({ role: 'ADMIN', phone: '972509999999', hm: '08:00', evening: false }));
 

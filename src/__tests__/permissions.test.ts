@@ -41,9 +41,10 @@ describe('getFieldEditPermission', () => {
     expect(getFieldEditPermission(sales,   'type')).toBe('FREE_EDIT');
   });
 
-  it('dueDate requires manager approval', () => {
-    expect(getFieldEditPermission(sales,   'dueDate')).toBe('REQUIRES_MANAGER_APPROVAL');
-    expect(getFieldEditPermission(manager, 'dueDate')).toBe('REQUIRES_MANAGER_APPROVAL');
+  it('dueDate is FORBIDDEN for all roles (X-T2 removed the manager-approval pipeline)', () => {
+    expect(getFieldEditPermission(sales,   'dueDate')).toBe('FORBIDDEN');
+    expect(getFieldEditPermission(manager, 'dueDate')).toBe('FORBIDDEN');
+    expect(getFieldEditPermission(admin,   'dueDate')).toBe('FORBIDDEN');
   });
 
   it('reassign/relink fields return ELEVATED_ONLY for MANAGER/ADMIN', () => {

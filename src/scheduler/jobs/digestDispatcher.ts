@@ -26,7 +26,11 @@ import {
   getFieldExceptionCounts, getOpenFieldExceptions,
 } from '../../services/exceptionsQueries';
 import { normalizeIsraeliPhone } from '../../auth/phoneNormalizer';
-import { findOvernightUnassignedLeads, findActiveInspectors } from '../../services/incomingLeads';
+import {
+  findOvernightUnassignedLeads,
+  findActiveInspectors,
+  getYoramLeadCounts,
+} from '../../services/incomingLeads';
 import { suggestWorkerForLead } from '../../ai/leadSuggester';
 
 const log = moduleLogger('digestDispatcher');
@@ -146,7 +150,7 @@ export async function runDigestDispatcher(): Promise<void> {
     const morningDue = row.morning_enabled && isDigestDue(row.morning_time, row.local_hm);
     const eveningDue = row.evening_enabled && isDigestDue(row.evening_time, row.local_hm);
     if (morningDue) {
-      await dispatchOne(row, 'MORNING', yoramPhoneNormalized);
+      await dispatchOne(row, 'MORNING', yoramPhoneNormalized, sashaPhoneNormalized);
       // D2-T9 — piggyback on the morning slot per the task-spec design
       // decision. Fires ONLY for inspector rows (K1: role !== 'ADMIN') AND
       // when the Yoram allow-list did NOT redirect this row to the exceptions
@@ -160,7 +164,7 @@ export async function runDigestDispatcher(): Promise<void> {
         await maybeDispatchEquipmentReminder(row);
       }
     }
-    if (eveningDue) await dispatchOne(row, 'EVENING', yoramPhoneNormalized);
+    if (eveningDue) await dispatchOne(row, 'EVENING', yoramPhoneNormalized, sashaPhoneNormalized);
   }
 }
 
@@ -234,7 +238,32 @@ async function dispatchOne(
   row: DueUserRow,
   type: PrimaryDigestType,
   yoramPhoneNormalized: string | null,
+  sashaPhoneNormalized: string | null,
 ): Promise<void> {
+  // X-T5 (K4 option c) — legacy ADMIN digest gate.
+  // For ADMIN users who are NOT Yoram and NOT Sasha, check the feature flag
+  // LEGACY_MANAGER_DIGEST_ENABLED. When the flag is off (default), skip early
+  // WITHOUT claiming a dedup row (so a future flag-on enablement will not be
+  // blocked by a stale claim). Sasha normally doesn't reach dispatchOne (she
+  // `continue`s in the loop), but we guard her here defensively.
+  // Yoram has already been handled separately in buildContent so he would still
+  // pass through here — but since his phone match in buildContent is what makes
+  // his digest useful, we only gate non-Yoram ADMINs.
+  if (row.role === 'ADMIN') {
+    const rowPhoneNorm = normalizeIsraeliPhone(row.user_phone);
+    const isYoramRow = yoramPhoneNormalized && rowPhoneNorm === yoramPhoneNormalized;
+    const isSashaRow = sashaPhoneNormalized && rowPhoneNorm === sashaPhoneNormalized;
+    if (!isYoramRow && !isSashaRow) {
+      if (process.env.LEGACY_MANAGER_DIGEST_ENABLED !== 'true') {
+        log.debug(
+          { userId: row.user_id, type },
+          'Legacy ADMIN digest DISABLED for non-Yoram/non-Sasha admin user',
+        );
+        return; // skip — do NOT claim the dedup slot
+      }
+    }
+  }
+
   // INSERT-first dedup: only the instance that wins the claim sends.
   let claimed = false;
   try {
@@ -286,14 +315,15 @@ async function buildContent(
   if (yoramPhoneNormalized) {
     const rowPhoneNormalized = normalizeIsraeliPhone(row.user_phone);
     if (rowPhoneNormalized && rowPhoneNormalized === yoramPhoneNormalized) {
-      const [counts, exceptions] = await Promise.all([
+      const [counts, exceptions, leadCounts] = await Promise.all([
         getFieldExceptionCounts(row.local_date),
         getOpenFieldExceptions(row.local_date),
+        getYoramLeadCounts(row.local_date),
       ]);
       const user = { name: row.user_name };
       return type === 'MORNING'
-        ? formatGalitManagerMorning({ counts, exceptions, user })
-        : formatGalitManagerEndOfDay({ counts, exceptions, user });
+        ? formatGalitManagerMorning({ counts, exceptions, user, leadCounts })
+        : formatGalitManagerEndOfDay({ counts, exceptions, user, leadCounts });
     }
   }
 

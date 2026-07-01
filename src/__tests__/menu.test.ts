@@ -65,13 +65,10 @@ describe('menuItemsFor', () => {
     ]);
     // K5: no digest-settings entry in the v2 inspector menu.
     expect(items.some((i) => i.action.kind === 'digest_settings')).toBe(false);
-    // The old CRM employee kinds are not emitted here (they remain in the type
-    // for other emitters until the X-series dismantle tasks remove them).
+    // The old CRM employee kinds are not emitted here.
     expect(items.some((i) => i.action.kind === 'list_tasks')).toBe(false);
     expect(items.some((i) => i.action.kind === 'free_text')).toBe(false);
     expect(items.some((i) => i.action.kind === 'guide')).toBe(false);
-    expect(items.some((i) => i.action.kind === 'team_workload')).toBe(false);
-    expect(items.some((i) => i.action.kind === 'pending_approvals')).toBe(false);
   });
 
   it('K1: MANAGER users now see the inspector menu (only ADMIN gets the legacy manager menu)', () => {
@@ -79,13 +76,14 @@ describe('menuItemsFor', () => {
     expect(menuItemsFor(manager)).toEqual(menuItemsFor(employee));
   });
 
-  it('ADMIN gets the (unchanged) 8-item legacy manager menu until D4-T1 rewrites it', () => {
+  it('ADMIN gets the 6-item manager menu (X-T2/X-T4 removed team_workload and pending_approvals)', () => {
     const items = menuItemsFor(admin);
-    expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(items[0].action.kind).toBe('team_workload');
-    expect(items.some((i) => i.action.kind === 'pending_approvals')).toBe(true);
-    expect(items[6].action.kind).toBe('digest_settings');
-    expect(items[7].action.kind).toBe('free_text');
+    expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(items[0].action.kind).toBe('guide');
+    expect(items[4].action.kind).toBe('digest_settings');
+    expect(items[5].action.kind).toBe('free_text');
+    // No team_workload or pending_approvals items.
+    expect(items.some((i) => i.action.kind === 'list_tasks' && (i.action as { kind: 'list_tasks'; scope: string }).scope === 'own')).toBe(false);
     // Legacy manager lists are company-wide (scope 'all').
     const listScopes = items
       .filter((i) => i.action.kind === 'list_tasks')

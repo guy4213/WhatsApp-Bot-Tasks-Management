@@ -21,11 +21,8 @@ import { setViewOwners, getViewOwners, clearViewOwners } from '../services/viewC
 import { setActiveTask, getActiveTask } from '../services/taskContext';
 import { getHistory, appendTurn } from '../services/chatHistory';
 import {
-  listTasks, getTaskById, getAllowedTaskTypes, getAllowedPriorities, getTeamWorkload, findUsersByName,
-  findCustomersByName, findLeadsByName, findProjectsByName,
+  listTasks, getTaskById, getAllowedTaskTypes, getAllowedPriorities, findUsersByName,
 } from '../services/tasks';
-import { getLatestPendingForUser, getPendingApprovals } from '../services/pendingActions';
-import { dispatchInternal } from '../utils/internalApi';
 import { sendTextMessage } from '../whatsapp/sender';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
@@ -197,13 +194,6 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
 // ── Threshold routing ──────────────────────────────────────────────────────────
 
 async function routeIntent(user: ResolvedUser, intent: AIIntentResult): Promise<void> {
-  // 0. Approval/decline of a pending action — resolve to the user's latest pending
-  //    action and act immediately (no confirm gate; this IS the confirmation).
-  if (intent.intent === 'confirm_pending_action' || intent.intent === 'decline_pending_action') {
-    await executeIntent(user, intent);
-    return;
-  }
-
   // 1. Unknown or very low confidence → use the model's Hebrew clarification when it
   //    provided one (status-change / out-of-scope answers), else ask to rephrase.
   //    Either way, record the event in the audit log.
@@ -218,11 +208,10 @@ async function routeIntent(user: ResolvedUser, intent: AIIntentResult): Promise<
   }
 
   // 2. Missing required info → ask for the first missing field.
-  // But if the only thing missing is WHICH task, and the user just acted on one,
+  // If the only thing missing is WHICH task and the user just acted on one,
   // reuse that active task instead of asking again (resolveOrAsk picks it up).
-  const TASK_TARGETING = new Set(['edit_field', 'edit_duedate', 'reassign_task', 'relink_task', 'get_task']);
   if (
-    TASK_TARGETING.has(intent.intent) &&
+    intent.intent === 'get_task' &&
     intent.missing_fields.includes('task_reference') &&
     getActiveTask(user.phone)
   ) {
@@ -382,21 +371,6 @@ async function continueConversation(
     return;
   }
 
-  if (ctx.awaiting === 'read_confirm') {
-    if (YES_RE.test(trimmed)) {
-      await clearContext(user.phone);
-      await runListTasks(user, resolveListQuery(user, ctxIntent));
-    } else if (NO_RE.test(trimmed)) {
-      await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'בוטל.' });
-    } else {
-      // Treat as a new request
-      await clearContext(user.phone);
-      await handleAIMessage(user, text);
-    }
-    return;
-  }
-
   if (ctx.awaiting === 'task_disambig' && ctx.candidateTaskIds) {
     const idx = parseInt(trimmed, 10);
     if (!Number.isInteger(idx) || idx < 1 || idx > ctx.candidateTaskIds.length) {
@@ -406,55 +380,6 @@ async function continueConversation(
     const taskId = ctx.candidateTaskIds[idx - 1];
     await clearContext(user.phone);
     await executeIntent(user, ctxIntent, taskId);
-    return;
-  }
-
-  if (ctx.awaiting === 'owner_disambig' && ctx.candidateUserIds) {
-    const idx = parseInt(trimmed, 10);
-    if (!Number.isInteger(idx) || idx < 1 || idx > ctx.candidateUserIds.length) {
-      await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${ctx.candidateUserIds.length}.` });
-      return;
-    }
-    const intent = ctxIntent;
-    intent.params.ownerId = ctx.candidateUserIds[idx - 1];
-    intent.params._ownerResolved = true;   // concrete id now — skip re-resolution
-    await clearContext(user.phone);
-    await executeIntent(user, intent);
-    return;
-  }
-
-  if (ctx.awaiting === 'link_disambig' && ctx.candidateLinkIds && ctx.linkField) {
-    const idx = parseInt(trimmed, 10);
-    if (!Number.isInteger(idx) || idx < 1 || idx > ctx.candidateLinkIds.length) {
-      await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${ctx.candidateLinkIds.length}.` });
-      return;
-    }
-    const intent = ctxIntent;
-    intent.params[ctx.linkField] = ctx.candidateLinkIds[idx - 1];
-    intent.params._linkResolved = true;    // concrete id now — skip re-resolution
-    await clearContext(user.phone);
-    await executeIntent(user, intent);
-    return;
-  }
-
-  if (ctx.awaiting === 'create_date') {
-    await clearContext(user.phone);
-    const intent = ctxIntent;
-    const title = String(intent.params.title ?? 'משימה');
-
-    // Resolve the reply to an ISO date via the AI ("מחר"/"יום ראשון ב-3" → ISO).
-    // If nothing date-like is found (e.g. "ללא תאריך"), create without a due date.
-    try {
-      const [allowedTypes, allowedPriorities] = await Promise.all([getAllowedTaskTypes(), safePriorities()]);
-      const probe = await parseIntent(`צור משימה ${title} ל${trimmed}`, { user, allowedTypes, allowedPriorities });
-      if (probe.intent === 'create_task' && typeof probe.params.dueDate === 'string') {
-        intent.params.dueDate = probe.params.dueDate;
-      }
-    } catch (err) {
-      log.error({ err }, 'create_date re-parse failed (creating without date)');
-    }
-
-    await executeIntent(user, intent); // _dateAsked already true → no re-ask loop
     return;
   }
 
@@ -471,126 +396,14 @@ async function executeIntent(
   resolvedTaskId?: string,
 ): Promise<void> {
   switch (intent.intent) {
-    case 'confirm_pending_action':
-    case 'decline_pending_action': {
-      const approve = intent.intent === 'confirm_pending_action';
-
-      // Always act on the single MOST-RECENT pending action this user can resolve —
-      // their own action awaiting confirmation, or (for managers) an employee request
-      // awaiting approval. Latest wins; older ones are ignored. No "which one?" prompts.
-      const own = await getLatestPendingForUser(user.id);
-      const approvals = user.isElevated ? await getPendingApprovals() : [];
-
-      const candidates = [
-        ...(own ? [{ kind: 'own' as const, action: own }] : []),
-        ...approvals.map((a) => ({ kind: 'approval' as const, action: a })),
-      ];
-      if (candidates.length === 0) {
-        await sendTextMessage({ to: user.phone, text: 'אין כרגע פעולה הממתינה לאישור.' });
-        return;
-      }
-
-      candidates.sort(
-        (a, b) => new Date(b.action.createdAt).getTime() - new Date(a.action.createdAt).getTime(),
-      );
-      const latest = candidates[0];
-
-      if (latest.kind === 'own') {
-        const decision = approve ? 'CONFIRM' : 'CANCEL';
-        await dispatchInternal(user.phone, '/tasks/confirm', { pendingActionId: latest.action.id, decision }, 'POST');
-      } else {
-        const decision = approve ? 'APPROVE' : 'REJECT';
-        await dispatchInternal(user.phone, '/tasks/approve', { pendingActionId: latest.action.id, decision }, 'POST');
-      }
-      return;
-    }
-
     case 'help':
       await sendTextMessage({ to: user.phone, text: helpText() });
-      return;
-
-    case 'team_workload':
-      await doTeamWorkload(user);
-      return;
-
-    case 'list_tasks':
-      await doListTasks(user, intent);
       return;
 
     case 'get_task': {
       const id = await resolveOrAsk(user, intent, resolvedTaskId);
       if (!id) return;
       await doGetTask(user, id);
-      return;
-    }
-
-    case 'create_task':
-      // Creating a task asks for a date/time first when none was given. The user
-      // can answer with a date, or explicitly opt out ("ללא תאריך").
-      if (!intent.params.dueDate && !intent.params._dateAsked) {
-        intent.params._dateAsked = true;
-        await setContext(user.phone, { awaiting: 'create_date', intent });
-        await sendTextMessage({
-          to: user.phone,
-          text: 'לאיזה תאריך ושעה לפתוח את המשימה? (אפשר לכתוב "ללא תאריך")',
-        });
-        return;
-      }
-      // Resolve a named assignee (params.ownerId) to a concrete user id, asking
-      // the user to choose when several active employees match the name. Skips
-      // when no assignee was named (defaults to the caller in POST /tasks).
-      if (!(await resolveOwnerReference(user, intent))) return;
-      await dispatchInternal(user.phone, '/tasks', buildCreateBody(intent), 'POST');
-      return;
-
-    case 'edit_field': {
-      const id = await resolveOrAsk(user, intent, resolvedTaskId);
-      if (!id) return;
-      await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: intent.field, value: intent.new_value }, 'PATCH');
-      await noteWorkingTask(user.phone);
-      return;
-    }
-
-    case 'edit_duedate': {
-      const id = await resolveOrAsk(user, intent, resolvedTaskId);
-      if (!id) return;
-      await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: 'dueDate', value: intent.new_value }, 'PATCH');
-      await noteWorkingTask(user.phone);
-      return;
-    }
-
-    case 'reassign_task': {
-      // Carry the resolved task id through a possible owner-disambiguation
-      // round-trip (re-entry calls executeIntent without resolvedTaskId).
-      const id = await resolveOrAsk(user, intent, resolvedTaskId ?? (intent.params._taskId as string | undefined));
-      if (!id) return;
-      intent.params._taskId = id;
-      // Resolve the target owner NAME → user id (with disambiguation); the ownerId
-      // column is an FK, so a raw name would fail the update. Stops here (returns
-      // false) when it has asked the user to pick among several matches.
-      if (!(await resolveOwnerReference(user, intent))) return;
-      await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: 'ownerId', value: intent.params.ownerId }, 'PATCH');
-      await noteWorkingTask(user.phone);
-      return;
-    }
-
-    case 'relink_task': {
-      // Carry the resolved task id through a possible link-disambiguation
-      // round-trip (re-entry calls executeIntent without resolvedTaskId).
-      const id = await resolveOrAsk(user, intent, resolvedTaskId ?? (intent.params._taskId as string | undefined));
-      if (!id) return;
-      intent.params._taskId = id;
-      const linkField = (['customerId', 'leadId', 'projectId'] as const).find((f) => intent.params[f] !== undefined);
-      if (!linkField) {
-        await sendTextMessage({ to: user.phone, text: 'לא צוין לקוח/ליד/פרויקט לקישור.' });
-        return;
-      }
-      // Resolve the target entity NAME → its id (with disambiguation); the link
-      // columns are FKs, so a raw name would fail the update. Stops here (returns
-      // false) when it has asked the user to pick among several matches.
-      if (!(await resolveLinkReference(user, intent))) return;
-      await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: linkField, value: intent.params[linkField] }, 'PATCH');
-      await noteWorkingTask(user.phone);
       return;
     }
 
@@ -735,100 +548,7 @@ interface ListQuery {
   ownerNames?: string[];  // for display
 }
 
-/**
- * Resolve a named-employee filter on intent.params.owners (one or more names) to
- * user ids stored back on intent.params.owner_ids/owner_names. Returns false when it
- * has already replied to the user (denied / not-found / ambiguous) and routing should stop.
- */
-async function resolveOwnerFilter(user: ResolvedUser, intent: AIIntentResult): Promise<boolean> {
-  const p = intent.params;
-  if (Array.isArray(p.owner_ids)) return true; // already resolved (read_confirm re-entry)
-
-  const raw = Array.isArray(p.owners) ? p.owners : typeof p.owner === 'string' ? [p.owner] : [];
-  const refs = raw.map((s) => String(s).trim()).filter(Boolean);
-  if (refs.length === 0) return true; // no employee filter requested
-
-  // Viewing another employee's tasks is open to everyone (read-only). Writes stay
-  // gated downstream (canEditTask / canCreateForOthers), so no role check here.
-
-  const ids: string[] = [];
-  const names: string[] = [];
-  const notFound: string[] = [];
-  let ambiguous: { ref: string; options: string[] } | null = null;
-
-  for (const ref of refs) {
-    const matches = await findUsersByName(ref);
-    if (matches.length === 0) notFound.push(ref);
-    else if (matches.length > 1 && !ambiguous) ambiguous = { ref, options: matches.map((m) => m.name) };
-    else if (matches.length === 1) { ids.push(matches[0].id); names.push(matches[0].name); }
-  }
-
-  if (notFound.length > 0) {
-    await sendTextMessage({ to: user.phone, text: `לא מצאתי עובד פעיל בשם: ${notFound.join(', ')}.` });
-    return false;
-  }
-  if (ambiguous) {
-    await sendTextMessage({
-      to: user.phone,
-      text: `נמצאו כמה עובדים בשם "${ambiguous.ref}":\n${ambiguous.options.map((n) => `• ${n}`).join('\n')}\nציין שם מלא יותר.`,
-    });
-    return false;
-  }
-
-  p.owner_ids = ids;
-  p.owner_names = names;
-  return true;
-}
-
-/** Resolve the AI params into a concrete, validated list query. */
-function resolveListQuery(user: ResolvedUser, intent: AIIntentResult): ListQuery {
-  const p = intent.params;
-  const validFilters = ['today', 'this_week', 'open', 'next_deadline', 'overdue', 'unlinked', 'all'];
-  const filterRaw = String(p.filter ?? 'all');
-  const filter = (validFilters.includes(filterRaw) ? filterRaw : 'all') as ListQuery['filter'];
-
-  // Scope: managers/admins default to TEAM-WIDE; own-only when they intentionally ask
-  // ("שלי"). Non-elevated users are always own-scoped (the service re-clamps anyway).
-  const rawScope = p.scope == null ? undefined : String(p.scope);
-  const scope: 'own' | 'all' =
-    rawScope === 'own' ? 'own'
-    : rawScope === 'all' ? 'all'
-    : user.isElevated ? 'all' : 'own';
-
-  // Default to createdAt — only use dueDate when the user intentionally asked about deadlines.
-  const dateField = String(p.date_field ?? 'createdAt') === 'dueDate' ? 'dueDate' : 'createdAt';
-
-  const strOrUndef = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
-  const dateFrom = strOrUndef(p.date_from);
-  let dateTo = strOrUndef(p.date_to);
-  if (dateFrom && !dateTo) dateTo = dateFrom; // single explicit day
-
-  // Employee filter already resolved to ids (see doListTasks) — persists across a
-  // read_confirm round-trip because it lives in intent.params.
-  const ownerIds = Array.isArray(p.owner_ids) ? p.owner_ids.map(String) : undefined;
-  const ownerNames = Array.isArray(p.owner_names) ? p.owner_names.map(String) : undefined;
-
-  return { filter, scope, dateField, dateFrom, dateTo, ownerIds, ownerNames };
-}
-
-async function doListTasks(user: ResolvedUser, intent: AIIntentResult): Promise<void> {
-  // Resolve a named-employee filter ("המשימות של יאיר ויורם") to user ids once,
-  // baking them into intent.params so they survive a read_confirm round-trip.
-  if (!(await resolveOwnerFilter(user, intent))) return;
-
-  const q = resolveListQuery(user, intent);
-
-  // Date-scoped reads: describe the action in plain Hebrew and wait for approval.
-  if (q.dateFrom || q.dateTo) {
-    await setContext(user.phone, { awaiting: 'read_confirm', intent });
-    await sendTextMessage({ to: user.phone, text: `${describeListQuery(q)}\nלהציג? השב "כן" או "לא".` });
-    return;
-  }
-
-  await runListTasks(user, q);
-}
-
-/** Actually fetch + render the list (called directly, or after read_confirm approval). */
+/** Fetch + render the task list for menu and digest commands. */
 async function runListTasks(user: ResolvedUser, q: ListQuery): Promise<void> {
   log.info(
     { userId: user.id, scope: q.scope, filter: q.filter, dateField: q.dateField, owners: q.ownerIds?.length ?? 0 },
@@ -914,34 +634,6 @@ async function runListTasks(user: ResolvedUser, q: ListQuery): Promise<void> {
   await appendTurn(user.phone, 'assistant', `הצגתי ${tasks.length} משימות${ownerNote}: ${summaryItems}`);
 }
 
-/** Team workload view (manager/admin): open-task load per employee. */
-async function doTeamWorkload(user: ResolvedUser): Promise<void> {
-  if (!user.isElevated) {
-    await auditEvent(user, 'team_workload', null, 'SKIPPED', 'not elevated');
-    await sendTextMessage({ to: user.phone, text: 'התצוגה הזו זמינה למנהלים בלבד.' });
-    return;
-  }
-
-  const rows = await getTeamWorkload();
-  await auditEvent(user, 'team_workload', null, 'SUCCESS');
-
-  if (rows.length === 0) {
-    await sendTextMessage({ to: user.phone, text: 'אין כרגע משימות פתוחות לאף עובד.' });
-    return;
-  }
-
-  const lines = rows.map((r) => {
-    const flags: string[] = [];
-    if (r.overdueCount)  flags.push(`⚠️ ${r.overdueCount} באיחור`);
-    if (r.dueTodayCount) flags.push(`🔴 ${r.dueTodayCount} להיום`);
-    const extra = flags.length ? ` (${flags.join(', ')})` : '';
-    return `👤 ${r.ownerName}: ${r.openCount} פתוחות${extra}`;
-  });
-
-  await sendTextMessage({ to: user.phone, text: `📊 עומס משימות בצוות:\n${lines.join('\n')}` });
-  await appendTurn(user.phone, 'assistant', `הצגתי עומס משימות בצוות (${rows.length} עובדים).`);
-}
-
 // ── Role-based numbered menu ────────────────────────────────────────────────────
 // V1 is a numbered TEXT menu only (no WhatsApp interactive list messages). It is
 // opened ONLY by an exact trigger word; all other free text still goes straight to
@@ -971,14 +663,6 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
     case 'list_tasks':
       await clearContext(user.phone);
       await runListTasks(user, { filter: action.filter, scope: action.scope, dateField: action.dateField });
-      return;
-    case 'team_workload':
-      await clearContext(user.phone);
-      await doTeamWorkload(user);
-      return;
-    case 'pending_approvals':
-      await clearContext(user.phone);
-      await doPendingApprovals(user);
       return;
     case 'digest_settings':
       await showDigestSettings(user);
@@ -1737,27 +1421,6 @@ async function handleCallbackCustomerNoteReply(user: ResolvedUser, raw: string):
   await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
 }
 
-/** Pending dueDate-change approvals (manager/admin) — confirm via "אשר <id>" / "דחה <id>". */
-async function doPendingApprovals(user: ResolvedUser): Promise<void> {
-  if (!user.isElevated) {
-    await sendTextMessage({ to: user.phone, text: 'אישורים ממתינים זמינים למנהלים בלבד.' });
-    return;
-  }
-  const approvals = await getPendingApprovals();
-  if (approvals.length === 0) {
-    await sendTextMessage({ to: user.phone, text: 'אין כרגע אישורים ממתינים.' });
-    return;
-  }
-  const lines = approvals.map((a, i) => {
-    const title = typeof a.payload?.taskTitle === 'string' ? a.payload.taskTitle : '';
-    const nv = a.payload?.new_value;
-    const what = title ? `"${title}"` : (a.targetTaskId ?? a.id);
-    const detail = nv != null ? ` → ${String(nv)}` : '';
-    return `${i + 1}. ${what}${detail}\n   לאישור: "אשר ${a.id}" · לדחייה: "דחה ${a.id}"`;
-  });
-  await sendTextMessage({ to: user.phone, text: `⏳ אישורים ממתינים (${approvals.length}):\n${lines.join('\n')}` });
-}
-
 // ── Deterministic digest follow-up commands (buttons + exact text) ──────────────
 // Routes a tapped digest quick-reply (its payload id) or the exact Hebrew command
 // to a fixed action WITHOUT the AI parser. Team views are elevated-only, so an
@@ -1946,21 +1609,6 @@ function renderTaskLine(t: TaskListItem, q: ListQuery, now: Date): string {
 }
 
 /** A plain-Hebrew description of the read about to run (no SQL). */
-function describeListQuery(q: ListQuery): string {
-  const scopeTxt = q.scope === 'all' ? 'של כל המשתמשים' : 'שלך';
-  const fieldTxt = q.dateField === 'createdAt' ? 'שנוצרו' : 'עם תאריך יעד';
-  const timeTxt  = q.dateField === 'createdAt' ? ' (כולל שעת יצירה)' : ' (כולל שעה)';
-  const statusTxt = q.filter === 'open' ? ' (פתוחות בלבד)' : '';
-
-  let dateTxt: string;
-  if (q.dateFrom && q.dateTo && q.dateFrom === q.dateTo) dateTxt = `בתאריך ${fmtDateStr(q.dateFrom)}`;
-  else if (q.dateFrom && q.dateTo) dateTxt = `בין ${fmtDateStr(q.dateFrom)} ל-${fmtDateStr(q.dateTo)}`;
-  else if (q.dateFrom) dateTxt = `מתאריך ${fmtDateStr(q.dateFrom)}`;
-  else dateTxt = `עד תאריך ${fmtDateStr(q.dateTo as string)}`;
-
-  return `אציג את המשימות ${scopeTxt} ${fieldTxt} ${dateTxt}${statusTxt}${timeTxt}.`;
-}
-
 const STATUS_LABELS: Record<string, string> = {
   OPEN: 'פתוח', IN_PROGRESS: 'בתהליך', DONE: 'בוצע',
 };
@@ -2018,113 +1666,6 @@ async function doGetTask(user: ResolvedUser, taskId: string): Promise<void> {
 
 // ── Misc helpers ────────────────────────────────────────────────────────────────
 
-/**
- * Resolve the named owner on intent.params.ownerId (used by create_task and
- * reassign_task) to a concrete user id. Uses substring matching over ACTIVE
- * employees (findUsersByName), so a partial name like "גיא" finds "גיא פרנסס".
- * When several match, asks the user to pick by number (awaiting: 'owner_disambig')
- * and returns false so routing stops until they reply. Returns true when
- * resolution is complete (or no owner was named — create then defaults to the
- * caller). Resolving here is required: the ownerId column is an FK, so passing a
- * raw name to the DB update would fail.
- */
-async function resolveOwnerReference(user: ResolvedUser, intent: AIIntentResult): Promise<boolean> {
-  const p = intent.params;
-  if (p._ownerResolved) return true;                 // already a concrete id (disambig re-entry)
-  const ref = typeof p.ownerId === 'string' ? p.ownerId.trim() : '';
-  if (!ref) return true;                              // no owner named → caller owns it
-
-  const matches = await findUsersByName(ref);
-  if (matches.length === 0) {
-    await sendTextMessage({ to: user.phone, text: `לא מצאתי עובד פעיל בשם "${ref}".` });
-    return false;
-  }
-  if (matches.length === 1) {
-    p.ownerId = matches[0].id;
-    p._ownerResolved = true;
-    return true;
-  }
-
-  // Several active employees match → ask the user to choose by number.
-  const lines = matches.map((m, i) => `${i + 1}. ${m.name}`);
-  await setContext(user.phone, {
-    awaiting: 'owner_disambig',
-    intent,
-    candidateUserIds: matches.map((m) => m.id),
-  });
-  await sendTextMessage({
-    to: user.phone,
-    text: `נמצאו כמה עובדים בשם "${ref}":\n${lines.join('\n')}\nהשב במספר.`,
-  });
-  return false;
-}
-
-// The link fields are FKs, so each must be resolved from a NAME to a concrete id
-// before the relink update — keyed by which param the AI populated.
-const LINK_RESOLVERS = {
-  customerId: { finder: findCustomersByName, kind: 'לקוח' },
-  leadId:     { finder: findLeadsByName,     kind: 'ליד' },
-  projectId:  { finder: findProjectsByName,  kind: 'פרויקט' },
-} as const;
-
-/**
- * Resolve the named link target on intent.params (one of customerId / leadId /
- * projectId, set by relink_task) from a NAME to a concrete entity id. Uses
- * substring matching (findCustomersByName / findLeadsByName / findProjectsByName),
- * so a partial name finds the full record. When several match, asks the user to
- * pick by number (awaiting: 'link_disambig') and returns false so routing stops
- * until they reply. Returns true when resolution is complete (or no link field
- * was set). Resolving here is required: the customerId/leadId/projectId columns
- * are FKs, so passing a raw name to the DB update would fail.
- */
-async function resolveLinkReference(user: ResolvedUser, intent: AIIntentResult): Promise<boolean> {
-  const p = intent.params;
-  if (p._linkResolved) return true;                  // already a concrete id (disambig re-entry)
-
-  // Exactly one link field is set for a relink — find which.
-  const field = (Object.keys(LINK_RESOLVERS) as Array<keyof typeof LINK_RESOLVERS>)
-    .find((f) => p[f] !== undefined);
-  if (!field) return true;                           // nothing to resolve
-
-  const { finder, kind } = LINK_RESOLVERS[field];
-  const ref = typeof p[field] === 'string' ? (p[field] as string).trim() : '';
-  if (!ref) return true;
-
-  const matches = await finder(ref);
-  if (matches.length === 0) {
-    await sendTextMessage({ to: user.phone, text: `לא מצאתי ${kind} בשם "${ref}".` });
-    return false;
-  }
-  if (matches.length === 1) {
-    p[field] = matches[0].id;
-    p._linkResolved = true;
-    return true;
-  }
-
-  // Several entities match → ask the user to choose by number.
-  const lines = matches.map((m, i) => `${i + 1}. ${m.label}`);
-  await setContext(user.phone, {
-    awaiting: 'link_disambig',
-    intent,
-    candidateLinkIds: matches.map((m) => m.id),
-    linkField: field,
-  });
-  await sendTextMessage({
-    to: user.phone,
-    text: `נמצאו כמה רשומות מסוג ${kind} בשם "${ref}":\n${lines.join('\n')}\nהשב במספר.`,
-  });
-  return false;
-}
-
-function buildCreateBody(intent: AIIntentResult): Record<string, unknown> {
-  const p = intent.params;
-  const body: Record<string, unknown> = { title: p.title, type: p.type };
-  if (p.dueDate)  body.dueDate  = p.dueDate;
-  if (p.priority) body.priority = p.priority;
-  if (p.ownerId)  body.ownerId  = p.ownerId;
-  return body;
-}
-
 function applyFieldValue(intent: AIIntentResult, field: string, value: string): AIIntentResult {
   if (field === 'new_value') intent.new_value = value;
   else if (field === 'task_reference') intent.task_reference = value;
@@ -2134,15 +1675,8 @@ function applyFieldValue(intent: AIIntentResult, field: string, value: string): 
 
 function describeIntent(intent: AIIntentResult): string {
   switch (intent.intent) {
-    case 'create_task':   return `הבנתי שברצונך ליצור משימה "${intent.params.title ?? ''}" (סוג: ${intent.params.type ?? '?'}).`;
-    case 'edit_field':    return `הבנתי שברצונך לעדכן את השדה "${intent.field}" למשימה "${intent.task_reference ?? ''}".`;
-    case 'edit_duedate':  return `הבנתי שברצונך לשנות את מועד המשימה "${intent.task_reference ?? ''}".`;
-    case 'reassign_task': return `הבנתי שברצונך להעביר בעלות על המשימה "${intent.task_reference ?? ''}".`;
-    case 'relink_task':   return `הבנתי שברצונך לשנות את הקישור של המשימה "${intent.task_reference ?? ''}".`;
-    case 'list_tasks':    return 'הבנתי שברצונך לראות את רשימת המשימות.';
-    case 'team_workload': return 'הבנתי שברצונך לראות את עומס המשימות בצוות.';
-    case 'get_task':      return `הבנתי שברצונך לראות פרטי משימה "${intent.task_reference ?? ''}".`;
-    default:              return 'הבנתי את בקשתך.';
+    case 'get_task': return `הבנתי שברצונך לראות פרטי משימה "${intent.task_reference ?? ''}".`;
+    default:         return 'הבנתי את בקשתך.';
   }
 }
 
@@ -2167,13 +1701,11 @@ async function auditEvent(
 
 function helpText(): string {
   return [
-    'אני עוזר לנהל משימות. אפשר לבקש למשל:',
-    '• "הצג את המשימות שלי" / "מה המשימות להיום"',
-    '• "מה באיחור?" — משימות שעבר זמנן',
-    '• "צור משימה תיאום ללקוח X למחר"',
-    '• "שנה את הכותרת של משימה Y ל..."',
-    '• "שנה מועד למשימה Y ל..." (דורש אישור מנהל)',
-    '• למנהלים: "כל המשימות" / "עומס משימות בצוות"',
+    'אני עוזר לעובדי שטח לדווח על בדיקות. אפשר לבקש למשל:',
+    '• "יצאתי" / "הגעתי" / "סיימתי" — עדכון סטטוס בדיקה',
+    '• "הלקוח לא ענה" / "אין גישה" — דיווח על בעיה',
+    '• "חסר לי טופס דגימה" — דיווח על מידע חסר',
+    '• כתוב "תפריט" לפתיחת התפריט המלא.',
   ].join('\n');
 }
 

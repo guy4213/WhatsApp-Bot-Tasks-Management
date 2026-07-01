@@ -1,20 +1,9 @@
 import { z } from 'zod';
 import type { AIIntentResult } from '../types';
 
-// The set of intents the model may emit. The v2 field-inspector intents
-// (`set_field_status`, `report_problem`, `report_missing_info`) live alongside
-// the legacy CRM intents until X-T2 drops the latter.
+// The set of intents the model may emit. Legacy CRM intents removed by X-T2.
 export const AI_INTENTS = [
-  'list_tasks',
   'get_task',
-  'create_task',
-  'edit_field',
-  'edit_duedate',
-  'reassign_task',
-  'relink_task',
-  'confirm_pending_action',
-  'decline_pending_action',
-  'team_workload',
   'set_field_status',
   'report_problem',
   'report_missing_info',

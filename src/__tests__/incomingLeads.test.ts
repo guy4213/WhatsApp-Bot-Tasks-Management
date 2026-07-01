@@ -17,6 +17,7 @@ import {
   findNewlyAssignedLeads,
   findEscalationCandidates,
   findActiveInspectors,
+  getYoramLeadCounts,
 } from '../services/incomingLeads';
 
 const EMPTY = { rowCount: 0, rows: [] };
@@ -115,5 +116,40 @@ describe('findActiveInspectors', () => {
     expect(sql).toMatch(/phone\s+IS\s+NOT\s+NULL/);
     expect(result).toHaveLength(2);
     expect(result[0].id).toBe('u1');
+  });
+});
+
+// ── getYoramLeadCounts ────────────────────────────────────────────────────────
+
+describe('getYoramLeadCounts', () => {
+  it('returns overnight count for ALL leads in the overnight window (no ownerId filter) and total unassigned', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '7', unassigned: '3' }] });
+    const result = await getYoramLeadCounts('2026-07-01');
+    const [sql, params] = poolQuery.mock.calls[0];
+    // Must query IncomingLead.
+    expect(sql).toMatch(/"IncomingLead"/);
+    // Overnight filter uses overnight window timestamps (same DST-aware SQL as findOvernightUnassignedLeads).
+    expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
+    expect(sql).toMatch(/17:00/);
+    expect(sql).toMatch(/09:30/);
+    // Overnight count must NOT filter on ownerId (spec §13: count ALL overnight leads).
+    // The unassigned count separately filters ownerId IS NULL.
+    // Verify via a single-query aggregate pattern.
+    expect(sql).toMatch(/COUNT\(\*\)/i);
+    expect(params).toEqual(['2026-07-01']);
+    // Parsed correctly as integers.
+    expect(result).toEqual({ overnight: 7, unassigned: 3 });
+  });
+
+  it('returns zeros when the DB row has 0 counts', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '0', unassigned: '0' }] });
+    const result = await getYoramLeadCounts('2026-07-01');
+    expect(result).toEqual({ overnight: 0, unassigned: 0 });
+  });
+
+  it('gracefully returns zeros when no rows come back (defensive guard)', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    const result = await getYoramLeadCounts('2026-07-01');
+    expect(result).toEqual({ overnight: 0, unassigned: 0 });
   });
 });

@@ -53,6 +53,14 @@ vi.mock('../services/inspectionsQueries', () => ({
   getInspectionsForWorkerOnDate: getInspectionsMock,
   getEquipmentChecklistForFamilies: getEquipmentChecklistMock,
 }));
+vi.mock('../services/incomingLeads', () => ({
+  findOvernightUnassignedLeads: vi.fn(async () => []),
+  findActiveInspectors: vi.fn(async () => []),
+  getYoramLeadCounts: vi.fn(async () => ({ overnight: 0, unassigned: 0 })),
+}));
+vi.mock('../ai/leadSuggester', () => ({
+  suggestWorkerForLead: vi.fn(async () => ({ userId: null, reason: 'לא נמצאה התאמה' })),
+}));
 vi.mock('../services/tasks', () => ({
   getCompanyMorning: getCompanyMorningMock,
   getCompanyEndOfDay: getCompanyEndOfDayMock,
@@ -113,6 +121,7 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
   });
 
   afterEach(() => {
+    delete process.env.LEGACY_MANAGER_DIGEST_ENABLED;
     vi.clearAllMocks();
   });
 
@@ -155,7 +164,9 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
     expect(formatManagerMorningMock).not.toHaveBeenCalled();
   });
 
-  it('ADMIN → legacy formatManagerMorning path; inspector formatter NOT called', async () => {
+  it('ADMIN + flag on → legacy formatManagerMorning path; inspector formatter NOT called', async () => {
+    // X-T5: LEGACY_MANAGER_DIGEST_ENABLED must be true for non-Yoram/non-Sasha ADMIN to reach legacy path.
+    process.env.LEGACY_MANAGER_DIGEST_ENABLED = 'true';
     await fireMorning('ADMIN');
     expect(formatManagerMorningMock).toHaveBeenCalledTimes(1);
     expect(getCompanyMorningMock).toHaveBeenCalledTimes(1);

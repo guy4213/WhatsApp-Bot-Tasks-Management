@@ -51,6 +51,14 @@ vi.mock('../services/inspectionsQueries', () => ({
   getInspectionsForWorkerOnDate: getInspectionsMock,
   getEquipmentChecklistForFamilies: getEquipmentChecklistMock,
 }));
+vi.mock('../services/incomingLeads', () => ({
+  findOvernightUnassignedLeads: vi.fn(async () => []),
+  findActiveInspectors: vi.fn(async () => []),
+  getYoramLeadCounts: vi.fn(async () => ({ overnight: 0, unassigned: 0 })),
+}));
+vi.mock('../ai/leadSuggester', () => ({
+  suggestWorkerForLead: vi.fn(async () => ({ userId: null, reason: 'לא נמצאה התאמה' })),
+}));
 vi.mock('../services/tasks', () => ({
   getCompanyMorning: getCompanyMorningMock,
   getCompanyEndOfDay: getCompanyEndOfDayMock,
@@ -130,6 +138,7 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
 
   afterEach(() => {
     delete process.env.YORAM_PHONE;
+    delete process.env.LEGACY_MANAGER_DIGEST_ENABLED;
     vi.clearAllMocks();
   });
 
@@ -193,7 +202,9 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
     expect(sendButtonMessageMock).not.toHaveBeenCalled();
   });
 
-  it('ADMIN row → equipment reminder never fires (K1 branch guard)', async () => {
+  it('ADMIN row + flag on → equipment reminder never fires (K1 branch guard); MORNING claim made, EQUIPMENT_MORNING not', async () => {
+    // X-T5: LEGACY_MANAGER_DIGEST_ENABLED must be true so the ADMIN reaches the claim step.
+    process.env.LEGACY_MANAGER_DIGEST_ENABLED = 'true';
     getInspectionsMock.mockResolvedValue([oneInspection]);
     getEquipmentChecklistMock.mockResolvedValue(checklistRows);
 

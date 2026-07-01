@@ -7,20 +7,20 @@ import {
 describe('parseIntentResult', () => {
   it('parses a well-formed model output', () => {
     const r = parseIntentResult({
-      intent: 'create_task',
+      intent: 'get_task',
       confidence: 0.92,
-      task_reference: null,
+      task_reference: 'T-123',
       field: null,
       new_value: null,
-      params: { title: 'תיאום', type: 'step5' },
+      params: {},
       missing_fields: [],
       clarification: null,
-      requires_confirmation: true,
+      requires_confirmation: false,
       requires_manager_approval: false,
     });
-    expect(r.intent).toBe('create_task');
+    expect(r.intent).toBe('get_task');
     expect(r.confidence).toBe(0.92);
-    expect(r.params.title).toBe('תיאום');
+    expect(r.task_reference).toBe('T-123');
   });
 
   it('coerces an invalid intent to unknown', () => {
@@ -46,7 +46,7 @@ describe('parseIntentResult', () => {
   });
 
   it('clamps out-of-range confidence to 0', () => {
-    const r = parseIntentResult({ intent: 'list_tasks', confidence: 5 });
+    const r = parseIntentResult({ intent: 'help', confidence: 5 });
     expect(r.confidence).toBe(0);
   });
 
@@ -69,14 +69,10 @@ describe('AI_INTENTS — v2 field-inspector kinds', () => {
     expect(AI_INTENTS).toContain('report_missing_info');
   });
 
-  it('preserves every legacy CRM kind (X-T2 removes these later)', () => {
-    for (const k of [
-      'list_tasks', 'get_task', 'create_task', 'edit_field', 'edit_duedate',
-      'reassign_task', 'relink_task', 'confirm_pending_action',
-      'decline_pending_action', 'team_workload', 'help', 'unknown',
-    ]) {
-      expect(AI_INTENTS).toContain(k);
-    }
+  it('contains exactly the 6 active intents (X-T2 removed legacy CRM kinds)', () => {
+    expect([...AI_INTENTS].sort()).toEqual([
+      'get_task', 'help', 'report_missing_info', 'report_problem', 'set_field_status', 'unknown',
+    ]);
   });
 });
 

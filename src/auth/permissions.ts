@@ -3,9 +3,6 @@ import type { ResolvedUser } from '../types';
 // Fields a regular employee can edit freely on their own tasks
 const FREE_EDIT_FIELDS = new Set(['title', 'description', 'priority', 'type']);
 
-// Fields that require manager approval
-const MANAGER_APPROVAL_FIELDS = new Set(['dueDate']);
-
 // Reassign/relink fields — only MANAGER/ADMIN (elevated) may change them.
 const ELEVATED_ONLY_FIELDS = new Set(['ownerId', 'customerId', 'leadId', 'projectId']);
 
@@ -25,7 +22,6 @@ export function getFieldEditPermission(
 ): EditPermission {
   if (SYSTEM_FIELDS.has(field)) return 'READONLY';
   if (FREE_EDIT_FIELDS.has(field)) return 'FREE_EDIT';
-  if (MANAGER_APPROVAL_FIELDS.has(field)) return 'REQUIRES_MANAGER_APPROVAL';
   if (ELEVATED_ONLY_FIELDS.has(field)) {
     return user.isElevated ? 'ELEVATED_ONLY' : 'FORBIDDEN';
   }

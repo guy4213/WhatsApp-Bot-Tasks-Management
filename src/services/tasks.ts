@@ -1,6 +1,6 @@
 import { pool } from '../db/connection';
 import { canViewAllTasks } from '../auth/permissions';
-import type { Task, Customer, Lead, Project, ResolvedUser, TaskFilter, TaskListItem, WorkloadRow } from '../types';
+import type { Task, Customer, Lead, Project, ResolvedUser, TaskFilter, TaskListItem } from '../types';
 
 // ── Read: list tasks ──────────────────────────────────────────────────────────
 
@@ -22,6 +22,118 @@ export interface ListTasksOptions {
   dateTo?: string;
   limit?: number;
   offset?: number;
+}
+
+export async function listTasks(
+  user: ResolvedUser,
+  opts: ListTasksOptions = {},
+): Promise<ListTasksResult> {
+  const { filter = 'all', scope = 'own', dateField = 'createdAt', dateFrom, dateTo } = opts;
+  const limit = opts.limit ?? 100;
+  const offset = opts.offset ?? 0;
+
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  const requestedOwners = opts.ownerIds?.filter(Boolean) ?? [];
+  const allowedOwners = canViewAllTasks(user)
+    ? requestedOwners
+    : requestedOwners.filter((id) => id === user.id);
+
+  if (allowedOwners.length > 0) {
+    params.push(allowedOwners);
+    conditions.push(`t."ownerId" = ANY($${params.length}::text[])`);
+  } else {
+    const ownOnly = scope !== 'all' || !canViewAllTasks(user);
+    if (ownOnly) {
+      params.push(user.id);
+      conditions.push(`t."ownerId" = $${params.length}`);
+    }
+  }
+
+  const dateCol = dateField === 'createdAt' ? 'createdAt' : 'dueDate';
+  const hasRange = Boolean(dateFrom || dateTo);
+
+  if (hasRange) {
+    if (dateFrom) {
+      params.push(dateFrom);
+      conditions.push(`t."${dateCol}"::date >= $${params.length}::date`);
+    }
+    if (dateTo) {
+      params.push(dateTo);
+      conditions.push(`t."${dateCol}"::date <= $${params.length}::date`);
+    }
+    if (filter === 'open') conditions.push(`t.status IN ('OPEN', 'IN_PROGRESS')`);
+  } else {
+    switch (filter) {
+      case 'today':
+        conditions.push(`t."${dateCol}"::date = CURRENT_DATE`);
+        break;
+      case 'today_overdue':
+        conditions.push(
+          `t.status != 'DONE' AND t."dueDate" IS NOT NULL AND t."dueDate"::date <= CURRENT_DATE`,
+        );
+        break;
+      case 'this_week':
+        conditions.push(
+          `t."${dateCol}" >= date_trunc('week', now()) AND t."${dateCol}" < date_trunc('week', now()) + interval '7 days'`,
+        );
+        break;
+      case 'open':
+        conditions.push(`t.status IN ('OPEN', 'IN_PROGRESS')`);
+        break;
+      case 'next_deadline':
+        conditions.push(`t."dueDate" IS NOT NULL AND t.status != 'DONE'`);
+        break;
+      case 'overdue':
+        conditions.push(`t.status != 'DONE' AND t."dueDate" IS NOT NULL AND t."dueDate" < now()`);
+        break;
+      case 'unlinked':
+        conditions.push(`t."customerId" IS NULL AND t."leadId" IS NULL AND t."projectId" IS NULL`);
+        break;
+      default:
+        break;
+    }
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const orderBy =
+    dateField === 'createdAt'
+      ? `ORDER BY t."createdAt" DESC`
+      : `ORDER BY
+           (CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END),
+           (CASE WHEN t.status != 'DONE' AND t."dueDate" IS NOT NULL AND t."dueDate" < now() THEN 0 ELSE 1 END),
+           (CASE WHEN t.status != 'DONE' AND t."dueDate"::date = CURRENT_DATE THEN 0 ELSE 1 END),
+           (CASE upper(COALESCE(t.priority::text, '')) WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END),
+           t."dueDate" ASC NULLS LAST,
+           t."createdAt" DESC`;
+
+  params.push(limit + 1, offset);
+  const limitParam  = params.length - 1;
+  const offsetParam = params.length;
+
+  const sql = `
+    SELECT t.id, t.title, t.description, t."dueDate", t.priority,
+           t.status, t.type, t."createdAt", t."updatedAt",
+           t."ownerId", t."customerId", t."leadId", t."projectId",
+           u.name        AS "ownerName",
+           c.name        AS "customerName",
+           l."fullName"  AS "leadName",
+           p.name        AS "projectName"
+    FROM "Task" t
+    JOIN "User" u       ON u.id = t."ownerId"
+    LEFT JOIN "Customer" c ON c.id = t."customerId"
+    LEFT JOIN "Lead"     l ON l.id = t."leadId"
+    LEFT JOIN "Project"  p ON p.id = t."projectId"
+    ${where}
+    ${orderBy}
+    LIMIT $${limitParam} OFFSET $${offsetParam}
+  `;
+
+  const result = await pool.query<TaskListItem>(sql, params);
+  const truncated = result.rows.length > limit;
+  return { tasks: result.rows.slice(0, limit), truncated };
 }
 
 /** Find active users whose name contains the given text (for "tasks of <name>"). */
@@ -77,162 +189,6 @@ export async function findProjectsByName(name: string): Promise<Array<{ id: stri
     id: r.id,
     label: (r.projectNumber ? `#${r.projectNumber} ` : '') + r.name,
   }));
-}
-
-export async function listTasks(
-  user: ResolvedUser,
-  opts: ListTasksOptions = {},
-): Promise<ListTasksResult> {
-  const { filter = 'all', scope = 'own', dateField = 'createdAt', dateFrom, dateTo } = opts;
-  const limit = opts.limit ?? 100;
-  const offset = opts.offset ?? 0;
-
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-
-  // Owner filtering, in priority order:
-  //  1. Explicit ownerIds — filter to those employees. A non-elevated caller can
-  //     only ever see their OWN tasks, so any other ids are dropped.
-  //  2. Otherwise: "my tasks" is own-scoped unless scope='all' AND the user may
-  //     view all records.
-  const requestedOwners = opts.ownerIds?.filter(Boolean) ?? [];
-  const allowedOwners = canViewAllTasks(user)
-    ? requestedOwners
-    : requestedOwners.filter((id) => id === user.id);
-
-  if (allowedOwners.length > 0) {
-    params.push(allowedOwners);
-    conditions.push(`t."ownerId" = ANY($${params.length}::text[])`);
-  } else {
-    const ownOnly = scope !== 'all' || !canViewAllTasks(user);
-    if (ownOnly) {
-      params.push(user.id);
-      conditions.push(`t."ownerId" = $${params.length}`);
-    }
-  }
-
-  const dateCol = dateField === 'createdAt' ? 'createdAt' : 'dueDate';
-  const hasRange = Boolean(dateFrom || dateTo);
-
-  if (hasRange) {
-    // Explicit date range on the chosen column (compared by calendar date so a
-    // single day matches the whole day regardless of time component).
-    if (dateFrom) {
-      params.push(dateFrom);
-      conditions.push(`t."${dateCol}"::date >= $${params.length}::date`);
-    }
-    if (dateTo) {
-      params.push(dateTo);
-      conditions.push(`t."${dateCol}"::date <= $${params.length}::date`);
-    }
-    // A status sub-filter is still honored alongside a range.
-    if (filter === 'open') conditions.push(`t.status IN ('OPEN', 'IN_PROGRESS')`);
-  } else {
-    // Named time / status filters. "today"/"this_week" operate on the ACTIVE date
-    // field (createdAt by default, or dueDate when the user asked about deadlines),
-    // so they work even for tasks that have no due date.
-    switch (filter) {
-      case 'today':
-        conditions.push(`t."${dateCol}"::date = CURRENT_DATE`);
-        break;
-      case 'today_overdue':
-        // Due today OR overdue carry-over, excluding DONE — the digest "today"
-        // view ("my/team tasks for today"). Always keyed off dueDate regardless
-        // of the active date field, so it means the same thing everywhere.
-        conditions.push(
-          `t.status != 'DONE' AND t."dueDate" IS NOT NULL AND t."dueDate"::date <= CURRENT_DATE`,
-        );
-        break;
-      case 'this_week':
-        conditions.push(
-          `t."${dateCol}" >= date_trunc('week', now()) AND t."${dateCol}" < date_trunc('week', now()) + interval '7 days'`,
-        );
-        break;
-      case 'open':
-        conditions.push(`t.status IN ('OPEN', 'IN_PROGRESS')`);
-        break;
-      case 'next_deadline':
-        conditions.push(`t."dueDate" IS NOT NULL AND t.status != 'DONE'`);
-        break;
-      case 'overdue':
-        conditions.push(`t.status != 'DONE' AND t."dueDate" IS NOT NULL AND t."dueDate" < now()`);
-        break;
-      case 'unlinked':
-        conditions.push(`t."customerId" IS NULL AND t."leadId" IS NULL AND t."projectId" IS NULL`);
-        break;
-      default:
-        break;
-    }
-  }
-
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  // Ordering. createdAt-based lists (the default) read most naturally newest-first.
-  // Deadline-based lists use a management-useful sort: active before done, overdue
-  // first, then due-today, then by priority, then soonest due, then newest.
-  const orderBy =
-    dateField === 'createdAt'
-      ? `ORDER BY t."createdAt" DESC`
-      : `ORDER BY
-           (CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END),
-           (CASE WHEN t.status != 'DONE' AND t."dueDate" IS NOT NULL AND t."dueDate" < now() THEN 0 ELSE 1 END),
-           (CASE WHEN t.status != 'DONE' AND t."dueDate"::date = CURRENT_DATE THEN 0 ELSE 1 END),
-           (CASE upper(COALESCE(t.priority::text, '')) WHEN 'URGENT' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END),
-           t."dueDate" ASC NULLS LAST,
-           t."createdAt" DESC`;
-
-  // Fetch one extra row to detect truncation without a COUNT query
-  params.push(limit + 1, offset);
-  const limitParam  = params.length - 1;
-  const offsetParam = params.length;
-
-  const sql = `
-    SELECT t.id, t.title, t.description, t."dueDate", t.priority,
-           t.status, t.type, t."createdAt", t."updatedAt",
-           t."ownerId", t."customerId", t."leadId", t."projectId",
-           u.name        AS "ownerName",
-           c.name        AS "customerName",
-           l."fullName"  AS "leadName",
-           p.name        AS "projectName"
-    FROM "Task" t
-    JOIN "User" u       ON u.id = t."ownerId"
-    LEFT JOIN "Customer" c ON c.id = t."customerId"
-    LEFT JOIN "Lead"     l ON l.id = t."leadId"
-    LEFT JOIN "Project"  p ON p.id = t."projectId"
-    ${where}
-    ${orderBy}
-    LIMIT $${limitParam} OFFSET $${offsetParam}
-  `;
-
-  const result = await pool.query<TaskListItem>(sql, params);
-  const truncated = result.rows.length > limit;
-  return { tasks: result.rows.slice(0, limit), truncated };
-}
-
-// ── Read: team workload (manager/admin) ───────────────────────────────────────
-
-/**
- * Open-task load per active employee, with overdue / due-today breakdown.
- * Most-overdue, then most-loaded first — answers "who's drowning?".
- */
-export async function getTeamWorkload(limit = 15): Promise<WorkloadRow[]> {
-  const result = await pool.query<WorkloadRow>(
-    `SELECT
-       u.id   AS "ownerId",
-       u.name AS "ownerName",
-       COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS'))::int AS "openCount",
-       COUNT(*) FILTER (WHERE t.status != 'DONE' AND t."dueDate" IS NOT NULL AND t."dueDate" < now())::int AS "overdueCount",
-       COUNT(*) FILTER (WHERE t.status != 'DONE' AND t."dueDate"::date = CURRENT_DATE)::int AS "dueTodayCount"
-     FROM "User" u
-     JOIN "Task" t ON t."ownerId" = u.id
-     WHERE upper(u.status::text) = 'ACTIVE'
-     GROUP BY u.id, u.name
-     HAVING COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS')) > 0
-     ORDER BY "overdueCount" DESC, "openCount" DESC
-     LIMIT $1`,
-    [limit],
-  );
-  return result.rows;
 }
 
 // ── Read: digest summaries (morning plan / end-of-day status) ─────────────────

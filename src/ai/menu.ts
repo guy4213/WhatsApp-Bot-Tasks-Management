@@ -22,14 +22,10 @@ export const MENU_TRIGGER_RE = /^\s*(menu|תפריט|עזרה|היי|שלום)\s
 /** What a menu number does. The router translates each into existing behavior. */
 export type MenuAction =
   | { kind: 'list_tasks'; filter: TaskFilter; scope: 'own' | 'all'; dateField: 'dueDate' | 'createdAt' }
-  | { kind: 'team_workload' }
-  | { kind: 'pending_approvals' }
   | { kind: 'digest_settings' }
   | { kind: 'free_text' }
   | { kind: 'guide'; guide: string }
   // v2 inspector (field-worker) menu — the 7 items from SPEC_FIELD_V2 §5.
-  // Kept typed alongside the legacy kinds; the legacy kinds are still legally
-  // valid until the X-series dismantle tasks remove them.
   | { kind: 'list_inspections_today' }
   | { kind: 'list_inspections_tomorrow' }
   | { kind: 'update_inspection_status' }
@@ -44,12 +40,7 @@ export interface MenuRoute {
   action: MenuAction;
 }
 
-// Guide texts (explain-only — V1 must NOT let the bot change CRM task status).
-const GUIDE_REPORT_COMPLETION =
-  'דיווח על השלמת משימה: כתוב בלשון חופשית מה בוצע, למשל "סיימתי את המשימה תיאום ללקוח X". ' +
-  'הבוט לא משנה סטטוס משימה במערכת — עדכון הסטטוס מתבצע ב-CRM. אפשר לפרט מה הושלם ואצרף זאת להיסטוריית השיחה.';
-const GUIDE_DUEDATE_CHANGE =
-  'בקשת שינוי מועד: כתוב למשל "שנה מועד למשימה Y ל-מחר". בקשה כזו דורשת אישור מנהל לפני ביצוע.';
+// Guide texts (explain-only).
 const GUIDE_TASKS_BY_EMPLOYEE =
   'משימות לפי עובד: כתוב למשל "הצג את המשימות של דנה" או "המשימות של יאיר ויורם".';
 const GUIDE_CREATE_FOR_EMPLOYEE =
@@ -77,14 +68,12 @@ function employeeMenu(): MenuRoute[] {
 
 function managerMenu(): MenuRoute[] {
   return [
-    { n: 1, label: 'סקירת צוות יומית',                    action: { kind: 'team_workload' } },
-    { n: 2, label: 'משימות לפי עובד',                     action: { kind: 'guide', guide: GUIDE_TASKS_BY_EMPLOYEE } },
-    { n: 3, label: 'משימות באיחור',                       action: { kind: 'list_tasks', filter: 'overdue',       scope: 'all', dateField: 'dueDate' } },
-    { n: 4, label: 'משימות להיום',                        action: { kind: 'list_tasks', filter: 'today_overdue', scope: 'all', dateField: 'dueDate' } },
-    { n: 5, label: 'יצירת משימה לעובד',                   action: { kind: 'guide', guide: GUIDE_CREATE_FOR_EMPLOYEE } },
-    { n: 6, label: 'אישורים ממתינים',                     action: { kind: 'pending_approvals' } },
-    { n: 7, label: DIGEST_SETTINGS_LABEL,                 action: { kind: 'digest_settings' } },
-    { n: 8, label: FREE_TEXT_LABEL,                       action: { kind: 'free_text' } },
+    { n: 1, label: 'משימות לפי עובד',                     action: { kind: 'guide', guide: GUIDE_TASKS_BY_EMPLOYEE } },
+    { n: 2, label: 'משימות באיחור',                       action: { kind: 'list_tasks', filter: 'overdue',       scope: 'all', dateField: 'dueDate' } },
+    { n: 3, label: 'משימות להיום',                        action: { kind: 'list_tasks', filter: 'today_overdue', scope: 'all', dateField: 'dueDate' } },
+    { n: 4, label: 'יצירת משימה לעובד',                   action: { kind: 'guide', guide: GUIDE_CREATE_FOR_EMPLOYEE } },
+    { n: 5, label: DIGEST_SETTINGS_LABEL,                 action: { kind: 'digest_settings' } },
+    { n: 6, label: FREE_TEXT_LABEL,                       action: { kind: 'free_text' } },
   ];
 }
 

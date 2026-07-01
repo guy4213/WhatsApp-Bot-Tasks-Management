@@ -29,6 +29,7 @@ import type {
   FieldExceptionCounts,
   OpenFieldException,
 } from '../services/exceptionsQueries';
+import type { YoramLeadCounts } from '../services/incomingLeads';
 import { problemTypeMenu } from '../ai/menu';
 import { DIGEST_PAYLOAD_IDS } from '../ai/digestCommands';
 
@@ -267,11 +268,10 @@ function formatCountsLine(c: FieldExceptionCounts): string {
   );
 }
 
-/**
- * Leads placeholder — B2-blocked. Visually distinct so a human reviewer sees
- * the TODO immediately (see brief). Do NOT compute/query any lead numbers here.
- */
-const LEADS_TODO_LINE = 'לידים: (מחכה ל-B2 — טרם משולב)';
+/** Render the leads summary line per spec §13: "לידים: X מהלילה · Y לא שויכו". */
+function formatLeadsLine(lc: YoramLeadCounts): string {
+  return `לידים: ${lc.overnight} מהלילה · ${lc.unassigned} לא שויכו`;
+}
 
 /** Render one row of the numbered "פתוחים:" list. */
 function formatExceptionRow(ex: OpenFieldException, n: number): string {
@@ -289,16 +289,18 @@ function formatExceptionRow(ex: OpenFieldException, n: number): string {
 /**
  * Yoram morning — §13 format.
  *
- * Template vars (compact): [name, 5 counts]. Rich text carries the full open-
- * exceptions list. Empty open-exceptions list renders a one-liner
- * "אין חריגים פתוחים." between the counts and leads blocks.
+ * Template vars (compact): [name, 5 counts, overnight leads, unassigned leads].
+ * Rich text carries the full open-exceptions list and the leads summary line.
+ * Empty open-exceptions list renders a one-liner "אין חריגים פתוחים." between
+ * the counts and leads blocks.
  */
 export function formatGalitManagerMorning(input: {
   counts: FieldExceptionCounts;
   exceptions: OpenFieldException[];
   user: { name: string | null };
+  leadCounts: YoramLeadCounts;
 }): DigestContent {
-  const { counts, exceptions, user } = input;
+  const { counts, exceptions, user, leadCounts } = input;
   const name = user.name ?? '';
   const params = [
     name,
@@ -307,6 +309,8 @@ export function formatGalitManagerMorning(input: {
     String(counts.hasProblemToday),
     String(counts.waitingForInfoToday),
     String(counts.notClosedDayToday),
+    String(leadCounts.overnight),
+    String(leadCounts.unassigned),
   ];
 
   const openBlock = exceptions.length === 0
@@ -316,7 +320,7 @@ export function formatGalitManagerMorning(input: {
   const text =
     `סיכום גלית — בוקר טוב ${name}\n` +
     `${formatCountsLine(counts)}\n` +
-    `${LEADS_TODO_LINE}\n\n` +
+    `${formatLeadsLine(leadCounts)}\n\n` +
     `${openBlock}`;
 
   return { text, params, buttons: [] };
@@ -327,13 +331,15 @@ export function formatGalitManagerMorning(input: {
  *
  * Same shape as the morning; the header line switches to a "סיכום סוף יום"
  * label. Empty open-exceptions list renders the same one-liner.
+ * Template vars: [name, 5 counts, overnight leads, unassigned leads].
  */
 export function formatGalitManagerEndOfDay(input: {
   counts: FieldExceptionCounts;
   exceptions: OpenFieldException[];
   user: { name: string | null };
+  leadCounts: YoramLeadCounts;
 }): DigestContent {
-  const { counts, exceptions, user } = input;
+  const { counts, exceptions, user, leadCounts } = input;
   const name = user.name ?? '';
   const params = [
     name,
@@ -342,6 +348,8 @@ export function formatGalitManagerEndOfDay(input: {
     String(counts.hasProblemToday),
     String(counts.waitingForInfoToday),
     String(counts.notClosedDayToday),
+    String(leadCounts.overnight),
+    String(leadCounts.unassigned),
   ];
 
   const openBlock = exceptions.length === 0
@@ -351,7 +359,7 @@ export function formatGalitManagerEndOfDay(input: {
   const text =
     `סיכום סוף יום — ${name}\n` +
     `${formatCountsLine(counts)}\n` +
-    `${LEADS_TODO_LINE}\n\n` +
+    `${formatLeadsLine(leadCounts)}\n\n` +
     `${openBlock}`;
 
   return { text, params, buttons: [] };

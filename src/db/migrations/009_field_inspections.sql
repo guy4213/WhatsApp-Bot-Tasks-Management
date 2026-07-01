@@ -172,4 +172,126 @@ INSERT INTO "InspectionChecklist" (family, code, "labelHe", "sortOrder") VALUES
   ('radon','marking','מדבקות סימון',4)
 ON CONFLICT (family, code) DO NOTHING;
 
+-- ── D1-T7: Add isFieldInspection column (idempotent) ─────────────────────────
+-- Column was omitted from the original CREATE TABLE above; added here via
+-- ALTER TABLE ... ADD COLUMN IF NOT EXISTS so re-running is safe.
+
+ALTER TABLE "InspectionType"
+  ADD COLUMN IF NOT EXISTS "isFieldInspection" boolean NOT NULL DEFAULT true;
+
+-- ── D1-T7: Seed InspectionType catalog — field-inspection rows only ───────────
+-- Source: SPEC_FIELD_V2.md lines 416-571.
+-- Only rows with isFieldInspection = true are inserted here.
+-- Shielding rows (radiation מיגון), office-only rows (survey prep, reports,
+-- calibration certs, thermal, opinion, general/logistics) are excluded.
+-- Idempotent: ON CONFLICT (code) DO NOTHING — re-running leaves DB unchanged.
+
+INSERT INTO "InspectionType" (code, "labelHe", family, "isFieldInspection", "isActive", "sortOrder") VALUES
+-- ── איכות אוויר → air ─────────────────────────────────────────────────────────
+  ('66',    'אוויר – בדיקת איכות אוויר סביבתית',                                 'air', true, true, 1),
+  ('72',    'אוויר – בדיקת איכות אוויר תוך מבני',                                'air', true, true, 2),
+  ('10046', 'אוויר – בדיקת איכות אוויר מתחבורה',                                 'air', true, true, 3),
+  ('10072', 'אוויר – ניטור פורמלדהיד',                                           'air', true, true, 4),
+  ('69',    'אוויר – דיגום עובשים באוויר – בדיקה ראשונה',                        'air', true, true, 5),
+  ('10066', 'אוויר – דיגום עובשים באוויר – דיגום נוסף באתר',                     'air', true, true, 6),
+  ('10073', 'אוויר – דיגום חיידקים באוויר – דיגום נוסף באתר',                    'air', true, true, 7),
+  ('10126', 'אוויר – דיגום משטח עובשים – דיגום נוסף באתר',                       'air', true, true, 8),
+  ('10078', 'אוויר – בדיקת איכות אוויר סביבתית – יום נוסף',                      'air', true, true, 9),
+  ('10047', 'אוויר – תוספת אמוניה',                                              'air', true, true, 10),
+  ('10127', 'איכות אוויר – תחנה לניטור אוויר – מזהמים כימיים',                   'air', true, true, 11),
+  ('10159', 'איכות אוויר – תחנה לניטור אוויר – חודש נוסף – מזהמים כימיים',       'air', true, true, 12),
+-- ── אסבסט → asbestos ──────────────────────────────────────────────────────────
+  ('10023', 'אסבסט – ביצוע סקר אסבסט ע"י בודק מוסמך',                            'asbestos', true, true, 1),
+  ('10026', 'אסבסט – זיהוי צובר אסבסט',                                          'asbestos', true, true, 2),
+  ('10112', 'אסבסט – ניטור סיבי אסבסט באוויר – 2 דגימות',                        'asbestos', true, true, 3),
+-- ── ראדון → radon (kits/detectors = field; calibration/cert = office — skipped) ─
+  ('10044', 'ראדון – בדיקת גז ראדון קצרת טווח ע״י בודק מוסמך',                   'radon', true, true, 1),
+  ('10017', 'ראדון – בדיקת גז ראדון ארוכת טווח ע״י בודק מוסמך',                  'radon', true, true, 2),
+  ('61',    'ראדון – ערכה – בדיקת ראדון קצרת טווח',                              'radon', true, true, 3),
+  ('10000', 'ראדון – ערכה לבדיקת גז ראדון ארוכת טווח',                           'radon', true, true, 4),
+  ('87',    'ראדון – פרט ראדון',                                                 'radon', true, true, 5),
+  ('10022', 'ראדון – RD200 גלאי ראדון רציף',                                     'radon', true, true, 6),
+  ('10095', 'ראדון – RD200P Radon Eye +2 גלאי ראדון רציף',                       'radon', true, true, 7),
+  ('10160', 'ראדון – RADELEC כולל לידר',                                         'radon', true, true, 8),
+  ('10161', 'ראדון – גלאי אלקטרוני ארוך טווח חדש',                              'radon', true, true, 9),
+  ('10162', 'ראדון – גלאי אלקטרוני קצר טווח חדש',                               'radon', true, true, 10),
+  -- SKIPPED: ('70', ...) כיול מעבדה — isFieldInspection = false
+  -- SKIPPED: ('10069', ...) הנפקת תעודת כיול — isFieldInspection = false
+-- ── ריח → odor ────────────────────────────────────────────────────────────────
+  ('10013', 'ריח – איתור וסילוק מטרד ריח',                                       'odor', true, true, 1),
+  ('10003', 'ריח – בדיקת ריח ע״י צוות מריחים',                                   'odor', true, true, 2),
+  ('10083', 'ריח – בדיקת ריח ע״י בודק ריח מוסמך',                                'odor', true, true, 3),
+  -- SKIPPED: ('10055', ...) דוח סביבתי ריח – הערכת פיזור ריחות להגשה לרשויות — office report, isFieldInspection = false
+-- ── מים → water ───────────────────────────────────────────────────────────────
+  ('63',    'מים – בדיקה מיקרוביאלית מלאה, דיגום ראשון באתר',                    'water', true, true, 1),
+  ('10076', 'מים – בדיקת מתכות חלקית, דיגום ראשון באתר',                         'water', true, true, 2),
+  ('10120', 'מים – בדיקה מיקרוביאלית מלאה + בדיקת מתכות חלקית',                  'water', true, true, 3),
+  ('10121', 'מים – בדיקת מתכות מלאה',                                            'water', true, true, 4),
+  ('10122', 'מים – בדיקת מתכות ומיקרוביאלית מלאה',                               'water', true, true, 5),
+  ('10075', 'מים – בדיקה מיקרוביאלית מלאה, דיגום נוסף באתר',                     'water', true, true, 6),
+  ('10077', 'מים – בדיקת מתכות חלקית, דיגום נוסף באתר',                          'water', true, true, 7),
+-- ── קרקע → soil (field sampling = field; office survey/plan prep = skipped) ───
+  -- SKIPPED: ('10027', ...) הכנת סקר קרקע היסטורי — office survey, isFieldInspection = false
+  -- SKIPPED: ('10050', ...) הכנת תוכנית דיגום לקרקע — office planning, isFieldInspection = false
+  ('10087', 'קרקע – בדיקת רעידות ממכונות דחיקת צינור',                           'soil', true, true, 3),
+  ('10102', 'קרקע – דיגום לקרקע ע״פ סעיף מס׳ 1',                                 'soil', true, true, 4),
+  ('10103', 'קרקע – דיגום גז קרקע ע״פ סעיף מס׳ 1',                              'soil', true, true, 5),
+  ('10088', 'קרקע – דיגום נוסף באתר חיידקים בחול תחת ריצוף',                     'soil', true, true, 6),
+  ('10089', 'קרקע – פעימות וספיקת משאבות חיידקים בדגימת חול',                    'soil', true, true, 7),
+-- ── גהות / רעש תעסוקתי → occupational (measurement = field; office rows skipped) ─
+  ('62',    'גהות – בדיקת רעש תעסוקתית',                                         'occupational', true, true, 1),
+  -- SKIPPED: ('98', ...) הכנת סקר מקדים — office survey, isFieldInspection = false
+  -- SKIPPED: ('10084', ...) הכנת סקר מקדים חומרים כימיים ורעש — office survey, isFieldInspection = false
+  ('10104', 'גהות – יום עבודה ניטור סביבתי תעסוקתי',                             'occupational', true, true, 4),
+  -- SKIPPED: ('10105', ...) טופס מידע התקשרות עם הלקוח — form/admin, isFieldInspection = false
+  -- SKIPPED: ('10137', ...) תסקיר סביבתי להיתר בנייה — office report, isFieldInspection = false
+-- ── רעש → noise (measurement = field; consulting/forecast office rows skipped) ─
+  ('73',    'רעש – בדיקת רעש סביבתית עפ״י סעיף 1',                               'noise', true, true, 1),
+  ('10011', 'רעש – בדיקת רעש סביבתית רציפה עד 24 שעות',                          'noise', true, true, 2),
+  ('10048', 'רעש – בדיקת רעש רציפה יום נוסף',                                    'noise', true, true, 3),
+  ('10012', 'רעש – בדיקת רעש מתחבורה',                                           'noise', true, true, 4),
+  ('10028', 'רעש – בדיקת רעש במשתחמים',                                          'noise', true, true, 5),
+  ('10043', 'רעש – בדיקת רעש מציוד בנייה, השתל״ס 1979-1',                        'noise', true, true, 6),
+  ('10085', 'רעש – בדיקת רעש מטוסים',                                            'noise', true, true, 7),
+  ('10060', 'רעש – בדיקה אקוסטית לחדר קול נישא באוויר וקול הולם',                'noise', true, true, 8),
+  ('10061', 'רעש – חדר נוסף קול נישא באוויר וקול הולם',                          'noise', true, true, 9),
+  ('10058', 'רעש – בדיקה אקוסטית לחדר קול הולם',                                 'noise', true, true, 10),
+  ('10059', 'רעש – בדיקה אקוסטית לחדר קול הולם חדר נוסף',                        'noise', true, true, 11),
+  ('10070', 'רעש – בדיקה אקוסטית לחדר קול נישא באוויר',                          'noise', true, true, 12),
+  ('10071', 'רעש – בדיקה אקוסטית לחדר קול נישא באוויר חדר נוסף',                 'noise', true, true, 13),
+  ('10062', 'רעש – בדיקת רעש במסגרת ייעוץ אקוסטי למבנה בבנייה',                  'noise', true, true, 14),
+  ('10042', 'רעש – סקר אקוסטי להפחתת מפלסי הרעידות',                             'noise', true, true, 15),
+  ('10056', 'רעש – בדיקת רעש ממעלית',                                            'noise', true, true, 16),
+  ('10123', 'רעש – בדיקת מעלית נוספת',                                           'noise', true, true, 17),
+  -- SKIPPED: ('10037', ...) ייעוץ אקוסטי להפחתת רעש — office consulting, isFieldInspection = false
+  ('10086', 'רעש אקוסטיקה – בדיקת רעידות',                                       'noise', true, true, 19),
+  ('10079', 'רעש אקוסטיקה – מתן היתר לבריכה פרטית',                              'noise', true, true, 20),
+  ('10125', 'רעש – הספק אקוסטי לאולם / פאב',                                     'noise', true, true, 21),
+  ('10139', 'בדיקה אקוסטית – רעש מערכות',                                        'noise', true, true, 22),
+  -- SKIPPED: ('10119', ...) ביצוע חיזוי רעש לכביש חדש — office noise forecast, isFieldInspection = false
+-- ── קרינה → radiation : field measurement rows only ──────────────────────────
+  ('9',     'קרינה – בדיקת קרינה אלקטרומגנטית מרשת החשמל',                       'radiation', true, true, 1),
+  ('56',    'קרינה – בדיקת קרינה משולבת מדוח רשת החשמל',                         'radiation', true, true, 2),
+  ('83',    'קרינה – בדיקת קרינה רציפה מרשת החשמל',                              'radiation', true, true, 3),
+  ('10064', 'קרינה – בדיקת קרינה מרכב היברידי / חשמלי',                          'radiation', true, true, 4),
+  ('002',   'RF – קרינה – בדיקת קרינה אלקטרומגנטית ממתקני שידור ואנטנות סלולריות', 'radiation', true, true, 5),
+  ('10034', 'קרינה – בדיקת איפוס ואיזון הארקות אלקטרומגנטית',                    'radiation', true, true, 6),
+  ('10036', 'קרינה – בדיקת קרינה רקע RF + ELF בתחילת הבנייה (ELF היתר)',         'radiation', true, true, 7),
+  ('10165', 'בדיקת קרינה מרשת החשמל למתן היתר (ELF היתר)',                       'radiation', true, true, 8),
+  ('10167', 'מדידת קרינה לפני ואחרי עבודות המיגון',                              'radiation', true, true, 9),
+  ('10006', 'קרינה – ייעוץ ופיקוח עליון לאחר בנייה (ELF היתר)',                  'radiation', true, true, 10),
+  -- SKIPPED: All radiation מיגון (shielding) rows (10166, 10041, 10082, 10081,
+  --   10163, 10096, 10098, 10100, 10097, 10099, 10101, 10106, 10107, 10108,
+  --   10109, 10110, 10111, 10093, 10094, 10144, 10152, 10153, 10154, 10116,
+  --   10115, 10118, 10124, 10145, 10146, 10164, 10128, 10136, 10140, 10129,
+  --   10130, 10131, 10133, 10134, 10135) — shielding products, isFieldInspection = false
+-- ── בנייה ירוקה → green ───────────────────────────────────────────────────────
+  -- SKIPPED: ('10148', ...) הכנת אוגדן מקדמי שלב א׳ — office work, isFieldInspection = false
+  ('10149', 'בנייה ירוקה – הכנת אוגדן שלב ב׳ כולל ביקור בשטח והנחיות',           'green', true, true, 2)
+  -- SKIPPED families (all rows isFieldInspection = false):
+  --   thermal: 10156, 10157, 10158, 10150 — office thermal reports
+  --   opinion: 10015 — office environmental opinion
+  --   general: 10090, 10032, 10091, 10113, 82, 10117, 10092, 10142, 10143, 65, 10114 — logistics/admin
+ON CONFLICT (code) DO NOTHING;
+
 COMMIT;

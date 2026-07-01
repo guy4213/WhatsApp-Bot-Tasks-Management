@@ -121,6 +121,46 @@ export async function findEscalationCandidates(limit = 50): Promise<IncomingLead
   return rows;
 }
 
+// ── D4-T1 (LEADS portion) — Yoram lead-count summary ────────────────────────
+
+export interface YoramLeadCounts {
+  /** All leads received in the overnight window (prev day 17:00 → today 09:30 Jerusalem). */
+  overnight: number;
+  /** All leads where ownerId IS NULL right now (total open unassigned queue). */
+  unassigned: number;
+}
+
+/**
+ * Count summary for the Yoram digest leads line (spec §13: "לידים: X מהלילה · Y לא שויכו").
+ *
+ * `overnight` — ALL leads received in the overnight window (previous day 17:00 →
+ *   today 09:30, Asia/Jerusalem DST-aware), regardless of assignment status.
+ *   Same time-zone SQL pattern as `findOvernightUnassignedLeads` but WITHOUT
+ *   the `ownerId IS NULL` filter.
+ *
+ * `unassigned` — total IncomingLead rows where ownerId IS NULL right now
+ *   (snapshot at query time, not window-scoped).
+ *
+ * Bot NEVER writes to IncomingLead — read-only queries.
+ */
+export async function getYoramLeadCounts(localDate: string): Promise<YoramLeadCounts> {
+  const { rows } = await pool.query<{ overnight: string; unassigned: string }>(
+    `SELECT
+       COUNT(*) FILTER (
+         WHERE "receivedAt" >= (($1::date - 1)::timestamp + time '17:00:00') AT TIME ZONE 'Asia/Jerusalem'
+           AND "receivedAt" <  ($1::date::timestamp + time '09:30:00') AT TIME ZONE 'Asia/Jerusalem'
+       ) AS overnight,
+       COUNT(*) FILTER (WHERE "ownerId" IS NULL) AS unassigned
+     FROM "IncomingLead"`,
+    [localDate],
+  );
+  const row = rows[0] ?? { overnight: '0', unassigned: '0' };
+  return {
+    overnight: parseInt(row.overnight, 10),
+    unassigned: parseInt(row.unassigned, 10),
+  };
+}
+
 /** Active inspector candidates for the AI suggestion (D3-T4, D3-T2). */
 export async function findActiveInspectors(): Promise<InspectorCandidate[]> {
   const { rows } = await pool.query<InspectorCandidate>(

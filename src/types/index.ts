@@ -180,23 +180,12 @@ export interface ResolvedUser {
 // ── AI output contract (§11) ──────────────────────────────────────────────────
 
 export type AIIntent =
-  | 'list_tasks'      // show the caller's tasks (optionally filtered)
-  | 'get_task'        // show one task's details
-  | 'create_task'     // create a new task
-  | 'edit_field'      // edit title/description/priority/type
-  | 'edit_duedate'    // change dueDate (→ manager approval)
-  | 'reassign_task'   // change ownerId (ADMIN only)
-  | 'relink_task'     // change customerId/leadId/projectId (ADMIN only)
-  | 'confirm_pending_action'   // user approves their latest pending action ("כן"/"אשר")
-  | 'decline_pending_action'   // user cancels their latest pending action ("לא"/"בטל")
-  | 'team_workload'   // manager/admin asks who is loaded / overloaded
-  // v2 field-inspector intents (SPEC_FIELD_V2 §7–§9). The old CRM intents above
-  // are kept temporarily; X-T2 removes them once the v2 wiring lands.
+  | 'get_task'              // show one task's details
   | 'set_field_status'      // worker advances an inspection: departed/arrived/finished/waiting/problem
   | 'report_problem'        // worker reports a problem on an inspection (optionally with problemType)
   | 'report_missing_info'   // worker reports info missing for the final report
-  | 'help'            // user asked what the bot can do
-  | 'unknown';        // could not determine intent
+  | 'help'                  // user asked what the bot can do
+  | 'unknown';              // could not determine intent
 
 // v2 inspector-side sub-enums (SPEC_FIELD_V2 §4, §7, §9). These are the SUBSET
 // of `fieldStatus` transitions a worker can trigger via free text — the office-
@@ -265,11 +254,3 @@ export interface TaskListItem extends Task {
   projectName: string | null;
 }
 
-/** One row of the team-workload view (open-task load per employee). */
-export interface WorkloadRow {
-  ownerId: string;
-  ownerName: string;
-  openCount: number;
-  overdueCount: number;
-  dueTodayCount: number;
-}
