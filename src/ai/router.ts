@@ -15,7 +15,8 @@ import { getProvider } from './provider';
 import { parseIntent } from './intentParser';
 import { resolveTask } from './taskResolver';
 import {
-  getContext, setContext, clearContext, type ConversationState,
+  getContext, setContext, clearContext,
+  type ConversationState, type AwaitingKind,
 } from '../services/conversationContext';
 import { setViewOwners, getViewOwners, clearViewOwners } from '../services/viewContext';
 import { setActiveTask, getActiveTask } from '../services/taskContext';
@@ -107,6 +108,49 @@ const log = moduleLogger('ai-router');
 
 const CONF_HIGH = parseFloat(process.env.AI_CONFIDENCE_HIGH ?? '0.85');
 const CONF_LOW  = parseFloat(process.env.AI_CONFIDENCE_LOW  ?? '0.60');
+
+// ── Free-text escape hatch for numeric-only awaiting states ────────────────
+// The v2 UX contract: the user can type or record free text at ANY time and
+// the AI must try to understand it — never be trapped inside a numeric picker
+// after asking a question about the currently-displayed item. The states
+// listed below are numeric pickers (they expect a number / short nav word);
+// any free-text reply escapes to the AI parser via `handleAIMessage`. States
+// NOT listed here are either text-capture (missing_info_note, decline_reason,
+// notes, search queries, time/duration prompts) OR already handle text
+// intelligently (task-hint pickers) — do NOT add them or the capture breaks.
+const NUMERIC_PICKER_AWAITING: Set<AwaitingKind> = new Set<AwaitingKind>([
+  // Worker + role menus.
+  'menu',
+  'problem_type_choice', 'status_choice', 'finished_followup', 'day_summary_choice',
+  // Confirmations.
+  'reassign_confirm', 'correct_site_confirm', 'correct_type_confirm', 'schedule_confirm',
+  'assign_lead_confirm',
+  // Numbered pickers.
+  'reassign_pick_worker',
+  'correct_site_pick_field',
+  // NOTE: `correct_type_pick_from_list` is intentionally OMITTED — its handler
+  // treats free text as a search filter over the inspection-type catalog, so
+  // escaping to the AI would break the search-refine loop.
+  'schedule_intake_pick_task', 'schedule_pick_from_search',
+  'assign_lead_pick_lead', 'assign_lead_pick_worker',
+  // Manager menu system — top-level, sub-menus, list pickers, action menus.
+  'mgr_menu_root',
+  'mgr_exceptions_sub', 'mgr_leads_sub', 'mgr_workers_sub', 'mgr_search_sub',
+  'mgr_today_pick_task', 'mgr_today_action',
+  'mgr_exceptions_pick_row', 'mgr_exceptions_action',
+  'mgr_leads_pick_row',
+  'mgr_workers_pick_worker',
+  'mgr_search_pick_task', 'mgr_search_action',
+]);
+
+// Nav words a numeric picker will accept without escaping to AI: pure digits,
+// or the Hebrew/English navigation vocabulary (בי טול / חזרה / חיפוש / …).
+const NUMERIC_PICKER_NAV_RE = /^(?:\d+|חזרה|ביטול|עצור|אישור|כן|לא|חיפוש|yes|no|cancel|ok)$/i;
+
+/** True when `trimmed` is either digits or a known picker navigation word. */
+function looksLikeNumericPickerInput(trimmed: string): boolean {
+  return NUMERIC_PICKER_NAV_RE.test(trimmed);
+}
 
 // How many tasks to fetch/show in a list (override with LIST_TASKS_LIMIT).
 const LIST_LIMIT = parseInt(process.env.LIST_TASKS_LIMIT ?? '100', 10);
@@ -298,6 +342,22 @@ async function continueConversation(
   if (CORRECTION_RE.test(trimmed) && trimmed.split(/\s+/).length <= 4) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: 'בסדר, לא ביצעתי כלום. נסח מחדש מה לתקן ואטפל בזה.' });
+    return;
+  }
+
+  // ── Free-text escape hatch (v2 UX contract) ─────────────────────────────
+  // If we're in a numeric-picker awaiting state (see NUMERIC_PICKER_AWAITING)
+  // and the user typed free-text — a question, a command, a description —
+  // rather than a number or nav word, clear the context and re-enter the
+  // fresh-message path so the AI parser can try to understand it. This is
+  // what makes free text + voice work "at any time", including while a
+  // manager is viewing a specific inspection's detail card.
+  if (
+    NUMERIC_PICKER_AWAITING.has(ctx.awaiting) &&
+    !looksLikeNumericPickerInput(trimmed)
+  ) {
+    await clearContext(user.phone);
+    await handleAIMessage(user, text);
     return;
   }
 
@@ -1114,18 +1174,16 @@ async function showMenu(user: ResolvedUser): Promise<void> {
   await sendTextMessage({ to: user.phone, text: renderMenu(user) });
 }
 
-/** Handle a reply while the main menu is open: a valid number routes, else
- *  fall through to the free-text / AI path. The menu prompt explicitly says
- *  "אפשר גם פשוט לכתוב בקשה חופשית בכל עת" — blocking non-numeric replies
- *  contradicted that. Any non-numeric input clears the menu context and re-enters
- *  `handleAIMessage`, which resolves it via the intent parser. */
+/** Handle a numeric reply while the main menu is open. Non-numeric replies
+ *  are intercepted by the top-of-`continueConversation` free-text escape hatch
+ *  (see `NUMERIC_PICKER_AWAITING`) before they ever reach this handler, so any
+ *  input arriving here is either digits or a nav word (`ביטול` etc.). */
 async function handleMenuReply(user: ResolvedUser, trimmed: string): Promise<void> {
   const items = menuItemsFor(user);
   const idx = parseInt(trimmed, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
-    await clearContext(user.phone);
-    await handleAIMessage(user, trimmed);
-    return;
+    await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${items.length}.` });
+    return; // keep the menu context so the next number still works
   }
   await handleMenuRoute(user, items[idx - 1]);
 }

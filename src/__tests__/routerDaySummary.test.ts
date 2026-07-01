@@ -336,7 +336,7 @@ describe('D2-T10 — option 4 (בעיה פתוחה) hands off to D2-T8', () => {
 
 // ── Invalid choice ──────────────────────────────────────────────────────────
 
-describe('D2-T10 — invalid follow-up choice', () => {
+describe('D2-T10 — out-of-range numeric follow-up choice', () => {
   it('resends menu with "בחר מספר תקין:" prefix, keeps awaiting', async () => {
     const user = makeUser();
     dayFieldSummary.mockResolvedValueOnce({ finished: [], waitingForInfoCount: 0 });
@@ -344,7 +344,9 @@ describe('D2-T10 — invalid follow-up choice', () => {
     sendTextMessage.mockClear();
 
     const { handleAIMessage } = await loadRouter();
-    await handleAIMessage(user, 'טקסט לא תקין');
+    // Digits pass the free-text escape hatch; "9" is out of the 1-4 range and
+    // hits the handler's re-prompt path. Non-numeric replies now escape to AI.
+    await handleAIMessage(user, '9');
 
     expect(writeFieldNotes).not.toHaveBeenCalled();
     expect(writeMissingInfo).not.toHaveBeenCalled();

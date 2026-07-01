@@ -265,14 +265,18 @@ describe('D2-T8 — report-problem flow via menu item 4', () => {
     expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
   });
 
-  it('invalid problem-type choice → resend menu with a "בחר מספר תקין:" prefix, keep awaiting', async () => {
+  it('out-of-range numeric problem-type choice → resend menu with a "בחר מספר תקין:" prefix, keep awaiting', async () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 4);
     sendTextMessage.mockClear();
 
     const { handleAIMessage } = await loadRouter();
-    await handleAIMessage(user, 'טקסט לא תקין');
+    // "99" is a digit → passes the numeric-picker escape hatch, reaches the
+    // handler, and hits the out-of-range branch. Free text like "טקסט לא תקין"
+    // is now intercepted at the top of `continueConversation` and routed to
+    // the AI parser instead (v2 UX contract).
+    await handleAIMessage(user, '99');
 
     expect(writeProblem).not.toHaveBeenCalled();
     expect(sendTextMessage.mock.calls[0][0].text).toContain('בחר מספר תקין:');
@@ -483,14 +487,16 @@ describe('D2-T5 — status update flow via menu item 3', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'finished_followup', taskFieldId: 'tf-1' });
   });
 
-  it('invalid status choice → resend menu with "בחר מספר תקין:", keep awaiting', async () => {
+  it('out-of-range numeric status choice → resend menu with "בחר מספר תקין:", keep awaiting', async () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 3);
     sendTextMessage.mockClear();
 
     const { handleAIMessage } = await loadRouter();
-    await handleAIMessage(user, 'טקסט לא תקין');
+    // "9" is a digit → passes the escape hatch, hits the out-of-range branch.
+    // Free-text inputs are routed to AI parser at the top of the router now.
+    await handleAIMessage(user, '9');
 
     expect(advanceFieldStatus).not.toHaveBeenCalled();
     expect(sendTextMessage.mock.calls[0][0].text).toContain('בחר מספר תקין:');
@@ -576,11 +582,12 @@ describe('D2-T6 — finished follow-up menu', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'missing_info_note', taskFieldId: 'tf-1' });
   });
 
-  it('invalid follow-up choice → resend menu with "בחר מספר תקין:"', async () => {
+  it('out-of-range numeric follow-up choice → resend menu with "בחר מספר תקין:"', async () => {
     const user = makeUser();
     await reachFinishedFollowUp(user);
     const { handleAIMessage } = await loadRouter();
-    await handleAIMessage(user, 'משהו');
+    // Digits pass the escape hatch; free-text goes to AI now.
+    await handleAIMessage(user, '9');
     expect(writeFieldNotes).not.toHaveBeenCalled();
     expect(sendTextMessage.mock.calls[0][0].text).toContain('בחר מספר תקין:');
     expect(sendTextMessage.mock.calls[0][0].text).toContain('סיימת את הבדיקה. משהו נוסף?');

@@ -647,15 +647,23 @@ describe('schedule_confirm state', () => {
     expect(ctxStore).toBeNull();
   });
 
-  it('invalid input re-prompts without calling scheduleTaskField', async () => {
+  it('free-text at confirm escapes to AI (no schedule call, ctx cleared per v2 UX)', async () => {
     const user = makeWorker();
     ctxStore = { ...BASE_CTX };
+    // After the escape, the AI mock in this file parses as `schedule_task_field`
+    // and re-enters `startScheduleTaskFieldFlow`, which calls
+    // `findOpenTasksForOwner`. Empty list is enough — the test only checks
+    // that scheduleTaskField isn't called and the ctx moved off confirm.
+    findOpenTasksForOwner.mockResolvedValueOnce([]);
 
     const { handleAIMessage } = await loadRouter();
+    // "אולי" is Hebrew free text — the router's top-level escape hatch clears
+    // ctx and re-enters as a fresh message so the AI parser can try to
+    // understand it. `schedule_confirm` is NOT re-run.
     await handleAIMessage(user, 'אולי');
 
     expect(scheduleTaskField).not.toHaveBeenCalled();
-    expect(ctxStore).toMatchObject({ awaiting: 'schedule_confirm' });
+    expect(ctxStore?.awaiting).not.toBe('schedule_confirm');
   });
 
   it('final auth re-check rejects WORKER who no longer owns the task', async () => {

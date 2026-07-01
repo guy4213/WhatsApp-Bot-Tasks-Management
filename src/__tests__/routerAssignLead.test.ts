@@ -438,7 +438,7 @@ describe('assign_lead — edge cases', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'assign_lead_pick_worker' });
   });
 
-  it('invalid input at confirm re-prompts without calling assignLead', async () => {
+  it('free-text at confirm escapes to AI (no assignLead call, ctx cleared per v2 UX)', async () => {
     const user = makeLeadsViewer();
     ctxStore = {
       awaiting: 'assign_lead_confirm',
@@ -447,11 +447,20 @@ describe('assign_lead — edge cases', () => {
       assignLeadSelectedWorkerId: 'w-1',
       assignLeadSelectedWorkerName: 'דני',
     };
+    // After the escape, AI (per this file's parseIntent mock) parses as
+    // `assign_lead` and re-enters `startAssignLeadFlow`, which needs a lead
+    // list. Empty list is fine — the test only cares that assignLead is not
+    // called and the ctx is no longer `assign_lead_confirm`.
+    findUnassignedLeadsForAssignment.mockResolvedValueOnce([]);
 
     const { handleAIMessage } = await loadRouter();
+    // "אולי" is Hebrew free text — the top-of-router escape hatch clears the
+    // ctx and re-enters as a fresh message so the AI parser can try to
+    // understand it. The confirm branch is NOT re-run (assignLead is not
+    // invoked). This is the v2 "free text at any time" UX contract.
     await handleAIMessage(user, 'אולי');
     expect(assignLead).not.toHaveBeenCalled();
-    expect(ctxStore).toMatchObject({ awaiting: 'assign_lead_confirm' });
+    expect(ctxStore?.awaiting).not.toBe('assign_lead_confirm');
   });
 
   it('AI suggestion shown when provider returns a valid candidate', async () => {
