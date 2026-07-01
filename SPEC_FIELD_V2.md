@@ -62,12 +62,31 @@ can reassign a `TaskField` from WhatsApp — the bot writes `Task.ownerId`
 the worker for the whole Task); if a Task has multiple `TaskField` rows, all
 future scheduling inherits the new owner. Worker roles cannot reassign.
 
-**5. Correcting the inspection type on a `TaskField`.**
-Previously the type was a locked snapshot from `Task.productName`. Update: a
-worker (on their own row) or ADMIN (any row) can update
-`TaskField.inspectionTypeId` and `TaskField.family` when the CRM's
-`Task.productName` was misclassified. Bot never writes `Task.productName` —
-that's still the office's job. Only the TaskField snapshot is corrected.
+**5. Worker correction of inspection type — MVP.**
+A field worker may correct the inspection type for a field task assigned to
+them when the type selected in the system does not match the actual inspection
+required on site. This is a **controlled correction**, not general CRM editing.
+
+Allowed:
+- Update the current `TaskField` inspection type (`inspectionTypeId`).
+- Update the parent `Task.productName` to the corrected `InspectionType.code`.
+- Copy the corrected family into `TaskField.family`.
+- Notify the office/manager (WhatsApp text to Yoram + Sasha).
+- Write an audit record with the old value, new value, worker, `Task` ID,
+  `TaskField` ID, and timestamp.
+
+Not allowed:
+- Editing general CRM `Task` fields (title, description, dueDate, priority, etc.).
+- Changing `Task.status`.
+- Changing customer, price, payment, owner, or any other commercial column on `Task`.
+- Correcting tasks not assigned to the worker (`Task.ownerId != caller`).
+- Using a value that does not exist in `InspectionType`.
+
+**The correction must require worker confirmation before writing.**
+
+MANAGER and ADMIN inherit the same correction ability for any task, subject to
+the same "not allowed" list — they cannot use this flow to bypass the office
+on price/status/owner/etc.
 
 Extensions 1-5 are additive; nothing in §5-§13 changes. The out-of-scope list
 in §14 is unchanged (photos, Outlook, and the other deferred items stay

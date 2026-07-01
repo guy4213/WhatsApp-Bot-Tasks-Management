@@ -69,10 +69,23 @@ describe('AI_INTENTS — v2 field-inspector kinds', () => {
     expect(AI_INTENTS).toContain('report_missing_info');
   });
 
-  it('contains exactly the 6 active intents (X-T2 removed legacy CRM kinds)', () => {
-    expect([...AI_INTENTS].sort()).toEqual([
-      'get_task', 'help', 'report_missing_info', 'report_problem', 'set_field_status', 'unknown',
-    ]);
+  it('contains the known active intents (X-T2 removed legacy CRM kinds; new intents added by later tasks)', () => {
+    // Original 6 (X-T2) plus later additions: D2-T11 schedule_task_field,
+    // D2-T12/13/14 correction intents, D3-T6 assign_lead.
+    const expected = [
+      'assign_lead',
+      'correct_inspection_type',
+      'correct_task_field_site',
+      'get_task',
+      'help',
+      'reassign_task',
+      'report_missing_info',
+      'report_problem',
+      'schedule_task_field',
+      'set_field_status',
+      'unknown',
+    ];
+    expect([...AI_INTENTS].sort()).toEqual(expected);
   });
 });
 

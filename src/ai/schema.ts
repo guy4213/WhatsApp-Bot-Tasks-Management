@@ -9,6 +9,14 @@ export const AI_INTENTS = [
   'report_missing_info',
   'help',
   'unknown',
+  // D2-T12/T13/T14: correction intents (site metadata / task reassign / inspection type)
+  'correct_task_field_site',
+  'reassign_task',
+  'correct_inspection_type',
+  // D2-T11: schedule a new TaskField for an existing Task from WhatsApp.
+  'schedule_task_field',
+  // D3-T6: Sasha lead-assignment via WhatsApp.
+  'assign_lead',
 ] as const;
 
 // Editable fields the model may target with edit_field.

@@ -502,7 +502,7 @@ Two capabilities were promoted from OUT-OF-SCOPE to IN-SCOPE via the SPEC
 Addendum. See `SPEC_FIELD_V2.md` § "Addendum — 2026-07-01".
 
 ### D3-T6 — Sasha lead assignment via WhatsApp
-- **Status:** NOT STARTED. Design pending.
+- **Status:** DONE (local, uncommitted). Extended `src/services/incomingLeads.ts` with `findUnassignedLeadsForAssignment(limit=20)` + `assignLead(leadId, workerId, actorId)` (UPDATE IncomingLead.ownerId + writeAuditLog). Router state machine: `assign_lead_pick_lead` → `assign_lead_pick_worker` → `assign_lead_confirm`. Reuses existing `findActiveInspectors()` + `suggestWorkerForLead()` (D3-T5). Auth: only `isLeadsViewer(user.name) === true` (Sasha + Guy F + Yair) can execute; others rejected. After INSERT no extra plumbing needed — existing D3-T3 poller detects the new `ownerId` and sends the worker alert within 2 min. Tests: `assignLead.test.ts` (6 cases) + `routerAssignLead.test.ts` (14 cases) — 20 new tests pass. tsc clean.
 - **What to do:** new intent `assign_lead` + router state machine + `assignLead(leadId, workerId, actorId)` service in `src/services/incomingLeads.ts` (bot writes to `IncomingLead.ownerId` — first CRM-table write from the bot). Flow: Sasha (or a leads-viewer) types trigger → bot lists unassigned leads (uses `findUnassignedInWindow` — already exists) → Sasha picks number → bot calls `suggestWorkerForLead` (already exists, D3-T5) → shows AI suggestion + numbered list of active inspectors → Sasha picks a worker → confirmation → `UPDATE "IncomingLead" SET "ownerId" = $1 WHERE id = $2`. The existing D3-T3 poller (`leadAssignmentNotifier`) then detects the new `ownerId` and sends the worker their assignment alert — no extra plumbing needed. LEAD CLOSURE is NOT in scope — still the CRM's job.
 - **Definition of Done:** Sasha (or Guy F / Yair) can type "לשייך ליד" from WhatsApp, pick from a list, assign to a worker, and the worker receives the D3-T3 alert within 2 minutes; a worker who is not in `LEADS_VIEWER_NAMES` is rejected with "אין הרשאה".
 - **Auth:** only users in `LEADS_VIEWER_NAMES` (Sasha + Guy F + Yair) can execute the assignment.
@@ -510,7 +510,7 @@ Addendum. See `SPEC_FIELD_V2.md` § "Addendum — 2026-07-01".
 - **Blocked:** no.
 
 ### D2-T12 — Correct site metadata on a `TaskField` from WhatsApp
-- **Status:** NOT STARTED.
+- **Status:** DONE (local, uncommitted). Implemented via `src/services/taskFieldCorrections.ts` `updateSiteMetadata()` — dynamic SET clause on TaskField (only updates provided fields), never touches Customer/Task. Router state machine + handlers in `router.ts` wired via `correct_site_pick_task` → `correct_site_pick_field` → `correct_site_await_value` → `correct_site_confirm`. Auth: WORKER on own TaskField only, MANAGER+ADMIN any. Tests: `taskFieldCorrections.test.ts` (site cases) + `routerCorrections.test.ts` (site flow) — all pass. 442/449 total (baseline was 334); tsc clean.
 - **What to do:** new intent `correct_task_field_site` + router flow. Worker types "הכתובת שגויה" or similar; bot lists their open TaskField rows (or the "current" one from context if one is being worked); worker picks; bot asks which field (address / city / contact name / contact phone) and the corrected value; confirmation; UPDATE the specific column(s) on `TaskField`. Bot NEVER touches `Customer` or `Task` — this is a per-visit override. If the underlying `Customer` row is genuinely wrong, that's still the office's job.
 - **Auth:** WORKER can correct only rows where `Task.ownerId = self`. MANAGER + ADMIN can correct any.
 - **Fields writable:** `siteAddress`, `siteCity`, `fieldContactName`, `fieldContactPhone`. `navigationUrl` optional stretch.
@@ -518,7 +518,7 @@ Addendum. See `SPEC_FIELD_V2.md` § "Addendum — 2026-07-01".
 - **Blocked:** no.
 
 ### D2-T13 — Reassign a `Task` to another worker (MANAGER/ADMIN only)
-- **Status:** NOT STARTED.
+- **Status:** DONE (local, uncommitted). Implemented via `reassignTask()` in `src/services/taskFieldCorrections.ts` — transactional BEGIN/COMMIT: `UPDATE Task.ownerId` + `UPDATE TaskField.workerNotifiedAt = NULL WHERE fieldStatus IN ('ASSIGNED','CONFIRMED')`. Returns `{resetCount, hadInProgressRows}` — the router warns "משימה זו כבר בביצוע. לשייך מחדש בכל זאת?" when in-progress rows exist. Auth: MANAGER + ADMIN only; WORKER rejected. Router state machine: `reassign_pick_task` → `reassign_pick_worker` → `reassign_confirm`. Assumption to verify with implementer: `findUsersByName('')` returns all active users (used to populate worker picker).
 - **What to do:** new intent `reassign_task` + router flow. MANAGER/ADMIN types "לשייך משימה מחדש" / picks a task from a list → picks a target worker from an active-workers list → confirmation → transactional UPDATE: (1) `Task.ownerId = <newWorkerId>`, (2) `TaskField.workerNotifiedAt = NULL` for every TaskField row of this Task whose `fieldStatus IN ('ASSIGNED','CONFIRMED')` so the existing D5-T6 poller sends the §6 card to the new worker. Old worker is silently unassigned. **This is the SECOND CRM-table write from the bot** (first was D3-T6). Extend the SPEC Addendum "additive to CRM schema but bot may write specific documented fields" scope note.
 - **Auth:** MANAGER + ADMIN only. WORKER rejected.
 - **Fields writable:** `Task.ownerId` (write); `TaskField.workerNotifiedAt` (reset to NULL). Nothing else on `Task`.
@@ -526,16 +526,28 @@ Addendum. See `SPEC_FIELD_V2.md` § "Addendum — 2026-07-01".
 - **Dependencies:** D1-T5. No new migration.
 - **Blocked:** no.
 
-### D2-T14 — Correct inspection type on a `TaskField` from WhatsApp
-- **Status:** NOT STARTED.
-- **What to do:** new intent `correct_inspection_type` + router flow. Worker (or ADMIN) types "סוג בדיקה שגוי" or similar; bot asks for the correct type (free-text search against `InspectionType.labelHe` / `code`); bot shows top matches numbered; user picks; confirmation; UPDATE `TaskField.inspectionTypeId` + `TaskField.family` from the picked InspectionType row. Bot NEVER writes `Task.productName` — that's still the office's job. Only the TaskField snapshot is corrected.
-- **Auth:** WORKER can correct only rows where `Task.ownerId = self`. ADMIN any. (Not MANAGER — the type correction is a subject-matter decision; only the assigned worker at the site or an ADMIN can make it.)
-- **Fields writable:** `TaskField.inspectionTypeId`, `TaskField.family`. Nothing else.
+### D2-T14 — Worker correction of inspection type (MVP)
+- **Status:** DONE (local, uncommitted). Implemented via `correctInspectionType()` in `src/services/taskFieldCorrections.ts` — single transaction: UPDATE `TaskField.inspectionTypeId + family` + UPDATE `Task.productName` + WhatsApp notification to Yoram+Sasha (looked up from `User.name`) + `writeAuditLog` capturing old/new productName + taskId + taskFieldId + workerId + timestamp. Rejects when `TaskField.fieldStatus IN ('FINISHED_FIELD','CANCELED')` via `ClosedInspectionError`. Worker confirmation required before write. Router state machine: `correct_type_pick_task` → `correct_type_await_search` (free-text search of `InspectionType.labelHe`) → `correct_type_pick_from_list` → `correct_type_confirm`. Auth: WORKER on own TaskField only, MANAGER+ADMIN any (subject to same closed-status rejection). Deviation from brief: notification message uses `taskField: ${id}` reference instead of a richer customer name — the service function doesn't get the customer name from the caller; enrichment via a `LEFT JOIN Customer` in the prefetch query would be a small follow-up.
+- **What to do:** new intent `correct_inspection_type` + router flow. A field worker types "סוג בדיקה שגוי" (or similar) while working on a specific TaskField; bot asks for the correct type via free-text search against `InspectionType.labelHe` / `code`; bot shows top matches numbered; worker picks; **worker confirmation is REQUIRED before writing** (spec: "The correction must require worker confirmation before writing."). Then, in a single transaction:
+  1. `UPDATE "TaskField" SET "inspectionTypeId" = <newId>, "family" = <newFamily>, "updatedByUserId" = <workerId> WHERE id = <taskFieldId>`
+  2. `UPDATE "Task" SET "productName" = <newInspectionType.code> WHERE id = <taskId>`
+  3. Notify the office (Yoram + Sasha via WhatsApp `sendTextMessage` — same recipient logic as `notifyOfficeDeclined` in `src/services/inspections.ts`): "תיקון סוג בדיקה: העובד <name> עדכן את המשימה של <customer> מ-<oldType> ל-<newType>."
+  4. Write an audit record via `writeAuditLog` capturing: old `productName`, new `productName`, workerId, taskId, taskFieldId, timestamp.
+  This is the WORKER-authored propagation of the correction — no separate ADMIN approval step. The office is NOTIFIED, not asked to approve.
+- **Auth:** WORKER can correct only TaskField rows where `Task.ownerId = self`. MANAGER + ADMIN inherit the same correction ability for any Task.
+- **Fields writable:**
+  - `TaskField.inspectionTypeId`, `TaskField.family`, `TaskField.updatedByUserId`, `TaskField.updatedAt`
+  - `Task.productName` (writes to CRM Task — third CRM-table write from the bot, after D3-T6 and D2-T13)
+- **Fields NOT writable (explicit spec):** general CRM task fields (title, description, dueDate, priority, etc.), `Task.status`, `Task.customerId`, `Task.ownerId`, `Task.price`, and any other commercial/payment/owner column on `Task`. Only `productName`.
+- **Validation:**
+  - The new type must exist in `InspectionType` (validated at pick time by the numbered list — user can't type a raw code)
+  - Worker cannot correct a TaskField they are not assigned to (`Task.ownerId != caller`)
+  - `TaskField.fieldStatus` must not be `FINISHED_FIELD` or `CANCELED` — corrections apply to open field work only
 - **Dependencies:** D1-T2, D1-T5, D1-T7 (need catalog seeded so lookups have data). No new migration.
 - **Blocked:** no.
 
 ### D2-T11 — Schedule a `TaskField` for an existing `Task` from WhatsApp
-- **Status:** NOT STARTED. Full design in `HANDOFF.md`.
+- **Status:** DONE (local, uncommitted). Full design was in `HANDOFF.md` — implementation matches. New service file `src/services/taskFieldScheduling.ts` exports `findOpenTasksForOwner`, `findOpenTasksForAdmin`, `findCustomersByName`, `findOpenTasksForCustomer`, `scheduleTaskField`. Router state machine covers pick-task → search-customer fallback → time → duration → confirm → INSERT (with `workerNotifiedAt=NULL` so the D5-T6 poller sends the §6 card automatically). Auth: WORKER on own Task only, MANAGER+ADMIN any. Tests: `taskFieldScheduling.test.ts` + `routerScheduleTaskField.test.ts` — 49 new tests pass. tsc clean; full suite 442/449 (7 pre-existing skips).
 - **What to do:** new intent `schedule_task_field` + router state machine + `scheduleTaskField(taskId, actorId, {scheduledStartAt, durationMinutes, specialInstructions?})` service. Flow: user types trigger → bot lists user's open tasks (own only for WORKER; any for MANAGER/ADMIN) → user picks → bot asks for date/time (Hebrew parser: "ראשון בעשר") → duration (default 60) → confirmation with all static fields pre-filled from the picked `Task` → `INSERT` into `TaskField` with `workerNotifiedAt = NULL`. The existing D5-T6 poller sends the §6 card automatically. Bot NEVER writes `Task` or `Customer`.
 - **Definition of Done:** any user can schedule a TaskField from WhatsApp against a Task where auth permits; the inspector receives the §6 assignment card within 2 minutes; worker attempting to schedule for someone else's Task is rejected; TaskField inherits customer/address/product from the Task row.
 - **Auth:** WORKER can only schedule for `Task.ownerId = self`. MANAGER + ADMIN can schedule for any `Task`.
@@ -560,7 +572,8 @@ Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — 
 - Editing `TaskField` scheduling fields (`scheduledStartAt`, `scheduledEndAt`, `durationMinutes`, `appointmentTitle`) — reschedule stays in the CRM.
 - Editing `TaskField.specialInstructions` from the bot — CRM only.
 - Editing `Customer` data from the bot — CRM only. The D2-T12 site-metadata correction is a per-visit override on `TaskField`, not a `Customer` write.
-- Editing `Task.productName` from the bot — CRM only. The D2-T14 inspection-type correction is a per-visit snapshot on `TaskField`, not a `Task` write.
+- Editing `Task.productName` outside the D2-T14 controlled correction — CRM only. D2-T14 is the sole path for the bot to write `Task.productName`, and only under the strict validation + notification + audit conditions listed on that task.
+- Editing any other `Task` field (title, description, dueDate, priority, customerId, ownerId outside D2-T13 reassignment, price, and all commercial/payment columns) — CRM only.
 
 ---
 
@@ -578,4 +591,4 @@ Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — 
 - **M10: Templates + production validation.** `D5-T5` (Meta-approved templates for out-of-window sends), end-to-end smoke testing.
 - **M11: WhatsApp-based `TaskField` scheduling for existing `Task`s.** `D2-T11`. Added via 2026-07-01 SPEC Addendum. Bot now writes `TaskField` (not just reads); existing D5-T6 poller fires the §6 card automatically. See `HANDOFF.md` for the full design.
 - **M12: Sasha lead-assignment from WhatsApp.** `D3-T6`. Added via 2026-07-01 SPEC Addendum. Bot writes `IncomingLead.ownerId` (first CRM-table write from the bot); existing D3-T3 poller fires the worker alert automatically. Lead CLOSURE stays in the CRM.
-- **M13: WhatsApp-based `TaskField` corrections.** `D2-T12` (site metadata), `D2-T13` (reassign worker — writes `Task.ownerId` + resets `TaskField.workerNotifiedAt`), `D2-T14` (inspection type snapshot). Added via 2026-07-01 SPEC Addendum. Editing scheduling / duration / instructions still stays in the CRM.
+- **M13: WhatsApp-based corrections.** `D2-T12` (site metadata override on TaskField — no CRM write), `D2-T13` (reassign worker — writes `Task.ownerId` + resets `TaskField.workerNotifiedAt`), `D2-T14` (inspection type — writes BOTH `TaskField.inspectionTypeId/family` AND `Task.productName`, with worker confirmation + office notification + audit). Added via 2026-07-01 SPEC Addendum. Editing scheduling / duration / instructions and all other CRM Task fields still stay in the CRM.

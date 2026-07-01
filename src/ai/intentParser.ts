@@ -80,6 +80,26 @@ export function buildSystemPrompt(ctx: ParseContext): string {
         ctx.history.map((h) => `${h.role === 'user' ? 'USER' : 'BOT'}: ${h.content}`).join('\n')
       : '',
     ctx.pendingNote ? `\nCONTEXT: ${ctx.pendingNote}` : '',
+    // D2-T12/T13/T14: few-shot examples for correction intents.
+    '',
+    '- "הכתובת שגויה" / "לתקן את הכתובת" / "הכתובת לא נכונה" → correct_task_field_site.',
+    '- "איש קשר לא נכון" / "פרטי קשר שגויים" / "לעדכן פרטי קשר" → correct_task_field_site.',
+    '- "לשייך משימה מחדש" / "להעביר משימה לעובד אחר" / "לשנות שיוך" → reassign_task (requires_manager_approval=true).',
+    '- "לשנות את העובד המשויך" / "תשייך את זה ל..." → reassign_task (requires_manager_approval=true).',
+    '- "סוג בדיקה שגוי" / "לתקן את סוג הבדיקה" / "מק"ט לא נכון" → correct_inspection_type (requires_confirmation=true).',
+    '- "הזנתי סוג בדיקה לא נכון" / "צריך לשנות את המק"ט" → correct_inspection_type (requires_confirmation=true).',
+    // D2-T11: few-shot examples for schedule_task_field intent (HANDOFF §4).
+    '- "לתזמן ביקור" / "לתזמן בדיקה" → schedule_task_field, params.scheduledStartAt=null (router will ask).',
+    '- "לקבוע ביקור חדש" / "לקבוע בדיקה חדשה" → schedule_task_field, params.scheduledStartAt=null.',
+    '- "לפתוח תיזמון" → schedule_task_field.',
+    '- "בדיקה נוספת" → schedule_task_field.',
+    '- "לתזמן ביקור מחר ב-10" → schedule_task_field, params.scheduledStartAt="<resolved ISO datetime for tomorrow 10:00 Asia/Jerusalem>".',
+    '- "לקבוע בדיקה ראשון בעשר בבוקר" → schedule_task_field, params.scheduledStartAt="<resolved ISO datetime for next Sunday 10:00>".',
+    '- "לתזמן בדיקה, משך שעה וחצי" → schedule_task_field, params.durationMinutes=90.',
+    // D3-T6: few-shot examples for lead-assignment intent.
+    '- "לשייך ליד" / "לשייך את הליד" → assign_lead (router will show the lead list).',
+    '- "להקצות ליד לעובד" / "שיוך ליד לעובד" → assign_lead.',
+    '- "תשייך ליד לדני" / "תעביר את הליד לטכנאי" → assign_lead.',
   ].filter(Boolean).join('\n');
 }
 

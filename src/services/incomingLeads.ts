@@ -172,3 +172,69 @@ export async function findActiveInspectors(): Promise<InspectorCandidate[]> {
   );
   return rows;
 }
+
+// D3-T6: Sasha lead-assignment via WhatsApp ─────────────────────────────────
+
+/**
+ * All currently unassigned leads (ownerId IS NULL), newest first.
+ * Used by D3-T6 assign-lead flow to display the pick list.
+ * Defaults to 20 items — enough for a WhatsApp conversation.
+ */
+export async function findUnassignedLeadsForAssignment(limit = 20): Promise<IncomingLeadRow[]> {
+  const { rows } = await pool.query<IncomingLeadRow>(
+    `SELECT ${SELECT_LEAD_COLS}
+     FROM "IncomingLead"
+     WHERE "ownerId" IS NULL
+     ORDER BY "receivedAt" DESC
+     LIMIT $1`,
+    [limit],
+  );
+  return rows;
+}
+
+/**
+ * Write ownerId onto an IncomingLead row — the FIRST bot write to a CRM-owned
+ * table (SPEC Addendum point 1). Parameterized to prevent injection. Also
+ * writes an audit-log entry with actor + lead + target-worker captured.
+ *
+ * NOTE: the existing D3-T3 poller (leadAssignmentNotifier) will detect the new
+ * ownerId and send the worker alert automatically — no alert logic here.
+ *
+ * @param leadId   UUID of the IncomingLead row to assign.
+ * @param workerId UUID of the User to set as ownerId.
+ * @param actorId  UUID of the User performing the action (for audit).
+ * @param actorPhone  WhatsApp phone of the actor (for audit).
+ */
+export async function assignLead(
+  leadId: string,
+  workerId: string,
+  actorId: string,
+  actorPhone: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE "IncomingLead" SET "ownerId" = $1 WHERE id = $2`,
+    [workerId, leadId],
+  );
+
+  // Import inline to avoid circular dependency with utils/auditLog.
+  const { writeAuditLog } = await import('../utils/auditLog');
+  await writeAuditLog({
+    userId: actorId,
+    whatsappNumber: actorPhone,
+    originalMessage: null,
+    transcribedMessage: null,
+    detectedIntent: 'assign_lead',
+    detectedAction: 'ASSIGN_LEAD',
+    confidence: null,
+    targetTaskId: leadId,
+    oldValues: null,
+    newValues: { leadId, ownerId: workerId },
+    confirmationStatus: 'CONFIRMED',
+    approvalStatus: null,
+    approverUserId: null,
+    managerNotified: false,
+    executionStatus: 'SUCCESS',
+    errorMessage: null,
+    pendingActionId: null,
+  });
+}

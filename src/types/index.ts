@@ -185,7 +185,15 @@ export type AIIntent =
   | 'report_problem'        // worker reports a problem on an inspection (optionally with problemType)
   | 'report_missing_info'   // worker reports info missing for the final report
   | 'help'                  // user asked what the bot can do
-  | 'unknown';              // could not determine intent
+  | 'unknown'               // could not determine intent
+  // D2-T11: schedule a new TaskField
+  | 'schedule_task_field'       // schedule a new TaskField for an existing Task (office/manager)
+  // D2-T12/T13/T14: correction intents
+  | 'correct_task_field_site'   // correct site metadata on a TaskField (address/city/contact)
+  | 'reassign_task'             // reassign a Task to another worker (MANAGER/ADMIN only)
+  | 'correct_inspection_type'   // correct the inspection type on a TaskField (with confirmation)
+  // D3-T6: Sasha lead-assignment via WhatsApp.
+  | 'assign_lead';              // assign an unassigned IncomingLead to a worker
 
 // v2 inspector-side sub-enums (SPEC_FIELD_V2 §4, §7, §9). These are the SUBSET
 // of `fieldStatus` transitions a worker can trigger via free text — the office-

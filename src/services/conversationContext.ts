@@ -35,7 +35,34 @@ export type AwaitingKind =
   // completes the flow. `_reason` follows the DECLINE button (short reason);
   // `_note` follows the NEED_INFO button (free-text follow-up).
   | 'inspection_decline_reason'
-  | 'inspection_need_info_note';
+  | 'inspection_need_info_note'
+  // D2-T12: correct site metadata on a TaskField (address/city/contact).
+  | 'correct_site_pick_task'    // manager picks which Task
+  | 'correct_site_pick_field'   // manager picks which TaskField (when >1 per Task)
+  | 'correct_site_await_value'  // waiting for the corrected value
+  | 'correct_site_confirm'      // waiting for worker confirmation before writing
+  // D2-T13: reassign a Task to another worker (MANAGER/ADMIN only).
+  | 'reassign_pick_task'        // manager types a task reference
+  | 'reassign_pick_worker'      // manager picks new worker from a numbered list
+  | 'reassign_confirm'          // confirmation before writing (in-progress edge case)
+  // D2-T14: correct inspection type on a TaskField.
+  | 'correct_type_pick_task'    // pick which Task (by reference)
+  | 'correct_type_await_search' // awaiting a search term to narrow the type list
+  | 'correct_type_pick_from_list' // worker picks from a numbered list of matching types
+  | 'correct_type_confirm'      // worker confirmation before write
+  // D3-T6: Sasha lead-assignment via WhatsApp.
+  | 'assign_lead_pick_lead'     // Sasha picks which unassigned lead (numbered list)
+  | 'assign_lead_pick_worker'   // Sasha picks the target worker (numbered list with AI suggestion)
+  | 'assign_lead_confirm'       // Sasha confirms the assignment before writing
+  // D2-T11: schedule a new TaskField for an existing Task from WhatsApp.
+  // State machine per HANDOFF §5. Context payload carries taskId + resolved
+  // Task metadata across states so nothing has to be re-queried at commit time.
+  | 'schedule_intake_pick_task'    // waiting for user to pick a Task number (1..N)
+  | 'schedule_search_customer'     // fallback: waiting for customer name search query
+  | 'schedule_pick_from_search'    // waiting for customer pick after search results
+  | 'schedule_await_time'          // waiting for date/time (Hebrew → ISO 8601)
+  | 'schedule_await_duration'      // waiting for duration in minutes or "אישור" (default 60)
+  | 'schedule_confirm';            // waiting for 1 (confirm) / 2 (cancel)
 
 export interface ConversationState {
   awaiting: AwaitingKind;
@@ -54,6 +81,54 @@ export interface ConversationState {
   // D2-T9: the local date of the equipment reminder tap — retained so the
   // downstream office alert can name the morning the miss was reported for.
   equipmentLocalDate?: string;
+  // D3-T6: assign_lead multi-step state.
+  assignLeadCandidateIds?: string[];   // unassigned lead UUIDs presented to Sasha
+  assignLeadCandidateNames?: string[]; // fromName of each lead (for confirmation text)
+  assignLeadSelectedLeadId?: string;   // chosen lead UUID
+  assignLeadSelectedLeadName?: string; // chosen lead fromName (for confirmation text)
+  assignLeadWorkerIds?: string[];      // inspector candidate UUIDs presented to Sasha
+  assignLeadWorkerNames?: string[];    // worker names (for confirmation text)
+  assignLeadSelectedWorkerId?: string; // chosen worker UUID
+  assignLeadSelectedWorkerName?: string; // chosen worker name (for confirmation text)
+  // D2-T11: schedule_task_field multi-step state.
+  // Populated progressively as the user walks through the state machine.
+  scheduleTaskCandidates?: Array<{   // Task list shown to the user (task-pick state)
+    id: string;
+    title: string;
+    customerName: string | null;
+    inspectionLabelHe: string | null;
+    siteCity: string | null;
+    inspectionTypeId: string | null;
+    family: string | null;
+    ownerId: string | null;
+    siteAddress: string | null;
+    fieldContactName: string | null;
+    fieldContactPhone: string | null;
+    navigationUrl: string | null;
+    productName: string | null;
+  }>;
+  scheduleCustomerCandidates?: Array<{ // Customer search results (search fallback state)
+    id: string;
+    name: string;
+    openTaskCount: number;
+  }>;
+  scheduleSelectedTask?: {            // Resolved Task data carried forward to confirm
+    id: string;
+    title: string;
+    customerName: string | null;
+    inspectionLabelHe: string | null;
+    inspectionTypeId: string | null;
+    family: string | null;
+    ownerId: string | null;
+    siteAddress: string | null;
+    siteCity: string | null;
+    fieldContactName: string | null;
+    fieldContactPhone: string | null;
+    navigationUrl: string | null;
+  };
+  scheduleStartAt?: string;           // ISO 8601 date+time (user-supplied)
+  scheduleDurationMinutes?: number;   // default 60
+  scheduleSpecialInstructions?: string | null;
 }
 
 export async function getContext(phone: string): Promise<ConversationState | null> {

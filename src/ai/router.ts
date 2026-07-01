@@ -62,6 +62,32 @@ import {
 } from '../services/digestPreferences';
 import { getEmployeeEndOfDay, getCompanyEndOfDay } from '../services/tasks';
 import { formatEmployeeEndOfDay, formatManagerEndOfDay } from '../whatsapp/digestContent';
+// D3-T6: Sasha lead-assignment via WhatsApp.
+import { isLeadsViewer } from '../services/specialUsers';
+import {
+  findUnassignedLeadsForAssignment,
+  findActiveInspectors,
+  assignLead,
+} from '../services/incomingLeads';
+import { suggestWorkerForLead } from './leadSuggester';
+// D2-T12/T13/T14: site metadata correction, task reassign, inspection type correction.
+import {
+  updateSiteMetadata,
+  reassignTask,
+  correctInspectionType,
+  ClosedInspectionError,
+  listInspectionTypes,
+  getTaskFieldForCorrection,
+} from '../services/taskFieldCorrections';
+// D2-T11: schedule a new TaskField for an existing Task from WhatsApp.
+import {
+  findOpenTasksForOwner,
+  findOpenTasksForAdmin,
+  findCustomersByName,
+  findOpenTasksForCustomer,
+  scheduleTaskField,
+  type TaskCandidate,
+} from '../services/taskFieldScheduling';
 
 const log = moduleLogger('ai-router');
 
@@ -330,6 +356,87 @@ async function continueConversation(
     return;
   }
 
+  // D3-T6: Sasha lead-assignment multi-step flow.
+  if (ctx.awaiting === 'assign_lead_pick_lead') {
+    await handleAssignLeadPickLeadReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'assign_lead_pick_worker') {
+    await handleAssignLeadPickWorkerReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'assign_lead_confirm') {
+    await handleAssignLeadConfirmReply(user, trimmed, ctx);
+    return;
+  }
+
+  // D2-T11: schedule TaskField multi-step flow.
+  if (ctx.awaiting === 'schedule_intake_pick_task') {
+    await handleSchedulePickTaskReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'schedule_search_customer') {
+    await handleScheduleSearchCustomerReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'schedule_pick_from_search') {
+    await handleSchedulePickFromSearchReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'schedule_await_time') {
+    await handleScheduleAwaitTimeReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'schedule_await_duration') {
+    await handleScheduleAwaitDurationReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'schedule_confirm') {
+    await handleScheduleConfirmReply(user, trimmed, ctx);
+    return;
+  }
+
+  // D2-T12: correct site metadata on a TaskField.
+  if (ctx.awaiting === 'correct_site_pick_task' || ctx.awaiting === 'correct_site_pick_field') {
+    // Re-use the existing resolveAndShowSiteFieldMenu path with the free-text hint.
+    const intent = ctx.intent;
+    if (!intent) { await clearContext(user.phone); await handleAIMessage(user, text); return; }
+    await resolveAndShowSiteFieldMenu(user, intent, trimmed);
+    return;
+  }
+  if (ctx.awaiting === 'correct_site_await_value') {
+    await handleCorrectSiteAwaitValueReply(user, text, ctx);
+    return;
+  }
+
+  // D2-T13: reassign a Task to another worker.
+  if (ctx.awaiting === 'reassign_pick_task') {
+    const intent = ctx.intent;
+    if (!intent) { await clearContext(user.phone); await handleAIMessage(user, text); return; }
+    await resolveAndShowWorkerListForReassign(user, intent, trimmed);
+    return;
+  }
+  if (ctx.awaiting === 'reassign_pick_worker') {
+    await handleReassignPickWorkerReply(user, trimmed, ctx);
+    return;
+  }
+
+  // D2-T14: correct inspection type.
+  if (ctx.awaiting === 'correct_type_pick_task' || ctx.awaiting === 'correct_type_await_search') {
+    const intent = ctx.intent;
+    if (!intent) { await clearContext(user.phone); await handleAIMessage(user, text); return; }
+    await resolveAndShowTypeList(user, intent, trimmed);
+    return;
+  }
+  if (ctx.awaiting === 'correct_type_pick_from_list') {
+    await handleCorrectTypePickFromListReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'correct_type_confirm') {
+    await handleCorrectTypeConfirmReply(user, trimmed, ctx);
+    return;
+  }
+
   // Every remaining state carries a parsed intent. (Captured into a const so the
   // not-undefined narrowing survives the awaits in the branches below.)
   const ctxIntent = ctx.intent;
@@ -465,6 +572,38 @@ async function executeIntent(
       await sendTextMessage({ to: user.phone, text: helpText() });
       return;
     }
+
+    // D3-T6: Sasha lead-assignment via WhatsApp.
+    case 'assign_lead':
+      await startAssignLeadFlow(user);
+      return;
+
+    // D2-T11: schedule a new TaskField for an existing Task from WhatsApp.
+    case 'schedule_task_field': {
+      const startAt = typeof intent.params?.scheduledStartAt === 'string'
+        ? intent.params.scheduledStartAt.trim() : null;
+      const duration = typeof intent.params?.durationMinutes === 'number'
+        ? intent.params.durationMinutes : null;
+      const specialInstr = typeof intent.params?.specialInstructions === 'string'
+        ? intent.params.specialInstructions.trim() : null;
+      await startScheduleTaskFieldFlow(user, startAt, duration, specialInstr);
+      return;
+    }
+
+    // D2-T12: correct site metadata on a TaskField (address/city/contact).
+    case 'correct_task_field_site':
+      await startCorrectSiteFlow(user, intent);
+      return;
+
+    // D2-T13: reassign a Task to another worker (MANAGER/ADMIN only).
+    case 'reassign_task':
+      await startReassignTaskFlow(user, intent);
+      return;
+
+    // D2-T14: correct inspection type on a TaskField.
+    case 'correct_inspection_type':
+      await startCorrectInspectionTypeFlow(user, intent);
+      return;
 
     default:
       await sendTextMessage({ to: user.phone, text: helpText() });
@@ -1714,5 +1853,932 @@ async function safePriorities(): Promise<string[]> {
     return await getAllowedPriorities();
   } catch {
     return [];
+  }
+}
+
+// D3-T6: Sasha lead-assignment via WhatsApp ──────────────────────────────────
+//
+// Flow (3-step state machine):
+//   1. assign_lead intent → auth check → list unassigned leads (numbered)
+//   2. User picks lead → fetch inspectors + AI suggestion → show numbered list
+//   3. User picks worker → confirmation prompt
+//   4. User confirms → assignLead() writes ownerId → ack message
+//
+// Auth: only isLeadsViewer(user.name) may proceed. Others get a rejection.
+// After assignLead() the D3-T3 poller picks up the new ownerId automatically.
+
+const AUTH_REJECT_MSG =
+  'אין הרשאה — רק סשה או תצפיתני dev יכולים לשייך לידים.';
+
+/** Entry-point: triggered by the `assign_lead` AI intent or a direct call. */
+async function startAssignLeadFlow(user: ResolvedUser): Promise<void> {
+  if (!isLeadsViewer(user.name)) {
+    await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
+    return;
+  }
+
+  const leads = await findUnassignedLeadsForAssignment(20);
+  if (leads.length === 0) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין כרגע לידים לא משויכים.' });
+    return;
+  }
+
+  const lines = leads.map((l, i) => {
+    const name = l.fromName ?? '—';
+    const subj = l.subject ?? '(ללא נושא)';
+    return `${i + 1}. ${name} — ${subj}`;
+  });
+
+  await setContext(user.phone, {
+    awaiting: 'assign_lead_pick_lead',
+    assignLeadCandidateIds: leads.map((l) => l.id),
+    assignLeadCandidateNames: leads.map((l) => l.fromName ?? '—'),
+  });
+  await sendTextMessage({
+    to: user.phone,
+    text: `לידים ללא שיוך (${leads.length}):\n${lines.join('\n')}\n\nהשב במספר כדי לבחור ליד.`,
+  });
+}
+
+/** State: assign_lead_pick_lead — user picked a lead number. */
+async function handleAssignLeadPickLeadReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!isLeadsViewer(user.name)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
+    return;
+  }
+
+  if (/^ביטול$/.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+
+  const ids = ctx.assignLeadCandidateIds ?? [];
+  const names = ctx.assignLeadCandidateNames ?? [];
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > ids.length) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `אנא השב במספר בין 1 ל-${ids.length} (או "ביטול").`,
+    });
+    return;
+  }
+
+  const leadId = ids[idx - 1];
+  const leadName = names[idx - 1] ?? '—';
+
+  // Fetch inspectors then AI suggestion (suggestion needs the candidate list).
+  const candidates = await findActiveInspectors();
+  const suggestion = await suggestWorkerForLead({ customerName: leadName }, candidates);
+
+  if (candidates.length === 0) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'לא נמצאו עובדים פעילים לשיוך.' });
+    return;
+  }
+
+  const suggestedCandidate = suggestion.userId
+    ? candidates.find((c) => c.id === suggestion.userId) ?? null
+    : null;
+
+  const lines = candidates.map((c, i) => `${i + 1}. ${c.name} (${c.role})`);
+  const suggestionLine = suggestedCandidate
+    ? `הצעת AI: ${suggestedCandidate.name} (${suggestedCandidate.role}) — ${suggestion.reason}.\n`
+    : '';
+
+  await setContext(user.phone, {
+    awaiting: 'assign_lead_pick_worker',
+    assignLeadSelectedLeadId: leadId,
+    assignLeadSelectedLeadName: leadName,
+    assignLeadWorkerIds: candidates.map((c) => c.id),
+    assignLeadWorkerNames: candidates.map((c) => c.name),
+  });
+  await sendTextMessage({
+    to: user.phone,
+    text: `${suggestionLine}בחר עובד לשיוך הליד של ${leadName}:\n${lines.join('\n')}\n\nהשב במספר (או "ביטול").`,
+  });
+}
+
+/** State: assign_lead_pick_worker — user picked a worker number. */
+async function handleAssignLeadPickWorkerReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!isLeadsViewer(user.name)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
+    return;
+  }
+
+  if (/^ביטול$/.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+
+  const workerIds = ctx.assignLeadWorkerIds ?? [];
+  const workerNames = ctx.assignLeadWorkerNames ?? [];
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > workerIds.length) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `אנא השב במספר בין 1 ל-${workerIds.length} (או "ביטול").`,
+    });
+    return;
+  }
+
+  const workerId = workerIds[idx - 1];
+  const workerName = workerNames[idx - 1] ?? '—';
+  const leadName = ctx.assignLeadSelectedLeadName ?? '—';
+
+  await setContext(user.phone, {
+    awaiting: 'assign_lead_confirm',
+    assignLeadSelectedLeadId: ctx.assignLeadSelectedLeadId,
+    assignLeadSelectedLeadName: leadName,
+    assignLeadSelectedWorkerId: workerId,
+    assignLeadSelectedWorkerName: workerName,
+  });
+  await sendTextMessage({
+    to: user.phone,
+    text: `לשייך את הליד של ${leadName} ל-${workerName}?\n1. אישור\n2. ביטול`,
+  });
+}
+
+/** State: assign_lead_confirm — user typed 1 (confirm) or 2 (cancel). */
+async function handleAssignLeadConfirmReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!isLeadsViewer(user.name)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
+    return;
+  }
+
+  const leadId = ctx.assignLeadSelectedLeadId;
+  const workerId = ctx.assignLeadSelectedWorkerId;
+  const workerName = ctx.assignLeadSelectedWorkerName ?? '—';
+
+  if (!leadId || !workerId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+
+  // Accept "1" or any YES word; "2" or NO words cancel.
+  const isYes = trimmed === '1' || YES_RE.test(trimmed);
+  const isNo  = trimmed === '2' || NO_RE.test(trimmed);
+
+  if (isNo) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+
+  if (!isYes) {
+    await sendTextMessage({ to: user.phone, text: 'השב 1 לאישור או 2 לביטול.' });
+    return;
+  }
+
+  // Perform the assignment — FIRST bot write to a CRM-owned table (SPEC Addendum 1).
+  await assignLead(leadId, workerId, user.id, user.phone);
+  await clearContext(user.phone);
+  await sendTextMessage({
+    to: user.phone,
+    text: `הליד שויך ל-${workerName} ✓. הוא יקבל התראה תוך כמה דקות.`,
+  });
+}
+
+// ── D2-T12: correct site metadata on a TaskField ─────────────────────────────
+// Intent: correct_task_field_site
+// Auth: WORKER on own TaskField; MANAGER/ADMIN any.
+// Flow: resolve TaskField by hint → choose which field → new value → write.
+
+async function startCorrectSiteFlow(user: ResolvedUser, intent: AIIntentResult): Promise<void> {
+  const ref = intent.task_reference;
+  if (!ref) {
+    await setContext(user.phone, { awaiting: 'correct_site_pick_task', intent });
+    await sendTextMessage({ to: user.phone, text: 'לאיזו בדיקה הכוונה? ציין שם לקוח או כתובת אתר.' });
+    return;
+  }
+  await resolveAndShowSiteFieldMenu(user, intent, ref);
+}
+
+async function resolveAndShowSiteFieldMenu(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+  hint: string,
+): Promise<void> {
+  const found = await resolveOpenTaskFieldByHint(user.id, hint).catch(() => null);
+  if (found === null) {
+    await sendTextMessage({ to: user.phone, text: `לא מצאתי בדיקה עבור "${hint}". נסה שוב.` });
+    return;
+  }
+  if ('ambiguous' in found) {
+    await setContext(user.phone, { awaiting: 'correct_site_pick_field', intent });
+    await sendTextMessage({
+      to: user.phone,
+      text: `יש מספר בדיקות תואמות. ציין שם לקוח או כתובת מדויקים יותר.`,
+    });
+    return;
+  }
+  await showSiteFieldMenu(user, found.taskFieldId);
+}
+
+async function showSiteFieldMenu(user: ResolvedUser, taskFieldId: string): Promise<void> {
+  await setContext(user.phone, { awaiting: 'correct_site_await_value', taskFieldId });
+  await sendTextMessage({
+    to: user.phone,
+    text: [
+      'מה לתקן? כתוב בתבנית: <שדה>: <ערך חדש>',
+      '1. כתובת אתר  (siteAddress)',
+      '2. עיר  (siteCity)',
+      '3. שם איש קשר  (fieldContactName)',
+      '4. טלפון איש קשר  (fieldContactPhone)',
+      'לדוגמה: "כתובת אתר: רוטשילד 10 תל אביב"',
+    ].join('\n'),
+  });
+}
+
+/** Map of Hebrew label variants → camelCase column key for site metadata fields. */
+const SITE_FIELD_MAP: Record<string, keyof import('../services/taskFieldCorrections').SiteMetadataFields> = {
+  'כתובת': 'siteAddress', 'כתובת אתר': 'siteAddress', 'siteaddress': 'siteAddress',
+  'עיר': 'siteCity', 'sitecity': 'siteCity',
+  'שם איש קשר': 'fieldContactName', 'איש קשר': 'fieldContactName',
+  'fieldcontactname': 'fieldContactName',
+  'טלפון': 'fieldContactPhone', 'טלפון איש קשר': 'fieldContactPhone',
+  'fieldcontactphone': 'fieldContactPhone',
+};
+
+async function handleCorrectSiteAwaitValueReply(
+  user: ResolvedUser,
+  raw: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const text = raw.trim();
+  if (!text) {
+    await showSiteFieldMenu(user, ctx.taskFieldId);
+    return;
+  }
+  const colonIdx = text.indexOf(':');
+  if (colonIdx === -1) {
+    await sendTextMessage({ to: user.phone, text: 'לא הצלחתי לזהות. השתמש בתבנית: <שם שדה>: <ערך חדש>' });
+    return;
+  }
+  const rawField = text.slice(0, colonIdx).trim().toLowerCase();
+  const newValue = text.slice(colonIdx + 1).trim();
+  const siteFieldKey = SITE_FIELD_MAP[rawField];
+  if (!siteFieldKey) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `לא הכרתי את השדה "${rawField}". השתמש ב: כתובת אתר, עיר, שם איש קשר, טלפון איש קשר.`,
+    });
+    return;
+  }
+  // Auth check: WORKER can only correct their own TaskField.
+  if (!user.isElevated) {
+    const taskFieldRow = await getTaskFieldForCorrection(ctx.taskFieldId);
+    if (!taskFieldRow || taskFieldRow.taskOwnerId !== user.id) {
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'אין הרשאה לתקן בדיקה זו.' });
+      return;
+    }
+  }
+  await updateSiteMetadata(ctx.taskFieldId, user.id, { [siteFieldKey]: newValue });
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עודכן בהצלחה.' });
+  await auditEvent(user, 'correct_task_field_site', null, 'SUCCESS');
+}
+
+// ── D2-T13: reassign a Task to another worker ─────────────────────────────────
+// Intent: reassign_task — MANAGER / ADMIN only.
+
+async function startReassignTaskFlow(user: ResolvedUser, intent: AIIntentResult): Promise<void> {
+  if (!user.isElevated) {
+    await sendTextMessage({ to: user.phone, text: 'אין הרשאה — רק מנהל יכול לשייך מחדש.' });
+    return;
+  }
+  const ref = intent.task_reference;
+  if (!ref) {
+    await setContext(user.phone, { awaiting: 'reassign_pick_task', intent });
+    await sendTextMessage({ to: user.phone, text: 'לאיזו משימה הכוונה? ציין שם לקוח, כותרת, או מספר.' });
+    return;
+  }
+  await resolveAndShowWorkerListForReassign(user, intent, ref);
+}
+
+async function resolveAndShowWorkerListForReassign(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+  taskRef: string,
+): Promise<void> {
+  const res = await resolveTask(user, taskRef);
+  if (!res.match && (!res.ambiguous || res.candidates.length === 0)) {
+    await sendTextMessage({ to: user.phone, text: `לא מצאתי משימה התואמת ל"${taskRef}".` });
+    return;
+  }
+  if (res.ambiguous && res.candidates.length > 0) {
+    const lines = res.candidates.map((t, i) => `${i + 1}. ${t.title}`);
+    await setContext(user.phone, {
+      awaiting: 'task_disambig',
+      intent,
+      candidateTaskIds: res.candidates.map((t) => t.id),
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: `נמצאו כמה משימות:\n${lines.join('\n')}\nהשב במספר.`,
+    });
+    return;
+  }
+  await showWorkerListForReassign(user, intent, res.match!.id);
+}
+
+async function showWorkerListForReassign(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+  taskId: string,
+): Promise<void> {
+  const workers = await findUsersByName('');
+  if (!workers || workers.length === 0) {
+    await sendTextMessage({ to: user.phone, text: 'לא נמצאו עובדים פעילים.' });
+    return;
+  }
+  const lines = workers.map((w, i) => `${i + 1}. ${w.name}`);
+  await setContext(user.phone, {
+    awaiting: 'reassign_pick_worker',
+    intent,
+    candidateTaskIds: [taskId],
+    candidateUserIds: workers.map((w) => w.id),
+  });
+  await sendTextMessage({ to: user.phone, text: `למי לשייך את המשימה?\n${lines.join('\n')}\nהשב במספר.` });
+}
+
+async function handleReassignPickWorkerReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!user.isElevated) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין הרשאה — רק מנהל יכול לשייך מחדש.' });
+    return;
+  }
+  if (!ctx.candidateUserIds || !ctx.candidateTaskIds || ctx.candidateTaskIds.length === 0) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > ctx.candidateUserIds.length) {
+    await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${ctx.candidateUserIds.length}.` });
+    return;
+  }
+  const newOwnerId = ctx.candidateUserIds[idx - 1];
+  const taskId = ctx.candidateTaskIds[0];
+  const result = await reassignTask(taskId, newOwnerId, user.id);
+  await clearContext(user.phone);
+  let msg = `המשימה שויכה מחדש. ${result.resetCount} שורות בדיקה אופסו.`;
+  if (result.hadInProgressRows) msg += ' (שורות שכבר בביצוע לא שונו.)';
+  await sendTextMessage({ to: user.phone, text: msg });
+  await auditEvent(user, 'reassign_task', taskId, 'SUCCESS');
+}
+
+// ── D2-T14: correct inspection type ──────────────────────────────────────────
+// Intent: correct_inspection_type
+// Auth: WORKER on own TaskField; MANAGER/ADMIN any.
+// Flow: resolve TaskField → list types → worker picks → CONFIRM → write + notify.
+
+async function startCorrectInspectionTypeFlow(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+): Promise<void> {
+  const ref = intent.task_reference;
+  if (!ref) {
+    await setContext(user.phone, { awaiting: 'correct_type_pick_task', intent });
+    await sendTextMessage({ to: user.phone, text: 'לאיזו בדיקה הכוונה? ציין שם לקוח או כתובת אתר.' });
+    return;
+  }
+  await resolveAndShowTypeList(user, intent, ref);
+}
+
+async function resolveAndShowTypeList(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+  hint: string,
+): Promise<void> {
+  const found = await resolveOpenTaskFieldByHint(user.id, hint).catch(() => null);
+  if (found === null) {
+    await sendTextMessage({ to: user.phone, text: `לא מצאתי בדיקה פתוחה עבור "${hint}". נסה שם לקוח או כתובת.` });
+    return;
+  }
+  if ('ambiguous' in found) {
+    await setContext(user.phone, { awaiting: 'correct_type_pick_task', intent });
+    await sendTextMessage({ to: user.phone, text: `יש מספר בדיקות תואמות. ציין שם לקוח מדויק יותר.` });
+    return;
+  }
+  const { taskFieldId } = found;
+  // Auth + status check for WORKER.
+  if (!user.isElevated) {
+    const taskFieldRow = await getTaskFieldForCorrection(taskFieldId);
+    if (!taskFieldRow || taskFieldRow.taskOwnerId !== user.id) {
+      await sendTextMessage({ to: user.phone, text: 'אין הרשאה לתקן בדיקה זו.' });
+      return;
+    }
+    if (taskFieldRow.fieldStatus === 'FINISHED_FIELD' || taskFieldRow.fieldStatus === 'CANCELED') {
+      await sendTextMessage({ to: user.phone, text: 'בדיקה כבר סגורה — לא ניתן לתקן.' });
+      return;
+    }
+  }
+  await showInspectionTypeListForCorrection(user, intent, taskFieldId);
+}
+
+async function showInspectionTypeListForCorrection(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+  taskFieldId: string,
+): Promise<void> {
+  const types = await listInspectionTypes();
+  if (types.length === 0) {
+    await sendTextMessage({ to: user.phone, text: 'לא נמצאו סוגי בדיקות.' });
+    return;
+  }
+  const display = types.slice(0, 20);
+  const lines = display.map((t, i) => `${i + 1}. [${t.code}] ${t.labelHe}`);
+  await setContext(user.phone, {
+    awaiting: 'correct_type_pick_from_list',
+    taskFieldId,
+    candidateUserIds: display.map((t) => t.id),
+  });
+  const extraLine = types.length > 20 ? `\nועוד ${types.length - 20}. כתוב מילת חיפוש לצמצום.` : '';
+  await sendTextMessage({
+    to: user.phone,
+    text: `בחר סוג בדיקה חדש (השב במספר), או כתוב מילת חיפוש לסינון:\n${lines.join('\n')}${extraLine}`,
+  });
+}
+
+async function handleCorrectTypePickFromListReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!ctx.taskFieldId || !ctx.candidateUserIds) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const idx = parseInt(trimmed, 10);
+  if (Number.isInteger(idx) && idx >= 1 && idx <= ctx.candidateUserIds.length) {
+    const newTypeId = ctx.candidateUserIds[idx - 1];
+    const allTypes = await listInspectionTypes();
+    const chosen = allTypes.find((t) => t.id === newTypeId);
+    await setContext(user.phone, {
+      awaiting: 'correct_type_confirm',
+      taskFieldId: ctx.taskFieldId,
+      candidateUserIds: [newTypeId],
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: `לשנות את סוג הבדיקה ל-"${chosen?.labelHe ?? newTypeId}"?\nהשב "כן" לאישור או "לא" לביטול.`,
+    });
+    return;
+  }
+  // Treat as a search term.
+  const allTypes = await listInspectionTypes();
+  const lower = trimmed.toLowerCase();
+  const filtered = allTypes.filter(
+    (t) => t.labelHe.includes(trimmed) || t.code.toLowerCase().includes(lower),
+  );
+  if (filtered.length === 0) {
+    await sendTextMessage({ to: user.phone, text: `לא נמצאו תוצאות עבור "${trimmed}". נסה שוב.` });
+    return;
+  }
+  const display = filtered.slice(0, 20);
+  const lines = display.map((t, i) => `${i + 1}. [${t.code}] ${t.labelHe}`);
+  await setContext(user.phone, {
+    awaiting: 'correct_type_pick_from_list',
+    taskFieldId: ctx.taskFieldId,
+    candidateUserIds: display.map((t) => t.id),
+  });
+  await sendTextMessage({ to: user.phone, text: `תוצאות חיפוש:\n${lines.join('\n')}` });
+}
+
+async function handleCorrectTypeConfirmReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!ctx.taskFieldId || !ctx.candidateUserIds || ctx.candidateUserIds.length === 0) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  if (NO_RE.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  if (!YES_RE.test(trimmed)) {
+    await sendTextMessage({ to: user.phone, text: 'השב "כן" לאישור או "לא" לביטול.' });
+    return;
+  }
+  const newTypeId = ctx.candidateUserIds[0];
+  try {
+    const result = await correctInspectionType(ctx.taskFieldId, newTypeId, user.id, user.name);
+    await clearContext(user.phone);
+    await sendTextMessage({
+      to: user.phone,
+      text: `סוג הבדיקה עודכן מ-${result.oldProductName} ל-${result.newProductName}.`,
+    });
+  } catch (err) {
+    await clearContext(user.phone);
+    if (err instanceof ClosedInspectionError) {
+      await sendTextMessage({ to: user.phone, text: 'בדיקה כבר סגורה — לא ניתן לתקן.' });
+    } else {
+      log.error({ err, taskFieldId: ctx.taskFieldId, newTypeId }, 'D2-T14: correction failed');
+      await sendTextMessage({ to: user.phone, text: 'שגיאה בעדכון. נסה שוב.' });
+    }
+  }
+}
+
+// ── D2-T11: Schedule a new TaskField for an existing Task from WhatsApp ──────
+//
+// Flow (HANDOFF §3 state machine, 6 states):
+//   1. `schedule_task_field` intent → list open Tasks (own for WORKER, any for MANAGER/ADMIN)
+//   2. User picks Task number, or types "חיפוש" for the customer-search fallback
+//   3. [Fallback] search customer → pick customer → pick Task
+//   4. Ask for date+time (MVP: ISO or DD/MM/YYYY HH:mm; voice via D5-T2 pre-transcribed)
+//   5. Ask for duration (default 60 min)
+//   6. Confirmation card → confirm → INSERT TaskField (workerNotifiedAt=NULL)
+//      → D5-T6 poller sends the §6 assignment card automatically.
+//
+// Auth (HANDOFF §2): WORKER/TECHNICIAN → own tasks only. MANAGER/ADMIN → any.
+// The bot NEVER writes Task or Customer (HANDOFF §1 / SPEC §1 core principle 2).
+
+/** True when the caller may schedule TaskFields for any Task. */
+function canScheduleAnyTask(user: ResolvedUser): boolean {
+  return user.role === 'MANAGER' || user.role === 'ADMIN';
+}
+
+/** Render a numbered task list for the task-pick prompt (D2-T11). */
+function renderTaskCandidateList(
+  tasks: NonNullable<ConversationState['scheduleTaskCandidates']>,
+): string {
+  return tasks.map((t, i) => {
+    const customer = t.customerName ?? '(לקוח לא ידוע)';
+    const type = t.inspectionLabelHe ?? t.productName ?? '(סוג לא ידוע)';
+    const city = t.siteCity ? ` — ${t.siteCity}` : '';
+    return `${i + 1}. ${customer} — ${type}${city}`;
+  }).join('\n');
+}
+
+/** Entry-point: triggered by the `schedule_task_field` AI intent (D2-T11). */
+async function startScheduleTaskFieldFlow(
+  user: ResolvedUser,
+  prefilledStartAt: string | null,
+  prefilledDuration: number | null,
+  prefilledSpecialInstructions: string | null,
+): Promise<void> {
+  const rawTasks = canScheduleAnyTask(user)
+    ? await findOpenTasksForAdmin(10)
+    : await findOpenTasksForOwner(user.id, 10);
+
+  if (rawTasks.length === 0) {
+    await clearContext(user.phone);
+    await sendTextMessage({
+      to: user.phone,
+      text: canScheduleAnyTask(user)
+        ? 'לא נמצאו משימות פתוחות לתזמון.'
+        : 'אין לך משימות פתוחות לתזמון.',
+    });
+    return;
+  }
+
+  const taskCandidates = rawTasks.map((t: TaskCandidate) => ({
+    id: t.id,
+    title: t.title,
+    customerName: t.customerName,
+    inspectionLabelHe: t.inspectionLabelHe,
+    siteCity: t.siteCity,
+    inspectionTypeId: t.inspectionTypeId,
+    family: t.inspectionFamily,
+    ownerId: t.ownerId,
+    siteAddress: t.siteAddress,
+    fieldContactName: t.fieldContactName,
+    fieldContactPhone: t.fieldContactPhone,
+    navigationUrl: t.navigationUrl,
+    productName: t.productName,
+  }));
+
+  const list = renderTaskCandidateList(taskCandidates);
+  await setContext(user.phone, {
+    awaiting: 'schedule_intake_pick_task',
+    scheduleTaskCandidates: taskCandidates,
+    scheduleStartAt: prefilledStartAt ?? undefined,
+    scheduleDurationMinutes: prefilledDuration ?? undefined,
+    scheduleSpecialInstructions: prefilledSpecialInstructions ?? undefined,
+  });
+  await sendTextMessage({
+    to: user.phone,
+    text: `המשימות הפתוחות שלך:\n${list}\n\nבחר מספר, או כתוב "חיפוש" לחיפוש לפי לקוח, או "ביטול".`,
+  });
+}
+
+/** State: schedule_intake_pick_task — user picks a number or types "חיפוש" / "ביטול". */
+async function handleSchedulePickTaskReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (/^ביטול$|^cancel$/i.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  if (/^חיפוש$/.test(trimmed)) {
+    await setContext(user.phone, { ...ctx, awaiting: 'schedule_search_customer' });
+    await sendTextMessage({ to: user.phone, text: 'שם הלקוח או חלק ממנו?' });
+    return;
+  }
+  const tasks = ctx.scheduleTaskCandidates ?? [];
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > tasks.length) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `אנא השב במספר בין 1 ל-${tasks.length}, "חיפוש", או "ביטול".`,
+    });
+    return;
+  }
+  await scheduleProcessChosenTask(user, ctx, tasks[idx - 1]);
+}
+
+/** Internal: validate chosen Task then route to time or duration prompt. */
+async function scheduleProcessChosenTask(
+  user: ResolvedUser,
+  ctx: ConversationState,
+  chosen: NonNullable<ConversationState['scheduleTaskCandidates']>[number],
+): Promise<void> {
+  if (!canScheduleAnyTask(user) && chosen.ownerId !== user.id) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין הרשאה למשימה הזאת.' });
+    return;
+  }
+  if (!chosen.inspectionTypeId || !chosen.family) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'סוג הבדיקה של המשימה לא בקטלוג — פנה לאדמין.' });
+    return;
+  }
+  const selectedTask: NonNullable<ConversationState['scheduleSelectedTask']> = {
+    id: chosen.id, title: chosen.title, customerName: chosen.customerName,
+    inspectionLabelHe: chosen.inspectionLabelHe, inspectionTypeId: chosen.inspectionTypeId,
+    family: chosen.family, ownerId: chosen.ownerId, siteAddress: chosen.siteAddress,
+    siteCity: chosen.siteCity, fieldContactName: chosen.fieldContactName,
+    fieldContactPhone: chosen.fieldContactPhone, navigationUrl: chosen.navigationUrl,
+  };
+  if (ctx.scheduleStartAt) {
+    await setContext(user.phone, {
+      awaiting: 'schedule_await_duration', scheduleSelectedTask: selectedTask,
+      scheduleStartAt: ctx.scheduleStartAt, scheduleDurationMinutes: ctx.scheduleDurationMinutes,
+      scheduleSpecialInstructions: ctx.scheduleSpecialInstructions,
+    });
+    await sendTextMessage({ to: user.phone, text: 'משך? (ברירת מחדל: 60 דקות. שלח מספר בדקות או "אישור")' });
+    return;
+  }
+  await setContext(user.phone, {
+    awaiting: 'schedule_await_time', scheduleSelectedTask: selectedTask,
+    scheduleDurationMinutes: ctx.scheduleDurationMinutes,
+    scheduleSpecialInstructions: ctx.scheduleSpecialInstructions,
+  });
+  await sendTextMessage({ to: user.phone, text: 'מתי? (תאריך + שעה. למשל: "05/07/2026 10:00" או "2026-07-05T10:00")' });
+}
+
+/** State: schedule_search_customer — user typed a customer name query. */
+async function handleScheduleSearchCustomerReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (/^ביטול$|^cancel$/i.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  if (!trimmed) {
+    await sendTextMessage({ to: user.phone, text: 'שם הלקוח או חלק ממנו?' });
+    return;
+  }
+  const customers = await findCustomersByName(trimmed, 10);
+  if (customers.length === 0) {
+    await sendTextMessage({ to: user.phone, text: `לא נמצאו לקוחות עבור "${trimmed}". נסה שם אחר או כתוב "ביטול".` });
+    return;
+  }
+  const lines = customers.map((c, i) => {
+    const w = c.openTaskCount === 1 ? '1 משימה פתוחה' : `${c.openTaskCount} משימות פתוחות`;
+    return `${i + 1}. ${c.name} — ${w}`;
+  });
+  await setContext(user.phone, { ...ctx, awaiting: 'schedule_pick_from_search', scheduleCustomerCandidates: customers });
+  await sendTextMessage({ to: user.phone, text: `מצאתי:\n${lines.join('\n')}\nבחר לקוח (או "ביטול").` });
+}
+
+/** State: schedule_pick_from_search — user picks a customer, then we show their Tasks. */
+async function handleSchedulePickFromSearchReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (/^ביטול$|^cancel$/i.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  const customers = ctx.scheduleCustomerCandidates ?? [];
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > customers.length) {
+    await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${customers.length} (או "ביטול").` });
+    return;
+  }
+  const chosen = customers[idx - 1];
+  const rawTasks = await findOpenTasksForCustomer(chosen.id, 10);
+  if (rawTasks.length === 0) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: `אין משימות פתוחות עבור ${chosen.name}.` });
+    return;
+  }
+  const filteredTasks = canScheduleAnyTask(user) ? rawTasks : rawTasks.filter((t) => t.ownerId === user.id);
+  if (filteredTasks.length === 0) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: `אין לך משימות פתוחות עבור ${chosen.name}.` });
+    return;
+  }
+  const taskCandidates = filteredTasks.map((t: TaskCandidate) => ({
+    id: t.id, title: t.title, customerName: t.customerName,
+    inspectionLabelHe: t.inspectionLabelHe, siteCity: t.siteCity,
+    inspectionTypeId: t.inspectionTypeId, family: t.inspectionFamily,
+    ownerId: t.ownerId, siteAddress: t.siteAddress,
+    fieldContactName: t.fieldContactName, fieldContactPhone: t.fieldContactPhone,
+    navigationUrl: t.navigationUrl, productName: t.productName,
+  }));
+  const list = renderTaskCandidateList(taskCandidates);
+  await setContext(user.phone, {
+    ...ctx, awaiting: 'schedule_intake_pick_task',
+    scheduleTaskCandidates: taskCandidates, scheduleCustomerCandidates: undefined,
+  });
+  await sendTextMessage({ to: user.phone, text: `משימות פתוחות של ${chosen.name}:\n${list}\nבחר משימה (או "ביטול").` });
+}
+
+/** State: schedule_await_time — user types a date+time in ISO or DD/MM/YYYY HH:mm format. */
+async function handleScheduleAwaitTimeReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (/^ביטול$|^cancel$/i.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  if (!trimmed) {
+    await sendTextMessage({ to: user.phone, text: 'מתי? (תאריך + שעה)' });
+    return;
+  }
+  // Try ISO then DD/MM/YYYY HH:mm.
+  // TODO(D2-T11-voice): for full Hebrew date parsing ("ראשון בעשר") call parseIntent
+  //   with a specialized date-extraction prompt (voice transcript arrives here as text
+  //   via D5-T2 and is already ISO from the AI param or a human-typed pattern).
+  let isoStart: string | null = null;
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(trimmed)) {
+    isoStart = trimmed;
+  } else {
+    const m = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[T ](\d{1,2}):(\d{2})/);
+    if (m) {
+      isoStart = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}T${m[4].padStart(2, '0')}:${m[5]}:00+03:00`;
+    }
+  }
+  if (!isoStart || isNaN(new Date(isoStart).getTime())) {
+    await sendTextMessage({
+      to: user.phone,
+      text: 'לא הצלחתי להבין את התאריך. נסה: "05/07/2026 10:00" או "2026-07-05T10:00".',
+    });
+    return;
+  }
+  if (new Date(isoStart) <= new Date()) {
+    await sendTextMessage({ to: user.phone, text: 'לא ניתן לתזמן בעבר. אנא בחר תאריך עתידי.' });
+    return;
+  }
+  await setContext(user.phone, { ...ctx, awaiting: 'schedule_await_duration', scheduleStartAt: new Date(isoStart).toISOString() });
+  await sendTextMessage({ to: user.phone, text: 'משך? (ברירת מחדל: 60 דקות. שלח מספר בדקות או "אישור")' });
+}
+
+/** State: schedule_await_duration — user types minutes or "אישור". */
+async function handleScheduleAwaitDurationReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (/^ביטול$|^cancel$/i.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  let duration = ctx.scheduleDurationMinutes ?? 60;
+  if (trimmed && !/^אישור$|^ok$/i.test(trimmed)) {
+    const n = parseInt(trimmed, 10);
+    if (Number.isInteger(n) && n > 0) {
+      duration = n;
+    } else {
+      await sendTextMessage({ to: user.phone, text: 'שלח מספר דקות (למשל 90) או "אישור" לברירת המחדל (60 דקות).' });
+      return;
+    }
+  }
+  const task = ctx.scheduleSelectedTask;
+  if (!task || !ctx.scheduleStartAt) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const startFormatted = `${fmtDate(ctx.scheduleStartAt)} ${fmtTime(ctx.scheduleStartAt)}`;
+  const confirmText = [
+    'לאישור:',
+    `לקוח: ${task.customerName ?? '(לא ידוע)'}`,
+    `בדיקה: ${task.inspectionLabelHe ?? task.title}`,
+    `כתובת: ${[task.siteAddress, task.siteCity].filter(Boolean).join(', ') || '—'}`,
+    `איש קשר: ${[task.fieldContactName, task.fieldContactPhone].filter(Boolean).join(', ') || '—'}`,
+    `מתי: ${startFormatted}`,
+    `משך: ${duration} דקות`,
+    '',
+    '1. אישור  2. ביטול',
+  ].join('\n');
+  await setContext(user.phone, { ...ctx, awaiting: 'schedule_confirm', scheduleDurationMinutes: duration });
+  await sendTextMessage({ to: user.phone, text: confirmText });
+}
+
+/** State: schedule_confirm — user types 1 (confirm) or 2 (cancel). */
+async function handleScheduleConfirmReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const isYes = trimmed === '1' || YES_RE.test(trimmed);
+  const isNo  = trimmed === '2' || NO_RE.test(trimmed);
+  if (isNo || /^ביטול$|^cancel$/i.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  if (!isYes) {
+    await sendTextMessage({ to: user.phone, text: 'השב 1 לאישור או 2 לביטול.' });
+    return;
+  }
+  const task = ctx.scheduleSelectedTask;
+  const startAt = ctx.scheduleStartAt;
+  const duration = ctx.scheduleDurationMinutes ?? 60;
+  if (!task || !startAt || !task.inspectionTypeId || !task.family) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  // Final auth re-check at commit time (HANDOFF §2).
+  if (!canScheduleAnyTask(user) && task.ownerId !== user.id) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין הרשאה למשימה הזאת.' });
+    return;
+  }
+  try {
+    const { taskFieldId } = await scheduleTaskField({
+      taskId: task.id,
+      inspectionTypeId: task.inspectionTypeId,
+      family: task.family,
+      appointmentTitle: `בדיקה נוספת ל-${task.customerName ?? task.title}`,
+      scheduledStartAt: startAt,
+      durationMinutes: duration,
+      siteAddress: task.siteAddress,
+      siteCity: task.siteCity,
+      fieldContactName: task.fieldContactName,
+      fieldContactPhone: task.fieldContactPhone,
+      navigationUrl: task.navigationUrl,
+      specialInstructions: ctx.scheduleSpecialInstructions ?? null,
+      updatedByUserId: user.id,
+    });
+    await clearContext(user.phone);
+    await sendTextMessage({
+      to: user.phone,
+      text: `התיזמון נקלט.\nTaskField ID: ${taskFieldId}\nהטכנאי יקבל כרטיס משימה תוך כמה דקות.`,
+    });
+  } catch (err) {
+    log.error({ err, userId: user.id, taskId: task.id }, 'D2-T11: scheduleTaskField INSERT failed');
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה בשמירת התיזמון. נסה שוב מאוחר יותר.' });
   }
 }
