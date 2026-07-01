@@ -267,6 +267,29 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
     return;
   }
 
+  // ── Layer 2: bare-digit guard ────────────────────────────────────────────────
+  // If a manager-menu user types a single digit (1–9) with NO active context,
+  // treat it as a menu pick rather than sending it to the AI parser.
+  // This prevents the scenario: show menu → item 1 (snapshot) → context
+  // cleared → "2" gets routed through the AI parser which may recycle stale
+  // chat history and produce an unrelated search result.
+  //
+  // We re-open the menu (which sets awaiting:'mgr_menu_root') and then
+  // immediately dispatch the digit to handleMgrMenuRootReply by passing a
+  // synthetic mgr_menu_root context. This avoids a second getContext() call
+  // whose cached mock value might not yet reflect the freshly-set context.
+  //
+  // Worker users are intentionally excluded — their bare digits (e.g. picker
+  // selections in an inspection flow) are NOT the same pattern and they do not
+  // have a persistent manager-root menu to fall back to.
+  const trimmedForGuard = text.trim();
+  if (/^[1-9]$/.test(trimmedForGuard) && isManagerMenuUser(user)) {
+    await showMenu(user);          // sets awaiting: 'mgr_menu_root' + sends menu text
+    // Immediately route the digit as if the user replied to the freshly-shown menu.
+    await continueConversation(user, trimmedForGuard, { awaiting: 'mgr_menu_root' });
+    return;
+  }
+
   // Fresh message → parse, with the recent rolling window for reference resolution.
   let intent: AIIntentResult;
   try {
@@ -285,17 +308,35 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   // Record the user's turn AFTER parsing (so it isn't fed back into its own parse).
   await appendTurn(user.phone, 'user', text);
 
-  await routeIntent(user, intent);
+  await routeIntent(user, intent, text);
 }
 
 // ── Threshold routing ──────────────────────────────────────────────────────────
 
-async function routeIntent(user: ResolvedUser, intent: AIIntentResult): Promise<void> {
+async function routeIntent(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+  originalText?: string,
+): Promise<void> {
   // 1. Unknown or very low confidence → use the model's Hebrew clarification when it
   //    provided one (status-change / out-of-scope answers), else ask to rephrase.
   //    Either way, record the event in the audit log.
   if (intent.intent === 'unknown' || intent.confidence < CONF_LOW) {
     await auditEvent(user, 'unknown', null, 'SKIPPED', intent.clarification ?? 'unrecognized request');
+
+    // Layer 4 fix: for a manager-menu user with a very short input (≤3 chars),
+    // SHOW the menu directly instead of printing a generic hint. The model correctly
+    // returned 'unknown' for a bare digit (per the Layer 3 system-prompt rule), but
+    // a bare digit for a manager-menu user almost certainly means a menu pick, so we
+    // re-open the menu so they can try again with clear context visible.
+    if (isManagerMenuUser(user) && originalText !== undefined) {
+      const trimmedInput = originalText.trim();
+      if (trimmedInput.length <= 3) {
+        await showMenu(user);
+        return;
+      }
+    }
+
     const mgrSuffix = isManagerMenuUser(user)
       ? '\nתרצה לראות את התפריט? כתוב "תפריט".'
       : '';
@@ -3485,6 +3526,10 @@ async function showMgrSnapshot(user: ResolvedUser): Promise<void> {
   ].join('\n');
 
   await sendTextMessage({ to: user.phone, text });
+  // Layer 1 fix: restore mgr_menu_root so the next bare digit picks the right item.
+  // Do NOT re-send the menu text — the snapshot is a one-shot display; the state
+  // preservation alone is enough for "2" to route to item 2 on the next turn.
+  await setContext(user.phone, { awaiting: 'mgr_menu_root' });
 }
 
 // ── 2. Today's field inspections ─────────────────────────────────────────────
@@ -3774,12 +3819,12 @@ async function handleMgrLeadsPickRowReply(
   const leadId = ids[idx - 1];
   const leadName = names[idx - 1] ?? '—';
   // Show lead details — read from IncomingLead
-  const { findUnassignedLeadsForAssignment: fetchLeads } = await import('../services/incomingLeads');
-  // We can't fetch by ID directly in this flow — display the stored name + note
-  await clearContext(user.phone);
+  void leadId; // referenced for display only (no ID-based fetch in this list path)
+  // Layer 1 fix: restore mgr_menu_root so the next bare digit picks the right item.
+  await setContext(user.phone, { awaiting: 'mgr_menu_root' });
   await sendTextMessage({
     to: user.phone,
-    text: `ליד: ${leadName} (ID: ${leadId})\nלשיוך, בחר אפשרות 3 בתפריט הלידים.`,
+    text: `ליד: ${leadName}\nלשיוך, בחר אפשרות 3 בתפריט הלידים.`,
   });
 }
 
@@ -3888,7 +3933,8 @@ async function handleMgrWorkersPickWorkerReply(
   });
   const summary = `סיכום: ${detail.finished}/${detail.total} בוצעו, חריגים פתוחים: ${detail.openExceptions}`;
 
-  await clearContext(user.phone);
+  // Layer 1 fix: restore mgr_menu_root so the next bare digit picks the right item.
+  await setContext(user.phone, { awaiting: 'mgr_menu_root' });
   await sendChunked(user.phone,
     `${workerName} — היום (${fmtDDMM(localDate)}):\n\n${lines.join('\n\n')}\n\n${summary}`,
   );

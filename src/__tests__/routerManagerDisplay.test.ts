@@ -203,10 +203,12 @@ describe('formatInspectionDetail', () => {
     problemNote: null,
   };
 
-  it('first line is the stripped label (not raw CRM title)', () => {
+  it('starts with the labeled "סוג בדיקה" line — no unlabeled hero title (avoids duplication)', () => {
     const result = formatInspectionDetail(baseDetail, 'actions');
     const lines = result.split('\n');
-    // First line should be the cleaned label, not the raw CRM title
+    // First line must be a labeled field, not a repeated title
+    expect(lines[0]).toMatch(/^סוג בדיקה:/);
+    // The label carries the cleaned inspection type — no raw CRM garbage
     expect(lines[0]).not.toContain('🧪');
     expect(lines[0]).not.toContain('2026-07-01');
     expect(lines[0]).not.toContain('יאיר — 2026');

@@ -297,6 +297,23 @@ describe('item 1 — management snapshot', () => {
     await handleAIMessage(admin, '1');
     expect(clearContext).toHaveBeenCalled();
   });
+
+  it('restores mgr_menu_root after snapshot so next bare digit picks correct item (Layer 1 fix)', async () => {
+    // Step 1: user types "1" → snapshot is shown, mgr_menu_root is restored.
+    ctxStore = { awaiting: 'mgr_menu_root' };
+    getContext.mockResolvedValue(ctxStore);
+    await handleAIMessage(admin, '1');
+    // After snapshot, context must be mgr_menu_root (not null/cleared).
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+
+    // Step 2: simulate user types "2" with the restored mgr_menu_root context.
+    getTodayFieldInspections.mockResolvedValue([]);
+    getContext.mockResolvedValue(ctxStore);
+    await handleAIMessage(admin, '2');
+    // Should have handled item 2 (today's inspections), NOT gone to AI parser.
+    // clearContext was called (item 2 for empty list clears context).
+    expect(lastMsg()).toMatch(/אין בדיקות/);
+  });
 });
 
 // ── Item 2: today's inspections ───────────────────────────────────────────────
@@ -643,6 +660,57 @@ describe('item 6 — search sub-menu', () => {
 
     await handleAIMessage(admin, '4');
     expect(lastMsg()).toContain('שלום, מה תרצה לעשות?');
+  });
+});
+
+// ── Layer 1: sub-menu "חזרה" restores mgr_menu_root ──────────────────────────
+// Verify that after returning to the menu with "חזרה", a subsequent bare digit
+// routes to the correct menu item (not to the AI parser).
+
+describe('Layer 1 — back navigation leaves mgr_menu_root active', () => {
+  it('"חזרה" from exceptions sub restores mgr_menu_root, next "3" picks item 3', async () => {
+    // User is in exceptions sub, types "חזרה".
+    ctxStore = { awaiting: 'mgr_exceptions_sub' };
+    getContext.mockResolvedValue(ctxStore);
+    await handleAIMessage(admin, '6'); // option 6 = חזרה in exceptions sub
+
+    // After returning, context should be mgr_menu_root.
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+
+    // Simulate "3" next — should open exceptions sub-menu (item 3).
+    getContext.mockResolvedValue(ctxStore);
+    await handleAIMessage(admin, '3');
+    const msg = lastMsg();
+    expect(msg).toContain('חריגים ודיווחים');
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_exceptions_sub' });
+  });
+
+  it('"חזרה" from workers sub restores mgr_menu_root, next "5" picks item 5', async () => {
+    ctxStore = { awaiting: 'mgr_workers_sub' };
+    getContext.mockResolvedValue(ctxStore);
+    await handleAIMessage(admin, '3'); // option 3 = חזרה in workers sub
+
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+
+    getContext.mockResolvedValue(ctxStore);
+    await handleAIMessage(admin, '5');
+    const msg = lastMsg();
+    expect(msg).toContain('עובדים וסיכומי יום');
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_workers_sub' });
+  });
+
+  it('"חזרה" from search sub restores mgr_menu_root, next "6" picks item 6', async () => {
+    ctxStore = { awaiting: 'mgr_search_sub' };
+    getContext.mockResolvedValue(ctxStore);
+    await handleAIMessage(admin, '4'); // option 4 = חזרה in search sub
+
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+
+    getContext.mockResolvedValue(ctxStore);
+    await handleAIMessage(admin, '6');
+    const msg = lastMsg();
+    expect(msg).toContain('מה לחפש?');
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_search_sub' });
   });
 });
 

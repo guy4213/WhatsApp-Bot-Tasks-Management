@@ -161,7 +161,7 @@ const MANAGER_FEW_SHOT = [
   '- "לתקן סוג בדיקה" → correct_inspection_type (requires_confirmation=true).',
 ].join('\n');
 
-export function buildSystemPrompt(ctx: ParseContext): string {
+export function buildSystemPrompt(ctx: ParseContext, message?: string): string {
   const todayIsrael = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
@@ -223,6 +223,12 @@ export function buildSystemPrompt(ctx: ParseContext): string {
     '- confidence reflects how sure you are (0..1). If the message is vague, lower it.',
     '- For get_task you MUST identify the task via task_reference. If the user did NOT say which task, set task_reference=null, add "task_reference" to missing_fields, and write a Hebrew clarification.',
     '- Never invent task ids.',
+    '- CRITICAL — Do NOT recycle search terms, worker names, or customer names from prior',
+    '  conversation history unless the CURRENT user message explicitly mentions them.',
+    '  Short numeric messages like "1", "2", "3" are menu picks, NOT search queries.',
+    '  If the current message is a bare digit or very short (≤3 chars) and there is no',
+    '  clear search intent in the CURRENT message itself, return intent="unknown" with a',
+    '  Hebrew clarification. Never map a bare digit to search_task using stale history.',
   ].join('\n');
 
   const helpUnknownBlock = [
@@ -230,9 +236,21 @@ export function buildSystemPrompt(ctx: ParseContext): string {
     '- unknown: you cannot tell what they want, OR the request is out of scope. Set a Hebrew "clarification".',
   ].join('\n');
 
-  const historyBlock = ctx.history && ctx.history.length > 0
+  // Layer 3 fix: for very short messages (≤3 chars, e.g. a bare "2" or "כן"),
+  // do NOT feed the full chat history to the LLM. The risk of the model
+  // recycling a stale search query or worker name from a previous turn (e.g.
+  // pulling "יאיר" out of context when the user just types "2") far outweighs
+  // any benefit of reference resolution for such minimal input. We pass at most
+  // the single most-recent BOT turn so the model has minimal conversational
+  // anchor without the dangerous stale search terms.
+  const isVeryShortMessage = message !== undefined && message.trim().length <= 3;
+  const historyForPrompt = isVeryShortMessage
+    ? (ctx.history ?? []).filter((h) => h.role === 'assistant').slice(-1)
+    : (ctx.history ?? []);
+
+  const historyBlock = historyForPrompt.length > 0
     ? `\nRECENT CONVERSATION (oldest→newest). Use it to resolve references. Emit exactly ONE tool call for the LATEST user message:\n` +
-      ctx.history.map((h) => `${h.role === 'user' ? 'USER' : 'BOT'}: ${h.content}`).join('\n')
+      historyForPrompt.map((h) => `${h.role === 'user' ? 'USER' : 'BOT'}: ${h.content}`).join('\n')
     : '';
 
   const pendingNoteBlock = ctx.pendingNote ? `\nCONTEXT: ${ctx.pendingNote}` : '';
@@ -270,7 +288,7 @@ export async function parseIntent(
   if (!provider) throw new Error('No LLM provider configured');
 
   const raw = await provider.emitStructured({
-    system: buildSystemPrompt(ctx),
+    system: buildSystemPrompt(ctx, message),
     user: message,
     toolName: TOOL_NAME,
     toolDescription: TOOL_DESCRIPTION,

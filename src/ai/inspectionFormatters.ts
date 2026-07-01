@@ -277,7 +277,9 @@ export function formatInspectionDetail(
 ): string {
   const label = hebrewShortLabel(row.taskTitle, row.typeLabelHe);
 
-  const lines: string[] = [label, ''];
+  // No unlabeled hero title — every value gets a descriptive label per the
+  // "label everything" rule. The first line is the labeled "סוג בדיקה:".
+  const lines: string[] = [];
 
   // Labeled fields — right-pad label+colon to 14 chars for visual alignment
   const pad = (lbl: string) => `${lbl}:`.padEnd(14);
