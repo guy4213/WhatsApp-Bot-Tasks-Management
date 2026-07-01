@@ -3,10 +3,13 @@
  *
  * Coverage:
  *  - non-ADMIN user → getInspectionsForWorkerOnDate + formatInspectorMorning
- *    is called (formatEmployeeMorning and formatManagerMorning are NOT).
+ *    is called (formatManagerMorning is NOT).
  *  - MANAGER (K1 says role !== 'ADMIN' == inspector) also routes to the
  *    inspector formatter.
  *  - ADMIN user → formatManagerMorning is called (inspector path NOT taken).
+ *
+ * X-T3 (2026-07-01): the retired `formatEmployeeMorning` / `getEmployeeMorning
+ * Counts` mocks were removed — those helpers no longer exist.
  *
  * Kept in its own file because `vi.mock('../whatsapp/digestContent', ...)` is
  * hoisted for the entire file — running it in the same file as the pure
@@ -24,16 +27,18 @@ import type { InspectionListItem } from '../services/inspectionsQueries';
 const poolQueryMock = vi.hoisted(() => vi.fn());
 
 const getInspectionsMock = vi.hoisted(() => vi.fn());
+const getEquipmentChecklistMock = vi.hoisted(() => vi.fn());
 const getCompanyMorningMock = vi.hoisted(() => vi.fn());
-const getEmployeeMorningCountsMock = vi.hoisted(() => vi.fn());
 const getCompanyEndOfDayMock = vi.hoisted(() => vi.fn());
 const getEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
 
 const formatInspectorMorningMock = vi.hoisted(() => vi.fn());
 const formatManagerMorningMock = vi.hoisted(() => vi.fn());
-const formatEmployeeMorningMock = vi.hoisted(() => vi.fn());
+const formatEquipmentReminderMock = vi.hoisted(() => vi.fn());
 const formatManagerEndOfDayMock = vi.hoisted(() => vi.fn());
 const formatEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
+
+const sendButtonMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 const notifyMock = vi.hoisted(() => vi.fn(async () => undefined));
 const claimDigestSendMock = vi.hoisted(() => vi.fn(async () => true));
@@ -46,20 +51,23 @@ vi.mock('../db/connection', () => ({
 }));
 vi.mock('../services/inspectionsQueries', () => ({
   getInspectionsForWorkerOnDate: getInspectionsMock,
+  getEquipmentChecklistForFamilies: getEquipmentChecklistMock,
 }));
 vi.mock('../services/tasks', () => ({
   getCompanyMorning: getCompanyMorningMock,
-  getEmployeeMorningCounts: getEmployeeMorningCountsMock,
   getCompanyEndOfDay: getCompanyEndOfDayMock,
   getEmployeeEndOfDay: getEmployeeEndOfDayMock,
 }));
 vi.mock('../whatsapp/digestContent', () => ({
   formatInspectorMorning: formatInspectorMorningMock,
   formatManagerMorning: formatManagerMorningMock,
-  formatEmployeeMorning: formatEmployeeMorningMock,
+  formatEquipmentReminder: formatEquipmentReminderMock,
   formatManagerEndOfDay: formatManagerEndOfDayMock,
   formatEmployeeEndOfDay: formatEmployeeEndOfDayMock,
   digestTemplateKey: () => 'EMPLOYEE_MORNING_DIGEST',
+}));
+vi.mock('../whatsapp/sender', () => ({
+  sendButtonMessage: sendButtonMessageMock,
 }));
 vi.mock('../whatsapp/templates', () => ({
   notify: notifyMock,
@@ -95,12 +103,12 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
   beforeEach(() => {
     formatInspectorMorningMock.mockReturnValue(stubContent);
     formatManagerMorningMock.mockReturnValue(stubContent);
-    formatEmployeeMorningMock.mockReturnValue(stubContent);
+    formatEquipmentReminderMock.mockReturnValue({ text: 't', params: [], buttons: [] });
     getInspectionsMock.mockResolvedValue([]);
+    getEquipmentChecklistMock.mockResolvedValue([]);
     getCompanyMorningMock.mockResolvedValue({
       dueToday: 0, overdue: 0, open: 0, employeesWithOverdue: 0, employees: [],
     });
-    getEmployeeMorningCountsMock.mockResolvedValue({ dueToday: 0, overdue: 0, open: 0 });
     claimDigestSendMock.mockResolvedValue(true);
   });
 
@@ -114,7 +122,7 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
     await dispatcher.runDigestDispatcher();
   }
 
-  it('non-ADMIN (SALES) → formatInspectorMorning is called; formatEmployeeMorning / formatManagerMorning are NOT', async () => {
+  it('non-ADMIN (SALES) → formatInspectorMorning is called; formatManagerMorning is NOT', async () => {
     const items: InspectionListItem[] = [
       {
         taskFieldId: 'tf-a', customerName: 'ל', siteAddress: 'א',
@@ -122,6 +130,10 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
         typeLabelHe: 'ט',
       },
     ];
+    // getInspectionsForWorkerOnDate is called twice per inspector morning:
+    // once by buildContent (inspector digest) and once by
+    // maybeDispatchEquipmentReminder (equipment reminder). Return the same
+    // list on every call.
     getInspectionsMock.mockResolvedValue(items);
 
     await fireMorning('SALES');
@@ -129,9 +141,8 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
     expect(getInspectionsMock).toHaveBeenCalledWith('u-1', '2026-06-30');
     expect(formatInspectorMorningMock).toHaveBeenCalledTimes(1);
     expect(formatInspectorMorningMock).toHaveBeenCalledWith(items, { name: 'דני' });
-    expect(formatEmployeeMorningMock).not.toHaveBeenCalled();
     expect(formatManagerMorningMock).not.toHaveBeenCalled();
-    // Dedup ledger was consulted and the send fired.
+    // Dedup ledger was consulted (inspector morning) and the send fired.
     expect(claimDigestSendMock).toHaveBeenCalledWith('u-1', 'MORNING', '2026-06-30');
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });

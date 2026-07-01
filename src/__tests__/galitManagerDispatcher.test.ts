@@ -22,8 +22,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const poolQueryMock = vi.hoisted(() => vi.fn());
 
 const getInspectionsMock = vi.hoisted(() => vi.fn());
+const getEquipmentChecklistMock = vi.hoisted(() => vi.fn());
 const getCompanyMorningMock = vi.hoisted(() => vi.fn());
-const getEmployeeMorningCountsMock = vi.hoisted(() => vi.fn());
 const getCompanyEndOfDayMock = vi.hoisted(() => vi.fn());
 const getEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
 
@@ -32,11 +32,13 @@ const getOpenFieldExceptionsMock = vi.hoisted(() => vi.fn());
 
 const formatInspectorMorningMock = vi.hoisted(() => vi.fn());
 const formatManagerMorningMock = vi.hoisted(() => vi.fn());
-const formatEmployeeMorningMock = vi.hoisted(() => vi.fn());
+const formatEquipmentReminderMock = vi.hoisted(() => vi.fn());
 const formatManagerEndOfDayMock = vi.hoisted(() => vi.fn());
 const formatEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
 const formatGalitManagerMorningMock = vi.hoisted(() => vi.fn());
 const formatGalitManagerEndOfDayMock = vi.hoisted(() => vi.fn());
+
+const sendButtonMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 const notifyMock = vi.hoisted(() => vi.fn(async () => undefined));
 const claimDigestSendMock = vi.hoisted(() => vi.fn(async () => true));
@@ -49,6 +51,7 @@ vi.mock('../db/connection', () => ({
 }));
 vi.mock('../services/inspectionsQueries', () => ({
   getInspectionsForWorkerOnDate: getInspectionsMock,
+  getEquipmentChecklistForFamilies: getEquipmentChecklistMock,
 }));
 vi.mock('../services/exceptionsQueries', () => ({
   getFieldExceptionCounts: getFieldExceptionCountsMock,
@@ -56,19 +59,21 @@ vi.mock('../services/exceptionsQueries', () => ({
 }));
 vi.mock('../services/tasks', () => ({
   getCompanyMorning: getCompanyMorningMock,
-  getEmployeeMorningCounts: getEmployeeMorningCountsMock,
   getCompanyEndOfDay: getCompanyEndOfDayMock,
   getEmployeeEndOfDay: getEmployeeEndOfDayMock,
 }));
 vi.mock('../whatsapp/digestContent', () => ({
   formatInspectorMorning: formatInspectorMorningMock,
   formatManagerMorning: formatManagerMorningMock,
-  formatEmployeeMorning: formatEmployeeMorningMock,
+  formatEquipmentReminder: formatEquipmentReminderMock,
   formatManagerEndOfDay: formatManagerEndOfDayMock,
   formatEmployeeEndOfDay: formatEmployeeEndOfDayMock,
   formatGalitManagerMorning: formatGalitManagerMorningMock,
   formatGalitManagerEndOfDay: formatGalitManagerEndOfDayMock,
   digestTemplateKey: () => 'MANAGER_MORNING_DIGEST',
+}));
+vi.mock('../whatsapp/sender', () => ({
+  sendButtonMessage: sendButtonMessageMock,
 }));
 vi.mock('../whatsapp/templates', () => ({
   notify: notifyMock,
@@ -116,12 +121,13 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
   beforeEach(() => {
     formatInspectorMorningMock.mockReturnValue(stubContent);
     formatManagerMorningMock.mockReturnValue(stubContent);
-    formatEmployeeMorningMock.mockReturnValue(stubContent);
+    formatEquipmentReminderMock.mockReturnValue({ text: 't', params: [], buttons: [] });
     formatManagerEndOfDayMock.mockReturnValue(stubContent);
     formatEmployeeEndOfDayMock.mockReturnValue(stubContent);
     formatGalitManagerMorningMock.mockReturnValue(stubContent);
     formatGalitManagerEndOfDayMock.mockReturnValue(stubContent);
     getInspectionsMock.mockResolvedValue([]);
+    getEquipmentChecklistMock.mockResolvedValue([]);
     getCompanyMorningMock.mockResolvedValue({
       dueToday: 0, overdue: 0, open: 0, employeesWithOverdue: 0, employees: [],
     });
@@ -129,7 +135,6 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
       dueToday: 0, completed: 0, notCompleted: 0, overdue: 0, openCarry: 0,
       employeesWithUnfinishedOrOverdue: 0, employees: [],
     });
-    getEmployeeMorningCountsMock.mockResolvedValue({ dueToday: 0, overdue: 0, open: 0 });
     getEmployeeEndOfDayMock.mockResolvedValue({
       dueToday: 0, completed: 0, notCompleted: 0, overdue: 0, openCarry: 0, unfinishedTitles: [],
     });
@@ -170,9 +175,13 @@ describe('dispatcher — Yoram branch routing (D4-T1)', () => {
     // Legacy and inspector formatters must NOT have run.
     expect(formatManagerMorningMock).not.toHaveBeenCalled();
     expect(formatInspectorMorningMock).not.toHaveBeenCalled();
-    expect(formatEmployeeMorningMock).not.toHaveBeenCalled();
     expect(getCompanyMorningMock).not.toHaveBeenCalled();
     expect(getInspectionsMock).not.toHaveBeenCalled();
+    // D2-T9: Yoram (ADMIN with matching phone) is redirected to the exceptions
+    // digest instead of the inspector morning; equipment reminder MUST NOT
+    // fire for him (see the `isYoram` guard in the dispatcher).
+    expect(formatEquipmentReminderMock).not.toHaveBeenCalled();
+    expect(sendButtonMessageMock).not.toHaveBeenCalled();
     // Dedup ledger consulted + notify fired.
     expect(claimDigestSendMock).toHaveBeenCalledWith('u-yoram', 'MORNING', '2026-06-30');
     expect(notifyMock).toHaveBeenCalledTimes(1);

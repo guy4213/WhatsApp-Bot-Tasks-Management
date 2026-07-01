@@ -24,7 +24,13 @@ export type AwaitingKind =
   | 'status_disambig'
   // D2-T6: 4-option follow-up after FINISHED, and its "field notes" branch.
   | 'finished_followup'
-  | 'finished_notes';
+  | 'finished_notes'
+  // D2-T10: day-summary 4-option follow-up + option-3 free-text callback note.
+  | 'day_summary_choice'
+  | 'callback_customer_note'
+  // D2-T9: worker tapped "חסר לי ציוד" on the morning equipment reminder →
+  // next inbound text is the free-text description of what is missing.
+  | 'equipment_missing_note';
 
 export interface ConversationState {
   awaiting: AwaitingKind;
@@ -40,6 +46,9 @@ export interface ConversationState {
   problemType?: FieldProblemType;    // chosen problem type awaiting a free-text elaboration
   pendingTransition?: FieldStatusTransition; // D2-T5: the transition the worker asked for via free
                                              // text, held while we disambiguate which TaskField.
+  // D2-T9: the local date of the equipment reminder tap — retained so the
+  // downstream office alert can name the morning the miss was reported for.
+  equipmentLocalDate?: string;
 }
 
 export async function getContext(phone: string): Promise<ConversationState | null> {

@@ -419,3 +419,64 @@ describe('notifyOfficeProblem', () => {
     expect(body).toContain('לטיפול מנהל.');
   });
 });
+
+// ── notifyOfficeMissingEquipment (D2-T9) ───────────────────────────────────
+
+describe('notifyOfficeMissingEquipment', () => {
+  it('broadcasts a §10 alert with worker name + date + note to every manager', async () => {
+    getManagersForBroadcast.mockResolvedValue([
+      { id: 'm-1', name: 'מ1', phone: '972500000001' },
+      { id: 'm-2', name: 'מ2', phone: '972500000002' },
+    ]);
+    const { notifyOfficeMissingEquipment } = await import('../services/inspections');
+
+    await notifyOfficeMissingEquipment({
+      userId: 'u-1',
+      userName: 'דני',
+      note: 'חסר מד רעש',
+      localDate: '2026-07-01',
+    });
+
+    expect(sendTextMessage).toHaveBeenCalledTimes(2);
+    for (const call of sendTextMessage.mock.calls) {
+      const body = call[0].text;
+      expect(body).toContain('חסר ציוד לבוקר');
+      expect(body).toContain('דני');
+      expect(body).toContain('2026-07-01');
+      expect(body).toContain('חסר מד רעש');
+      expect(body).toContain('לטיפול המשרד.');
+    }
+  });
+
+  it('degrades gracefully when userName is null (worker fallback "—")', async () => {
+    getManagersForBroadcast.mockResolvedValue([
+      { id: 'm-1', name: 'מ1', phone: '972500000001' },
+    ]);
+    const { notifyOfficeMissingEquipment } = await import('../services/inspections');
+
+    await notifyOfficeMissingEquipment({
+      userId: 'u-1',
+      userName: null,
+      note: 'חסר X',
+      localDate: '2026-07-01',
+    });
+
+    expect(sendTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('עובד: —');
+  });
+
+  it('no-ops when no MANAGER/ADMIN is configured (logs a warning, does not throw)', async () => {
+    getManagersForBroadcast.mockResolvedValue([]);
+    const { notifyOfficeMissingEquipment } = await import('../services/inspections');
+
+    await expect(
+      notifyOfficeMissingEquipment({
+        userId: 'u-1',
+        userName: 'דני',
+        note: 'חסר',
+        localDate: '2026-07-01',
+      }),
+    ).resolves.toBeUndefined();
+    expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+});

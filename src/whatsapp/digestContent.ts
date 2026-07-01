@@ -17,12 +17,14 @@
  */
 import type { NotificationKey } from './templateNames';
 import type {
-  EmployeeMorningCounts,
   EmployeeEndOfDay,
   CompanyMorning,
   CompanyEndOfDay,
 } from '../services/tasks';
-import type { InspectionListItem } from '../services/inspectionsQueries';
+import type {
+  EquipmentChecklistItem,
+  InspectionListItem,
+} from '../services/inspectionsQueries';
 import type {
   FieldExceptionCounts,
   OpenFieldException,
@@ -72,19 +74,15 @@ export function digestTemplateKey(
 }
 
 // ── Morning ("opening day plan") ──────────────────────────────────────────────
-
-/** Employee morning — own due-today / overdue / open. Template vars: name + 3 counts. */
-export function formatEmployeeMorning(name: string, c: EmployeeMorningCounts): DigestContent {
-  const params = [name, String(c.dueToday), String(c.overdue), String(c.open)];
-  const text =
-    `☀️ בוקר טוב ${name}!\n` +
-    `תוכנית היום שלך:\n` +
-    `📋 ${c.dueToday} משימות להיום\n` +
-    `⚠️ ${c.overdue} באיחור\n` +
-    `🔄 ${c.open} פתוחות\n\n` +
-    cta('משימות להיום');
-  return { text, params, buttons: [BTN_EMP_TODAY, BTN_FREE_TEXT] };
-}
+//
+// X-T3 (2026-07-01): the old CRM `formatEmployeeMorning` used to live here. It
+// was replaced by the inspector morning digest below (D2-T4) which is what all
+// non-ADMIN users now receive via the K1 branch in `digestDispatcher.ts`. The
+// old employee-tasks morning path is dead code — deleted. The corresponding
+// service helper `getEmployeeMorningCounts` in `src/services/tasks.ts` is
+// removed alongside it. The 17:00 employee evening broadcast (`runDailySummary`)
+// is a separate legacy path already gated by `LEGACY_DAILY_SUMMARY_ENABLED` in
+// `src/scheduler/index.ts` — out of X-T3 scope, left dormant.
 
 // ── Inspector morning (D2-T4) ────────────────────────────────────────────────
 //
@@ -357,4 +355,124 @@ export function formatGalitManagerEndOfDay(input: {
     `${openBlock}`;
 
   return { text, params, buttons: [] };
+}
+
+// ── Equipment reminder (D2-T9) ───────────────────────────────────────────────
+//
+// SPEC_FIELD_V2 §10 — after the D2-T4 inspector morning digest, the dispatcher
+// sends this ONE consolidated equipment list per worker: for every family the
+// worker is inspecting today, list the required checklist items DEDUPED across
+// families (so 2 radiation inspections + 1 noise inspection → one merged list,
+// with `tripod` appearing exactly once even though both families require it).
+//
+// D5-T4 button-policy exception: this is one of the two surfaces where
+// `sendButtonMessage` is explicitly permitted (the other is the §6 inspection
+// card, D2-T2). Every other menu stays numbered text — see the JSDoc on
+// `problemTypeMenu` in `src/ai/menu.ts` and on `sendButtonMessage` in
+// `src/whatsapp/sender.ts`.
+
+/** Stable equipment-reminder payload IDs.
+ *
+ *  Deterministic on `userId` + `localDate` so the router can (a) validate the
+ *  tap belongs to the tapping user and (b) resolve the intended local day
+ *  without a DB lookup. Slashes/whitespace never occur in either component
+ *  (userId is a UUID; localDate is 'YYYY-MM-DD'), so a simple '_'-split works.
+ */
+export function equipmentTakenAllPayloadId(userId: string, localDate: string): string {
+  return `EQUIP_ALL_${userId}_${localDate}`;
+}
+export function equipmentMissingPayloadId(userId: string, localDate: string): string {
+  return `EQUIP_MISSING_${userId}_${localDate}`;
+}
+
+/**
+ * Equipment reminder — deduped by `labelHe`, alphabetically stable within a
+ * family block. The 2 buttons match the two allowed responses per §10:
+ *   - "לקחתי הכל"   → clear/ack via `EQUIP_ALL_*`
+ *   - "חסר לי ציוד" → free-text prompt via `EQUIP_MISSING_*`
+ *
+ * Empty item list → returns { buttons: [], text: '' } so the dispatcher can
+ * short-circuit and skip the send. The dispatcher already guards on the
+ * inspection list being non-empty (a worker with 0 inspections doesn't reach
+ * this formatter), so this is defense-in-depth for edge cases (checklist seed
+ * gap for a new family).
+ *
+ * Template vars (compact): [name, item count]. Rich text carries the list.
+ */
+export function formatEquipmentReminder(
+  items: EquipmentChecklistItem[],
+  user: { id: string; name: string | null; localDate: string },
+): DigestContent {
+  const name = user.name ?? '';
+  // Dedup by labelHe — preserve FIRST occurrence in the (family, sortOrder)
+  // order the query returned, so a stable set of dupes always renders the
+  // same way. E.g. 'חצובה' is seeded for both radiation and noise; the first
+  // family in the input decides where it lands.
+  const seen = new Set<string>();
+  const uniqueLabels: string[] = [];
+  for (const it of items) {
+    if (seen.has(it.labelHe)) continue;
+    seen.add(it.labelHe);
+    uniqueLabels.push(it.labelHe);
+  }
+
+  const params = [name, String(uniqueLabels.length)];
+
+  if (uniqueLabels.length === 0) {
+    return { text: '', params, buttons: [] };
+  }
+
+  const listBlock = uniqueLabels.map((l) => `• ${l}`).join('\n');
+  const text =
+    `${name ? `היי ${name},\n` : ''}` +
+    `לפני שיוצאים לשטח — נא לוודא שכל הציוד נמצא:\n` +
+    `${listBlock}`;
+
+  const buttons: DigestButton[] = [
+    { id: equipmentTakenAllPayloadId(user.id, user.localDate), title: 'לקחתי הכל' },
+    { id: equipmentMissingPayloadId(user.id, user.localDate), title: 'חסר לי ציוד' },
+  ];
+
+  return { text, params, buttons };
+}
+
+// ── D2-T10: on-demand worker day summary (menu item 7) ──────────────────────
+//
+// SPEC_FIELD_V2 §11 — a live "day summary" the worker asks for from menu item
+// 7. Compact Hebrew, no emojis. Lists the finished inspections in one line
+// (deduped, comma-separated by customer name / type family), plus a count of
+// WAITING_FOR_INFO rows when > 0. Null customer / type degrade to Hebrew
+// placeholders (mirrors `formatInspectorMorning`). No CTA button — the
+// follow-up 4-option menu is rendered separately (`renderDaySummaryFollowUpMenu`).
+
+/**
+ * Day-summary body per §11. Not a template message (worker asked for it in
+ * real time), so we don't emit `params` or `buttons` — this is a plain text
+ * block the router sends and then follows up with the 4-option menu.
+ */
+export function formatDayFieldSummary(
+  finished: InspectionListItem[],
+  waitingForInfoCount: number,
+  userName: string | null,
+): string {
+  const name = userName ?? '';
+  const greet = `סיכום יום${name ? ` — ${name}` : ''}:`;
+
+  const finishedLine = finished.length === 0
+    ? 'בוצעו: אין'
+    : `בוצעו: ${finished
+        .map((f) => {
+          const customer = f.customerName ?? 'לקוח לא ידוע';
+          const type = f.typeLabelHe && f.typeLabelHe.trim().length > 0
+            ? f.typeLabelHe
+            : 'בדיקה';
+          return `${customer} (${type})`;
+        })
+        .join(', ')}`;
+
+  const waitingLine = waitingForInfoCount > 0
+    ? `\nממתינות למידע: ${waitingForInfoCount}`
+    : '';
+
+  return `${greet}\n${finishedLine}${waitingLine}`;
 }

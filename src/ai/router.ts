@@ -34,6 +34,7 @@ import {
   problemTypeMenu, renderProblemTypeMenu,
   statusUpdateMenu, renderStatusUpdateMenu,
   finishedFollowUpMenu, renderFinishedFollowUpMenu,
+  daySummaryFollowUpMenu, renderDaySummaryFollowUpMenu,
 } from './menu';
 import {
   findOpenTaskFieldForWorker,
@@ -44,8 +45,12 @@ import {
   writeProblem,
   notifyOfficeMissingInfo,
   notifyOfficeProblem,
+  notifyOfficeMissingEquipment,
+  dayFieldSummary,
   type AdvanceTransition,
 } from '../services/inspections';
+import { getManagersForBroadcast } from '../services/pendingActions';
+import { formatDayFieldSummary } from '../whatsapp/digestContent';
 import {
   matchDigestCommand, planDigestCommand, type DigestCommand,
 } from './digestCommands';
@@ -111,6 +116,24 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   const digestCmd = matchDigestCommand(text);
   if (digestCmd) {
     await handleDigestCommand(user, digestCmd);
+    return;
+  }
+
+  // D2-T9 equipment reminder button taps. The payload arrives here as text
+  // (webhook routes `interactive.button_reply.id` through the same text path);
+  // route deterministically ahead of AI/NLU + context. Not-my-userId taps are
+  // ignored silently — a stale button belonging to another user should never
+  // hand control back to the AI parser for the tapping user.
+  const equipTap = matchEquipmentTap(text);
+  if (equipTap) {
+    if (equipTap.userId !== user.id) {
+      log.warn(
+        { from: user.id, embeddedUserId: equipTap.userId, kind: equipTap.kind },
+        'equipment tap ignored — payload userId does not match caller',
+      );
+      return;
+    }
+    await handleEquipmentTap(user, equipTap.kind, equipTap.localDate);
     return;
   }
 
@@ -279,6 +302,18 @@ async function continueConversation(
   }
   if (ctx.awaiting === 'finished_notes') {
     await handleFinishedNotesReply(user, text, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'day_summary_choice') {
+    await handleDaySummaryChoiceReply(user, trimmed);
+    return;
+  }
+  if (ctx.awaiting === 'callback_customer_note') {
+    await handleCallbackCustomerNoteReply(user, text);
+    return;
+  }
+  if (ctx.awaiting === 'equipment_missing_note') {
+    await handleEquipmentMissingNoteReply(user, text, ctx);
     return;
   }
 
@@ -951,15 +986,20 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
       await startReportProblemFlow(user);
       return;
     case 'missing_equipment':
-      await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T9).' });
+      // D2-T9: menu item 5 shortcut → same "what's missing?" prompt as the
+      // "חסר לי ציוד" button on the morning equipment reminder. Uses today's
+      // Asia/Jerusalem local date so the office alert stamps the right day.
+      await setContext(user.phone, {
+        awaiting: 'equipment_missing_note',
+        equipmentLocalDate: localJerusalemDate(),
+      });
+      await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
       return;
     case 'missing_report_info':
       await startMissingInfoFlow(user);
       return;
     case 'day_summary':
-      await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T10).' });
+      await startDaySummaryFlow(user);
       return;
   }
 }
@@ -1396,6 +1436,181 @@ async function handleDisambigReply(
   // flow === 'problem'
   await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
   await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
+}
+
+// ── D2-T9: equipment reminder button taps + missing-note flow ───────────────
+// SPEC_FIELD_V2 §10. The morning equipment reminder is one of the two allowed
+// button surfaces per D5-T4 (see `sendButtonMessage` JSDoc in
+// `src/whatsapp/sender.ts` and `formatEquipmentReminder` in
+// `src/whatsapp/digestContent.ts`). Payload shape (from the formatter):
+//   EQUIP_ALL_<userId>_<YYYY-MM-DD>
+//   EQUIP_MISSING_<userId>_<YYYY-MM-DD>
+// Deterministic. Parsed in `matchEquipmentTap` at the entry to
+// `handleAIMessage`, ahead of the AI parser and awaiting-state resolution.
+
+type EquipmentTapKind = 'all' | 'missing';
+
+/**
+ * Parse an inbound message that IS an equipment tap payload. Returns null for
+ * anything else so the caller falls through to the normal (digest / context /
+ * AI) routing untouched. Anchored to the full trimmed message and rejects any
+ * text after the date so free text like "EQUIP_ALL_… הלכתי" cannot spoof a
+ * tap. Only the two known kinds are accepted.
+ */
+function matchEquipmentTap(
+  raw: string,
+): { kind: EquipmentTapKind; userId: string; localDate: string } | null {
+  const m = raw.trim().match(
+    /^EQUIP_(ALL|MISSING)_([0-9a-f-]{36})_(\d{4}-\d{2}-\d{2})$/i,
+  );
+  if (!m) return null;
+  return {
+    kind: m[1].toUpperCase() === 'ALL' ? 'all' : 'missing',
+    userId: m[2],
+    localDate: m[3],
+  };
+}
+
+async function handleEquipmentTap(
+  user: ResolvedUser,
+  kind: EquipmentTapKind,
+  localDate: string,
+): Promise<void> {
+  if (kind === 'all') {
+    // "לקחתי הכל" — ack and clear any lingering awaiting state (a tap that
+    // arrives mid-conversation shouldn't strand the user in a stale context).
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'מעולה, יום עבודה טוב!' });
+    return;
+  }
+  // "חסר לי ציוד" — prompt for the free-text note; the next inbound text
+  // lands in `handleEquipmentMissingNoteReply`.
+  await setContext(user.phone, {
+    awaiting: 'equipment_missing_note',
+    equipmentLocalDate: localDate,
+  });
+  await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
+}
+
+async function handleEquipmentMissingNoteReply(
+  user: ResolvedUser,
+  raw: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const note = raw.trim();
+  if (!note) {
+    await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
+    return;
+  }
+  const localDate = ctx.equipmentLocalDate ?? localJerusalemDate();
+  await notifyOfficeMissingEquipment({
+    userId: user.id,
+    userName: user.name,
+    note,
+    localDate,
+  });
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+}
+
+// ── D2-T10: on-demand worker day summary (menu item 7) ─────────────────────
+// SPEC_FIELD_V2 §11. Menu item 7 → summary text (FINISHED_FIELD list +
+// WAITING_FOR_INFO count for the worker's local day) + a 4-option follow-up
+// menu. Options 2 (missing info) and 4 (open problem) hand back into the
+// D2-T7 / D2-T8 flows (with disambig when multiple TaskFields are open).
+// Option 3 ("צריך לחזור ללקוח") is alert-only — no DB write per spec brief
+// ("TODO: no persistence per D2-T10 spec — alert-only"). Option 1
+// acknowledges and clears; NO FieldWorkerDayClose row is written (deferred
+// per §14).
+
+/** Compute the worker's local calendar day (Asia/Jerusalem) as 'YYYY-MM-DD'. */
+function localJerusalemDate(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const y = parts.find((p) => p.type === 'year')?.value ?? '';
+  const m = parts.find((p) => p.type === 'month')?.value ?? '';
+  const d = parts.find((p) => p.type === 'day')?.value ?? '';
+  return `${y}-${m}-${d}`;
+}
+
+async function startDaySummaryFlow(user: ResolvedUser): Promise<void> {
+  const localDate = localJerusalemDate();
+  const { finished, waitingForInfoCount } = await dayFieldSummary(user.id, localDate);
+  const summary = formatDayFieldSummary(finished, waitingForInfoCount, user.name);
+  await sendTextMessage({ to: user.phone, text: summary });
+  await setContext(user.phone, { awaiting: 'day_summary_choice' });
+  await sendTextMessage({ to: user.phone, text: renderDaySummaryFollowUpMenu() });
+}
+
+async function handleDaySummaryChoiceReply(user: ResolvedUser, trimmed: string): Promise<void> {
+  const items = daySummaryFollowUpMenu();
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `בחר מספר תקין:\n${renderDaySummaryFollowUpMenu()}`,
+    });
+    return;
+  }
+  const chosen = items[idx - 1];
+  switch (chosen.choice) {
+    case 'all_done':
+      // Acknowledge, clear awaiting, DO NOT write any DB row (no
+      // FieldWorkerDayClose per D2-T10 spec / §14).
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'רשמנו. כל טוב!' });
+      return;
+    case 'missing_info': {
+      // Hand off to the D2-T7 missing-info flow. Uses the shared open-
+      // TaskField resolver so 0 / 1 / N cases are handled uniformly with
+      // the menu-item-6 entry point (disambig routes through
+      // `missing_info_disambig`).
+      await startMissingInfoFlow(user);
+      return;
+    }
+    case 'callback_customer': {
+      // Light "call back later" handler — free-text note → alert to
+      // managers. No DB column.
+      // TODO: no persistence per D2-T10 spec — alert-only.
+      await setContext(user.phone, { awaiting: 'callback_customer_note' });
+      await sendTextMessage({ to: user.phone, text: 'לאיזה לקוח צריך לחזור? כתוב שם והערה קצרה.' });
+      return;
+    }
+    case 'open_problem': {
+      // Hand off to the D2-T8 report-problem flow.
+      await startReportProblemFlow(user);
+      return;
+    }
+  }
+}
+
+async function handleCallbackCustomerNoteReply(user: ResolvedUser, raw: string): Promise<void> {
+  const note = raw.trim();
+  if (!note) {
+    await sendTextMessage({ to: user.phone, text: 'לאיזה לקוח צריך לחזור? כתוב שם והערה קצרה.' });
+    return;
+  }
+  const workerName = user.name ?? '—';
+  const alert =
+    `בקשת חזרה ללקוח\n` +
+    `עובד: ${workerName}\n` +
+    `${note}\n` +
+    `לטיפול המשרד.`;
+  const managers = await getManagersForBroadcast();
+  if (managers.length === 0) {
+    log.warn({ userId: user.id }, 'callback_customer: no managers configured; alert not sent');
+  } else {
+    await Promise.allSettled(
+      managers.map((m) =>
+        sendTextMessage({ to: m.phone, text: alert }).catch((err) => {
+          log.error({ err, userId: user.id, managerId: m.id }, 'callback alert send failed');
+        }),
+      ),
+    );
+  }
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
 }
 
 /** Pending dueDate-change approvals (manager/admin) — confirm via "אשר <id>" / "דחה <id>". */

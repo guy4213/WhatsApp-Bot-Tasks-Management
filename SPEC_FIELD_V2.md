@@ -12,7 +12,7 @@ First the locked decision log — this is the contract everything was written ag
 - "Finished" is unconditional. "Missing info for report" = a textual detail/form the office needs for the report → `WAITING_FOR_INFO` + alert.
 - STARTED dropped — arrival = start of inspection. The flow: departed → arrived → finished.
 - `InspectionType` = a dictionary keyed by מק"ט (`code` = `productName`) with `family`; `InspectionChecklist` = equipment only, by family.
-- A Task becomes an inspection via a dropdown in the CRM that writes a flag field on `Task` → a `TaskField` row is created automatically.
+- A `TaskField` is created from the CRM field scheduling form using an existing `Task` ID. The `Task` remains the office / CRM customer task; each `TaskField` row is one scheduled field visit / inspection appointment.
 - Leads: source = the `IncomingLead` table (not the CRM's `Lead`). Assignment field: `ownerId` (UUID FK). No phone column — display `fromName`/`fromEmail`/`subject`/`body`. The worker **does not touch the lead from the bot** — receives an alert only; all handling is done in the CRM. Sasha (MANAGER permission) performs the assignments. Yoram sees leads in the morning and evening summary.
 
 ═══════════════════════════════════════
@@ -21,7 +21,7 @@ First the locked decision log — this is the contract everything was written ag
 
 ## 1. Core principles
 
-1. **Additive-only** — zero changes to CRM tables, except for one approved exception: a single flag field on `Task` that marks "field task".
+1. **Additive-only** — zero changes to CRM tables for the field layer. The CRM field scheduling form creates `TaskField` rows using existing `Task` IDs; no field-task flag on `Task` is the source of truth.
 2. **The CRM is the owner of the real state** — not the `Task.status` of an inspection, and not the handling of a lead. The bot never changes them; it is a window and an alert voice.
 3. **Separate operational status** — the field track lives in `TaskField.fieldStatus`. The worker marks that they finished in the field, doesn't "close" the inspection.
 4. **One bot, role determines the display** — identification by phone → ROLE. A worker sees their inspections; Yoram sees exceptions + leads in reports; Sasha handles leads.
@@ -40,15 +40,42 @@ Identification by phone against `User` → ROLE. No separate screen; the same en
 
 **InspectionChecklist** — required equipment only, **per family**. A record for each equipment item a family needs. Defined once per family instead of per 150 מק"טים.
 
-**TaskField** — 1:1 with `Task` (`taskId` unique). Static metadata (address, contact, navigation) + the live operational status + an inline note/problem + a "missing info" flag. **A Task is a field inspection if and only if it has a row here.**
+**TaskField** — one scheduled field visit / inspection appointment. It references `Task` by `taskId`, but `taskId` is **not unique**: one office task can have multiple scheduled field visits. Static scheduling metadata (appointment title, planned start/end, duration) + static site metadata (address, contact, navigation) + the live operational status + an inline note/problem + a "missing info" flag. **The bot works against `TaskField`; the `Task` remains the CRM office task.**
 
 Leads don't require a table on our side — reading from the existing `IncomingLead` table + alerts.
 
-**How a Task becomes an inspection:**
-1. In the office they choose the dropdown "field task = yes".
-2. A flag field is written on `Task` → a `TaskField` row is created automatically.
-3. `productName` (the מק"ט) → `InspectionType.code` → determines `inspectionTypeId` and `family`.
-4. The Task's `ownerId` = the assigned worker → the bot sends them the inspection card.
+**How a field visit is scheduled:**
+1. The office opens the CRM field scheduling form and supplies an existing `Task ID`.
+2. The form creates a `TaskField` row for that scheduled field visit / inspection appointment.
+3. The `Task` remains the office / CRM customer task. One `Task` can have multiple `TaskField` rows.
+4. `Task.productName` (the מק"ט) → `InspectionType.code` → determines `inspectionTypeId` and copied `family`.
+5. `Task.ownerId` = the assigned field worker. Do not add `fieldWorkerId` to `TaskField`.
+6. The bot sends the inspection card only after the `TaskField` row was created successfully.
+
+**CRM scheduling form mapping:**
+
+| Form field | `TaskField` / related field |
+|---|---|
+| Task ID | `taskId` |
+| כותרת הפגישה | `appointmentTitle` |
+| תאריך + שעת התחלה | `scheduledStartAt` |
+| משך | `durationMinutes` |
+| calculated end time | `scheduledEndAt` |
+| מיקום | `siteAddress` |
+| עיר, if available | `siteCity` |
+| הערות לפגישה | `specialInstructions` |
+| worker | `Task.ownerId`, not `TaskField` |
+| inspection type | resolved by `Task.productName` → `InspectionType.code` |
+| family | copied from `InspectionType.family` |
+
+**Validation before creating `TaskField`:**
+- `Task` must exist.
+- `Task.ownerId` must exist.
+- `Task.productName` must exist.
+- `Task.productName` must match `InspectionType.code`.
+- Scheduling form must include `scheduledStartAt`, `durationMinutes`, and location.
+- `scheduledEndAt` is calculated from `scheduledStartAt + durationMinutes`.
+- Do not send an inspection card unless `TaskField` was created successfully.
 
 ## 4. The status model
 
@@ -62,7 +89,7 @@ Two separate layers:
 **The 10 operational statuses:**
 `ASSIGNED` · `CONFIRMED` · `DECLINED` · `NEEDS_MORE_INFO` · `EN_ROUTE` · `ARRIVED` · `FINISHED_FIELD` · `WAITING_FOR_INFO` · `HAS_PROBLEM` · `CANCELED`
 
-- `ASSIGNED` — automatic on `TaskField` creation.
+- `ASSIGNED` — automatic on `TaskField` creation. `assignedAt` is the row creation / system assignment time; `scheduledStartAt` is the actual planned field inspection time.
 - `CONFIRMED` / `DECLINED` / `NEEDS_MORE_INFO` — the worker, in response to the assignment.
 - `EN_ROUTE` ("departed") · `ARRIVED` ("arrived") — the worker. Arrival = start of inspection, no separate STARTED.
 - `FINISHED_FIELD` ("finished") — the worker, **with no blocking condition**.
@@ -115,9 +142,9 @@ Free text ("departed for Ra'anana") or a voice message is routed directly withou
 
 ## 7. Daily work process
 
-**Assignment** → card (section 6). 1 → `CONFIRMED` · 2 → `DECLINED` (asks for a short reason, alerts the office; reassignment is done in the office) · 3 → `NEEDS_MORE_INFO`.
+**Assignment** → card (section 6), sent for a newly created `TaskField` where `workerNotifiedAt IS NULL`. 1 → `CONFIRMED` · 2 → `DECLINED` (asks for a short reason, alerts the office; reassignment is done in the office) · 3 → `NEEDS_MORE_INFO`.
 
-**Morning reminder:**
+**Morning reminder:** uses `TaskField.scheduledStartAt` for "today" / "tomorrow" filtering and ordering, not `assignedAt`.
 ```
 בוקר טוב דני. היום יש לך 3 בדיקות:
 1. 09:00 קרינה - רעננה
@@ -168,7 +195,7 @@ One problem per inspection is stored inline on `TaskField`. If multiple structur
 
 ## 10. Equipment reminder in the morning
 
-Consolidates equipment from all of the day's inspections by the families' `InspectionChecklist`:
+Consolidates equipment from all of the day's inspections by the families' `InspectionChecklist`. "The day" is based on `TaskField.scheduledStartAt`, not `assignedAt`:
 ```
 תזכורת ציוד להיום:
 רעש: מד רעש, קליברטור, חצובה
@@ -181,7 +208,7 @@ Consolidates equipment from all of the day's inspections by the families' `Inspe
 
 ## 11. Day summary for the worker
 
-Computed in real time from the day's inspections' `fieldStatus`:
+Computed in real time from the day's inspections' `fieldStatus`. "The day" is based on `TaskField.scheduledStartAt`, not `assignedAt`:
 ```
 סיכום יום:
 בוצעו: קרינה רעננה, רעש הרצליה, איכות אוויר ת"א
@@ -245,7 +272,7 @@ Relies on the existing digest/notifications infrastructure in the managers' bot,
 
 ## 14. MVP scope
 
-**In:** automatic `TaskField` creation, card + confirmation, "my inspections", statuses (departed/arrived/finished), missing info for report, problem reporting, equipment reminder, day summary for the worker, exception alerts to Yoram, leads stream to Sasha (digest + assignment-by-alert + escalation + AI suggestion), voice messages.
+**In:** CRM scheduling-form `TaskField` creation from an existing `Task ID`, card + confirmation, "my inspections", statuses (departed/arrived/finished), missing info for report, problem reporting, equipment reminder, day summary for the worker, exception alerts to Yoram, leads stream to Sasha (digest + assignment-by-alert + escalation + AI suggestion), voice messages.
 
 **Out (for later):** photos, Outlook, `TaskFieldStatusHistory`, the structured `TaskFieldEntry`, `FieldWorkerDayClose`, performance analysis, automated reports, lead actions from within the bot.
 
@@ -253,7 +280,7 @@ Relies on the existing digest/notifications infrastructure in the managers' bot,
 
 # Updated migration — 3 tables, no photos
 
-Changes from the previous version: `TaskPhotoMeta` dropped, `kind`/photos dropped from `InspectionChecklist` (equipment only), `STARTED`/`startedAt` dropped from `TaskField`.
+Changes from the previous version: `TaskPhotoMeta` dropped, `kind`/photos dropped from `InspectionChecklist` (equipment only), `STARTED`/`startedAt` dropped from `TaskField`. K2 revision: `TaskField` is no longer 1:1 with `Task`; it is created from the CRM field scheduling form using an existing `Task ID`, and one `Task` can have multiple scheduled `TaskField` rows.
 
 ```sql
 -- Migration 009 (revised v2): Field-worker layer — 3 tables, additive only, no photos.
@@ -293,13 +320,19 @@ CREATE TABLE IF NOT EXISTS "InspectionChecklist" (
 );
 CREATE INDEX IF NOT EXISTS idx_checklist_family ON "InspectionChecklist"(family);
 
--- ── 3. TaskField — 1:1 with Task. A Task is an inspection IFF a row exists here ─
+-- ── 3. TaskField — scheduled field visit; one Task may have many rows ─
 CREATE TABLE IF NOT EXISTS "TaskField" (
   id                      uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  "taskId"                text        NOT NULL UNIQUE REFERENCES "Task"(id),
+  "taskId"                text        NOT NULL REFERENCES "Task"(id),
   "inspectionTypeId"      uuid        NOT NULL REFERENCES "InspectionType"(id),
   family                  text        NOT NULL,        -- snapshot for fast checklist lookups
-  -- static metadata (written once at assignment)
+  -- scheduling metadata from the CRM field scheduling form
+  "appointmentTitle"      text,
+  "scheduledStartAt"      timestamptz NOT NULL,
+  "scheduledEndAt"        timestamptz NOT NULL,
+  "durationMinutes"       integer     NOT NULL CHECK ("durationMinutes" > 0),
+  "workerNotifiedAt"      timestamptz,
+  -- static site metadata (written once from the scheduling form)
   "siteAddress"           text,
   "siteCity"              text,
   "fieldContactName"      text,
@@ -310,6 +343,7 @@ CREATE TABLE IF NOT EXISTS "TaskField" (
   "fieldStatus"           text        NOT NULL DEFAULT 'ASSIGNED' CHECK ("fieldStatus" IN (
     'ASSIGNED','CONFIRMED','DECLINED','NEEDS_MORE_INFO','EN_ROUTE',
     'ARRIVED','FINISHED_FIELD','WAITING_FOR_INFO','HAS_PROBLEM','CANCELED')),
+  -- row creation / assignment time; scheduledStartAt is the planned field time
   "assignedAt"            timestamptz NOT NULL DEFAULT now(),
   "confirmedAt"           timestamptz,
   "declinedAt"            timestamptz,
@@ -331,6 +365,7 @@ CREATE TABLE IF NOT EXISTS "TaskField" (
   "createdAt"             timestamptz NOT NULL DEFAULT now(),
   "updatedAt"             timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_taskfield_task_id ON "TaskField"("taskId");
 CREATE INDEX IF NOT EXISTS idx_taskfield_status ON "TaskField"("fieldStatus");
 CREATE INDEX IF NOT EXISTS idx_taskfield_open_problem
   ON "TaskField"("taskId") WHERE "hasOpenProblem" = true;
@@ -402,7 +437,7 @@ COMMIT;
 --     odor_panel_assessment      → 10003
 --     short_term_radon_certified → 10044
 --
--- isFieldInspection = true  → real on-site measurement; CRM dropdown may create a TaskField.
+-- isFieldInspection = true  → real on-site measurement; CRM scheduling form may create a TaskField.
 -- isFieldInspection = false → shielding products / logistics / office reports; never a field task.
 -- ════════════════════════════════════════════════════════════════════════════
 

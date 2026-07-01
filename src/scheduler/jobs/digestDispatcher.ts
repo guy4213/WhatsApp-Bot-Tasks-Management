@@ -1,19 +1,25 @@
 import { pool } from '../../db/connection';
 import { notify } from '../../whatsapp/templates';
+import { sendButtonMessage } from '../../whatsapp/sender';
 import { writeAuditLog } from '../../utils/auditLog';
 import { moduleLogger } from '../../utils/logger';
 import { claimDigestSend, markDigestFailed, type DigestType } from '../../services/digestSendLog';
 import {
-  getEmployeeMorningCounts, getEmployeeEndOfDay, getCompanyMorning, getCompanyEndOfDay,
+  getEmployeeEndOfDay, getCompanyMorning, getCompanyEndOfDay,
 } from '../../services/tasks';
 import {
-  formatEmployeeMorning, formatManagerMorning,
+  formatManagerMorning,
   formatEmployeeEndOfDay, formatManagerEndOfDay,
   formatInspectorMorning,
+  formatEquipmentReminder,
   formatGalitManagerMorning, formatGalitManagerEndOfDay,
   digestTemplateKey, type DigestContent,
 } from '../../whatsapp/digestContent';
-import { getInspectionsForWorkerOnDate } from '../../services/inspectionsQueries';
+import {
+  getInspectionsForWorkerOnDate,
+  getEquipmentChecklistForFamilies,
+  type InspectionListItem,
+} from '../../services/inspectionsQueries';
 import {
   getFieldExceptionCounts, getOpenFieldExceptions,
 } from '../../services/exceptionsQueries';
@@ -115,14 +121,35 @@ export async function runDigestDispatcher(): Promise<void> {
   for (const row of rows) {
     const morningDue = row.morning_enabled && isDigestDue(row.morning_time, row.local_hm);
     const eveningDue = row.evening_enabled && isDigestDue(row.evening_time, row.local_hm);
-    if (morningDue) await dispatchOne(row, 'MORNING', yoramPhoneNormalized);
+    if (morningDue) {
+      await dispatchOne(row, 'MORNING', yoramPhoneNormalized);
+      // D2-T9 — piggyback on the morning slot per the task-spec design
+      // decision. Fires ONLY for inspector rows (K1: role !== 'ADMIN') AND
+      // when the Yoram allow-list did NOT redirect this row to the exceptions
+      // digest. Yoram receives an inspections-manager digest, not an inspector
+      // equipment reminder — skipping him here matches that intent. The
+      // equipment reminder has its OWN dedup row via `EQUIPMENT_MORNING`, so
+      // failing / dedup-skipping the inspector morning does NOT affect this.
+      const isYoram = yoramPhoneNormalized
+        && normalizeIsraeliPhone(row.user_phone) === yoramPhoneNormalized;
+      if (row.role !== 'ADMIN' && !isYoram) {
+        await maybeDispatchEquipmentReminder(row);
+      }
+    }
     if (eveningDue) await dispatchOne(row, 'EVENING', yoramPhoneNormalized);
   }
 }
 
+// `dispatchOne` handles the two "primary" digest slots — MORNING and EVENING.
+// The D2-T9 equipment reminder is a separate send with its own dedup row
+// (`EQUIPMENT_MORNING` — see `maybeDispatchEquipmentReminder` below), so the
+// digestType here is narrowed to the two-value union that `digestTemplateKey`
+// accepts.
+type PrimaryDigestType = Exclude<DigestType, 'EQUIPMENT_MORNING'>;
+
 async function dispatchOne(
   row: DueUserRow,
-  type: DigestType,
+  type: PrimaryDigestType,
   yoramPhoneNormalized: string | null,
 ): Promise<void> {
   // INSERT-first dedup: only the instance that wins the claim sends.
@@ -162,7 +189,7 @@ async function dispatchOne(
 
 async function buildContent(
   row: DueUserRow,
-  type: DigestType,
+  type: PrimaryDigestType,
   isElevated: boolean,
   yoramPhoneNormalized: string | null,
 ): Promise<DigestContent> {
@@ -189,9 +216,9 @@ async function buildContent(
 
   if (type === 'MORNING') {
     // D2-T4 (K1): non-ADMIN users are inspectors and get the v2 numbered
-    // inspections list. ADMIN keeps the legacy manager path. `formatEmployee
-    // Morning` is preserved for any residual non-inspector path — X-T3 retires
-    // it once every non-ADMIN is routed through this branch.
+    // inspections list. ADMIN keeps the legacy manager path. The old CRM
+    // `formatEmployeeMorning` fallback is retired (X-T3) — every non-ADMIN
+    // now flows through the inspector path.
     if (row.role !== 'ADMIN') {
       const items = await getInspectionsForWorkerOnDate(row.user_id, row.local_date);
       return formatInspectorMorning(items, { name: row.user_name });
@@ -227,4 +254,103 @@ async function auditDigest(
     errorMessage: error ?? null,
     pendingActionId: null,
   });
+}
+
+// ── D2-T9: equipment reminder morning roll-up ────────────────────────────────
+//
+// Fires as a SECOND send after `dispatchOne('MORNING', ...)` for inspector
+// rows only. Dedup is via `EQUIPMENT_MORNING` in `WhatsappDigestSendLog` so
+// this is safe under overlapping cron runs. Send failures are logged and
+// audit-stamped just like the inspector morning path, but they DO NOT throw —
+// a bad equipment send must not block the inspector morning digest which was
+// already delivered successfully.
+
+async function maybeDispatchEquipmentReminder(row: DueUserRow): Promise<void> {
+  // INSERT-first dedup on a separate digestType — an inspector morning that
+  // already went out today doesn't gate the equipment reminder, and vice-versa.
+  let claimed = false;
+  try {
+    claimed = await claimDigestSend(row.user_id, 'EQUIPMENT_MORNING', row.local_date);
+  } catch (err) {
+    log.error(
+      { err, userId: row.user_id, type: 'EQUIPMENT_MORNING' },
+      'claimDigestSend failed (equipment reminder skipped)',
+    );
+    return;
+  }
+  if (!claimed) return;
+
+  // Skip if no inspections today (empty families → no checklist → no message).
+  let inspections: InspectionListItem[];
+  try {
+    inspections = await getInspectionsForWorkerOnDate(row.user_id, row.local_date);
+  } catch (err) {
+    log.error(
+      { err, userId: row.user_id },
+      'getInspectionsForWorkerOnDate failed (equipment reminder skipped)',
+    );
+    await markDigestFailed(row.user_id, 'EQUIPMENT_MORNING', row.local_date).catch(() => undefined);
+    return;
+  }
+  if (inspections.length === 0) {
+    // The morning digest itself already told the worker there's nothing today.
+    // The claim row stays so we don't re-check throughout the day.
+    log.info({ userId: row.user_id }, 'Equipment reminder skipped — no inspections today');
+    return;
+  }
+
+  const families = Array.from(new Set(inspections.map((i) => i.family)));
+  let items: Awaited<ReturnType<typeof getEquipmentChecklistForFamilies>>;
+  try {
+    items = await getEquipmentChecklistForFamilies(families);
+  } catch (err) {
+    log.error({ err, userId: row.user_id, families }, 'getEquipmentChecklistForFamilies failed');
+    await markDigestFailed(row.user_id, 'EQUIPMENT_MORNING', row.local_date).catch(() => undefined);
+    return;
+  }
+  if (items.length === 0) {
+    // No checklist seeded for the family(ies) the worker is inspecting. Skip
+    // silently — safer than sending a confusing empty message.
+    log.info(
+      { userId: row.user_id, families },
+      'Equipment reminder skipped — no checklist rows for these families',
+    );
+    return;
+  }
+
+  const content = formatEquipmentReminder(items, {
+    id: row.user_id,
+    name: row.user_name,
+    localDate: row.local_date,
+  });
+  if (content.text.length === 0 || content.buttons.length === 0) {
+    log.info({ userId: row.user_id }, 'Equipment reminder skipped — empty formatter output');
+    return;
+  }
+
+  try {
+    // D5-T4 button-policy: `sendButtonMessage` is explicitly allowed here (see
+    // JSDoc on `sendButtonMessage` in `src/whatsapp/sender.ts` and on
+    // `formatEquipmentReminder` in `src/whatsapp/digestContent.ts`).
+    await sendButtonMessage({
+      to: row.user_phone,
+      body: content.text,
+      buttons: content.buttons,
+    });
+    await auditDigest(row, 'EQUIPMENT_MORNING', 'SUCCESS');
+    log.info({ userId: row.user_id }, 'Equipment reminder sent');
+  } catch (err) {
+    log.error({ err, userId: row.user_id }, 'Equipment reminder send failed');
+    try {
+      await markDigestFailed(row.user_id, 'EQUIPMENT_MORNING', row.local_date);
+    } catch (markErr) {
+      log.error({ err: markErr, userId: row.user_id }, 'markDigestFailed failed');
+    }
+    await auditDigest(
+      row,
+      'EQUIPMENT_MORNING',
+      'FAILED',
+      (err as Error).message ?? 'unknown send error',
+    );
+  }
 }

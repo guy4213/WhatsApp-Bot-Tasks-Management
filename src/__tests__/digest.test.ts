@@ -3,14 +3,13 @@ import { parseTimeInput } from '../services/digestPreferences';
 import { minutesOfDay, isDigestDue } from '../scheduler/jobs/digestDispatcher';
 import {
   digestTemplateKey,
-  formatEmployeeMorning,
   formatManagerMorning,
   formatEmployeeEndOfDay,
   formatManagerEndOfDay,
 } from '../whatsapp/digestContent';
 import { DIGEST_PAYLOAD_IDS } from '../ai/digestCommands';
 import type {
-  EmployeeMorningCounts, EmployeeEndOfDay, CompanyMorning, CompanyEndOfDay,
+  EmployeeEndOfDay, CompanyMorning, CompanyEndOfDay,
 } from '../services/tasks';
 
 // ── parseTimeInput ──────────────────────────────────────────────────────────────
@@ -82,26 +81,9 @@ describe('digestTemplateKey', () => {
 });
 
 // ── Morning formatters ──────────────────────────────────────────────────────────
-
-describe('formatEmployeeMorning', () => {
-  it('renders own due-today / overdue / open and has NO per-employee data', () => {
-    const counts: EmployeeMorningCounts = { dueToday: 3, overdue: 1, open: 5 };
-    const { text, params } = formatEmployeeMorning('דנה', counts);
-    expect(params).toEqual(['דנה', '3', '1', '5']);
-    expect(text).toContain('בוקר טוב דנה');
-    expect(text).toContain('3 משימות להיום');
-    expect(text).toContain('1 באיחור');
-    expect(text).toContain('5 פתוחות');
-    // An employee morning must never include a per-employee breakdown.
-    expect(text).not.toContain('פירוט לפי עובד');
-  });
-
-  it('attaches the employee-today + free-text quick-reply buttons', () => {
-    const { buttons } = formatEmployeeMorning('דנה', { dueToday: 1, overdue: 0, open: 2 });
-    expect(buttons.map((b) => b.id)).toEqual([DIGEST_PAYLOAD_IDS.EMP_TODAY, DIGEST_PAYLOAD_IDS.FREE_TEXT]);
-    for (const b of buttons) expect(b.title.length).toBeLessThanOrEqual(20);
-  });
-});
+// X-T3 (2026-07-01): `formatEmployeeMorning` tests removed alongside the
+// retired formatter — every non-ADMIN user now receives the inspector morning
+// digest via `formatInspectorMorning` (see `inspectorMorning.test.ts`).
 
 describe('formatManagerMorning', () => {
   it('adds per-employee breakdown + #employees-with-overdue', () => {

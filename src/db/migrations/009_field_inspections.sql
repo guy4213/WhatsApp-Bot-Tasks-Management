@@ -16,10 +16,11 @@
 --                           later migration (B1-blocked) — this file only creates it.
 --   "InspectionChecklist" — required equipment PER FAMILY (defined once per family,
 --                           not per מק"ט). Seeded below for 4 families (17 rows).
---   "TaskField"           — 1:1 with "Task" (taskId UNIQUE). A Task is a field
---                           inspection IFF a row exists here. Static site metadata +
---                           the live fieldStatus + per-status timestamps + a single
---                           inline problem + a missing-info flag.
+--   "TaskField"           — scheduled field visit / inspection appointment created
+--                           from the CRM field scheduling form using an existing Task ID.
+--                           One Task may have multiple TaskField rows. Static scheduling
+--                           + site metadata, live fieldStatus, per-status timestamps,
+--                           a single inline problem, and a missing-info flag.
 
 BEGIN;
 
@@ -55,16 +56,22 @@ CREATE TABLE IF NOT EXISTS "InspectionChecklist" (
 );
 CREATE INDEX IF NOT EXISTS idx_checklist_family ON "InspectionChecklist"(family);
 
--- ── 3. TaskField — 1:1 with Task. A Task is an inspection IFF a row exists here ─
+-- ── 3. TaskField — scheduled field visit; one Task may have many rows ─
 
 CREATE TABLE IF NOT EXISTS "TaskField" (
   id                      uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  "taskId"                text        NOT NULL UNIQUE REFERENCES "Task"(id),
+  "taskId"                text        NOT NULL REFERENCES "Task"(id),
   "inspectionTypeId"      uuid        NOT NULL REFERENCES "InspectionType"(id),
   family                  text        NOT NULL CHECK (family IN (   -- snapshot for fast checklist lookups
                             'radiation','noise','air','asbestos','radon','odor',
                             'water','soil','occupational','thermal','green','opinion','general')),
-  -- static metadata (written once at assignment)
+  -- scheduling metadata from the CRM field scheduling form
+  "appointmentTitle"      text,
+  "scheduledStartAt"      timestamptz NOT NULL,
+  "scheduledEndAt"        timestamptz NOT NULL,
+  "durationMinutes"       integer     NOT NULL CHECK ("durationMinutes" > 0),
+  "workerNotifiedAt"      timestamptz,
+  -- static site metadata (written once from the scheduling form)
   "siteAddress"           text,
   "siteCity"              text,
   "fieldContactName"      text,
@@ -75,6 +82,7 @@ CREATE TABLE IF NOT EXISTS "TaskField" (
   "fieldStatus"           text        NOT NULL DEFAULT 'ASSIGNED' CHECK ("fieldStatus" IN (
     'ASSIGNED','CONFIRMED','DECLINED','NEEDS_MORE_INFO','EN_ROUTE',
     'ARRIVED','FINISHED_FIELD','WAITING_FOR_INFO','HAS_PROBLEM','CANCELED')),
+  -- row creation / assignment time; scheduledStartAt is the planned field time
   "assignedAt"            timestamptz NOT NULL DEFAULT now(),
   "confirmedAt"           timestamptz,
   "declinedAt"            timestamptz,
@@ -96,6 +104,7 @@ CREATE TABLE IF NOT EXISTS "TaskField" (
   "createdAt"             timestamptz NOT NULL DEFAULT now(),
   "updatedAt"             timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_taskfield_task_id ON "TaskField"("taskId");
 CREATE INDEX IF NOT EXISTS idx_taskfield_status ON "TaskField"("fieldStatus");
 CREATE INDEX IF NOT EXISTS idx_taskfield_open_problem
   ON "TaskField"("taskId") WHERE "hasOpenProblem" = true;

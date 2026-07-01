@@ -241,12 +241,9 @@ export async function getTeamWorkload(limit = 15): Promise<WorkloadRow[]> {
 // classification is by the task's CURRENT status + dueDate, with CURRENT_DATE in
 // the pool's pinned Asia/Jerusalem session tz. See BOT_V1_DESIGN_UPDATE_PLAN §1/§5.
 
-/** Employee morning ("opening day plan") counts — that employee's own tasks only. */
-export interface EmployeeMorningCounts {
-  dueToday: number;
-  overdue: number;
-  open: number;
-}
+// X-T3 (2026-07-01): `EmployeeMorningCounts` + `getEmployeeMorningCounts` were
+// removed — they fed the old CRM-tasks employee morning digest which was
+// replaced by the inspector morning digest (D2-T4) for every non-ADMIN user.
 
 /** Employee end-of-day ("current status") counts + unfinished titles for the in-window list. */
 export interface EmployeeEndOfDay {
@@ -294,21 +291,6 @@ export interface CompanyEndOfDay {
   openCarry: number;
   employeesWithUnfinishedOrOverdue: number;
   employees: CompanyEndOfDayEmployee[];
-}
-
-/** Morning plan counts for ONE employee — restricted to tasks they own. */
-export async function getEmployeeMorningCounts(ownerId: string): Promise<EmployeeMorningCounts> {
-  const result = await pool.query<{ due_today: number; overdue: number; open: number }>(
-    `SELECT
-       COUNT(*) FILTER (WHERE t."dueDate"::date = CURRENT_DATE AND t.status <> 'DONE')::int AS due_today,
-       COUNT(*) FILTER (WHERE t."dueDate"::date < CURRENT_DATE AND t.status <> 'DONE')::int AS overdue,
-       COUNT(*) FILTER (WHERE t.status IN ('OPEN','IN_PROGRESS'))::int                      AS open
-     FROM "Task" t
-     WHERE t."ownerId" = $1`,
-    [ownerId],
-  );
-  const r = result.rows[0];
-  return { dueToday: r.due_today, overdue: r.overdue, open: r.open };
 }
 
 /** End-of-day (current status) counts + unfinished titles for ONE employee — own tasks only. */

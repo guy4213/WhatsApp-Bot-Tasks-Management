@@ -5,7 +5,7 @@ Source of truth: `GAP_ANALYSIS.md` (30 gaps across 5 domains, 12 existing capabi
 Conventions:
 - Task IDs: `<section>-T<n>`. `B` = blocker / external input, `K` = decision-task, `D1..D5` = domain (per GAP_ANALYSIS Part 1), `X` = dismantle/replace (per GAP_ANALYSIS Part 2).
 - "Blocked" means cannot be started until the named blocker resolves (external input received, or decision-task closed).
-- Constraints in force throughout: ONE bot (role-routed display); additive-only DB except the single approved `Task` flag; the CRM owns `Task.status` and the bot NEVER writes it; no PG enums (text + CHECK); UUID PKs with `gen_random_uuid()`; RLS deny-all on every new table; migration conventions identical to `001`-`008`.
+- Constraints in force throughout: ONE bot (role-routed display); additive-only DB for the field layer; the CRM owns `Task.status` and the bot NEVER writes it; no PG enums (text + CHECK); UUID PKs with `gen_random_uuid()`; RLS deny-all on every new table; migration conventions identical to `001`-`008`.
 
 ---
 
@@ -14,19 +14,19 @@ Conventions:
 The 7 K-tasks from §2 are closed. Resolutions:
 
 - **K1 — Inspector identification:** rule is `user.role !== 'ADMIN'`. No schema change, no new role value, no per-user flag column. Simpler than any of the 3 surfaced options. `D5-T1` collapses to a one-liner branch in the menu router; `D2-T1` is unblocked from the K1 axis.
-- **K2 — `Task` → inspection mechanism:** TBD. Leaning towards "some kind of trigger" (DB trigger or CRM-side hook) — to be finalized when more context is available. Does NOT block `D1-T1 / T2 / T3 / T5 / T6` (the DDL scaffolding + checklist seed). DOES block `D1-T4` (the `Task.isFieldTask` column wiring), `D2-T2` (card emitter), `D5-T6` (assignment-detection pattern).
+- **K2 — `TaskField` scheduling mechanism:** CLOSED (2026-07-01). No field-task flag on `Task`. The CRM field scheduling form creates a `TaskField` row using an existing `Task ID`; `Task` remains the office / CRM customer task, and each `TaskField` row is one scheduled field visit / inspection appointment. One `Task` can have multiple `TaskField` rows. `Task.ownerId` is the assigned field worker; do not add `fieldWorkerId` to `TaskField`.
 - **K3 — Yoram vs Sasha dispatcher routing:** option (a) — per-user routing inside `src/scheduler/jobs/digestDispatcher.ts`, keyed on a tiny bot-side mapping (env-var phone allow-list, or a 2-row lookup table). One scheduled job, two code paths inside. Two-cron-jobs rejected as over-engineered for ~2 users.
 - **K4 — Old CRM manager digest:** option (c) — gate behind an env flag, default off. Precedent: `LEGACY_DAILY_SUMMARY_ENABLED` at `src/scheduler/index.ts:76`. Delete entirely once v2 has run cleanly in production for ~2 weeks.
 - **K5 — Digest-preference sub-menu:** option (b) — hidden capability. Keep `UserDigestPreference` table + service as infrastructure. No menu entry. Accessible only via a free-text trigger. Worker menu stays at exactly 7 items per spec.
 - **K6 — Daily greeting:** option (a) — keep AND auto-open the v2 inspections menu after it. Matches the §5 spec example "שלום דני, מה תרצה לעשות?".
 - **K7 — STT provider:** OpenAI Whisper API. Hebrew supported. ~$0.006/min. Single env var (`OPENAI_API_KEY` or a dedicated `WHISPER_API_KEY`).
 
-Downstream effect on task blockers: `D5-T1, D2-T1, D2-T4, D3-T5, D4-T1, D4-T2, D5-T2, D5-T6, X-T5, X-T6` are no longer blocked on K-decisions (only K2-gated tasks `D1-T4 / D2-T2` remain decision-blocked, plus the original external-input blockers `B1 / B2`).
+Downstream effect on task blockers: all K-decisions are closed. `D1-T4`, `D2-T2`, `D3-T3`, and `D5-T6` are no longer blocked on K2; they now target the CRM scheduling-form / unsent-`TaskField` model.
 
-**2026-07-01 — B1 and B2 RESOLVED. Only K2 remains open.**
+**2026-07-01 — B1, B2, and K2 RESOLVED.**
 - **B1 resolved:** proceed with the clear, field-relevant מק"טים from the spec draft (lines 416-571). Shielding and borderline rows are skipped for now — include only unambiguous field-inspection types. `D1-T7` is unblocked.
 - **B2 resolved:** table is `IncomingLead`. Columns: `id`, `subject`, `body`, `fromName`, `fromEmail`, `receivedAt`, `status`, `ownerId`, `taskId`, `notifiedAt`. Assignment field is `ownerId` (UUID FK to `User`). No phone column — messages display `fromName` / `fromEmail` / `subject` / `body`. `transferredToId` exists but is not used. All Domain 3 tasks unblocked; `D4-T1` leads portion unblocked.
-- **Only remaining open item: K2** — Task→inspection mechanism (DB trigger / CRM hook / polling). Still gates `D1-T4`, `D2-T2`, `D3-T3`, `D5-T6`.
+- **K2 resolved:** the CRM field scheduling form creates `TaskField` using an existing `Task ID`. The bot detects/sends assignment cards from created `TaskField` rows where `workerNotifiedAt IS NULL`.
 
 ---
 
@@ -48,7 +48,7 @@ These are inputs the bot team cannot produce internally. Work that depends on th
   - **No phone column** — lead messages display `fromName` / `fromEmail` / `subject` / `body`.
   - `transferredToId` exists on the table but is **not used** in the bot for now.
   - The spec's earlier question about whether `assignedTo` is a FK or free-text: it is a UUID FK (`ownerId`).
-- **Tasks previously gated on B2:** `D3-T1`, `D3-T2`, `D3-T3`, `D3-T4` — all now unblocked (note: `D3-T3` also requires K2; `D3-T5` was already unblocked). The leads-counts portion of `D4-T1` is also now unblocked.
+- **Tasks previously gated on B2:** `D3-T1`, `D3-T2`, `D3-T3`, `D3-T4` — all now unblocked. `D3-T3` is independent of K2 unless it deliberately reuses generic polling helpers. The leads-counts portion of `D4-T1` is also now unblocked.
 
 ---
 
@@ -65,14 +65,14 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **What's blocked until decided:** `D5-T1` (role-based menu routing), `D2-T1` (the worker menu can be rendered, but it has no "right people" without this).
 - **Recommended default per gap analysis lean:** option (c). Confirm with stakeholders.
 
-### K2 — Mechanism for "Task becomes inspection"
-- **Question:** when the office flips the "field task = yes" dropdown in the CRM, what mechanism creates the corresponding `TaskField` row and triggers the inspection card (§6)?
-- **Options surfaced by the gap analysis** (GAP Domain 1 row 4, GAP Domain 2 row 2):
-  - (a) DB trigger on `Task` UPDATE/INSERT that inserts into `TaskField`. Atomic — but invisible to the bot until polled.
-  - (b) Bot-side polling job (mirroring `completionNotifier.ts`) on the new `Task` flag column with a dedup mechanism.
-  - (c) CRM-side hook (HTTP call from the CRM into the bot's `/internal` routes) that posts the new field-task event.
-- **What's blocked until decided:** `D1-T4` (the `Task` flag migration), `D2-T2` (the inspection card emitter), `D5-T6` (assignment-detection polling pattern is the same shape).
-- **Note:** the same mechanism decision is reusable for the lead-assignment alert (`D3-T3`) — if (b) is chosen, both share a polling-job template.
+### K2 — CRM scheduling form creates `TaskField`
+- **Status: RESOLVED (2026-07-01).**
+- **Decision:** no field-task flag on `Task` and no automatic `Task` → `TaskField` conversion. The CRM field scheduling form receives an existing `Task ID` and creates a `TaskField` row for one scheduled field visit / inspection appointment.
+- **Card trigger:** the bot sends the inspection card when a created `TaskField` row exists and `workerNotifiedAt IS NULL`. After sending, the bot stamps `workerNotifiedAt` to prevent duplicate assignment-card sends.
+- **Cardinality:** `TaskField.taskId` is not unique. One `Task` can have multiple scheduled `TaskField` rows.
+- **Worker assignment:** `Task.ownerId` remains the assigned field worker. Do not add `fieldWorkerId` to `TaskField`.
+- **Required creation validation:** `Task` exists; `Task.ownerId` exists; `Task.productName` exists; `Task.productName` matches `InspectionType.code`; scheduling form includes `scheduledStartAt`, `durationMinutes`, and location; `scheduledEndAt` is calculated from start time + duration. Do not send an inspection card unless `TaskField` was created successfully.
+- **Unblocked by this decision:** `D1-T4`, `D2-T2`, `D3-T3`, `D5-T6`.
 
 ### K3 — Routing Yoram vs. Sasha to two different digests
 - **Question:** how does the dispatcher decide Yoram gets the field+leads exceptions digest and Sasha gets the leads-only digest, when both look like elevated users today?
@@ -142,17 +142,18 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Dependencies:** D1-T1.
 - **Blocked:** no.
 
-#### D1-T4 — `Task` flag column (the one approved CRM exception)
-- **What to do:** extend `009_field_inspections.sql` with a single `ALTER TABLE "Task" ADD COLUMN <name> BOOLEAN ...` per spec §1 + §3. Column name is the bot team's choice (suggest `isFieldTask`). Default `false`. Document the mechanism (per K2 decision) that flips this flag and triggers `TaskField` creation.
-- **Definition of Done:** column exists on `Task`; default is `false` on existing rows; mechanism documented in a comment block at the top of the migration referencing the K2 decision.
+#### D1-T4 — CRM scheduling form creates `TaskField` using `Task ID`
+- **Status:** OBSOLETE/REWRITTEN by K2 (2026-07-01). Do not add a field-task flag to `Task`.
+- **What to do:** document the CRM scheduling-form contract instead of adding a `Task` flag. The form creates one `TaskField` row per scheduled field visit using an existing `Task ID`; `Task` remains the office / CRM customer task.
+- **Definition of Done:** no migration adds a field-task flag column to `Task`; docs/migration comments state that `TaskField` is created from the CRM scheduling form using `Task ID`; validation rules are documented (`Task` exists, `ownerId`, `productName`, matching `InspectionType.code`, `scheduledStartAt`, `durationMinutes`, location, calculated `scheduledEndAt`).
 - **Reference:** GAP Domain 1 row 4. Spec §1, §3.
 - **Dependencies:** D1-T1, K2.
-- **Blocked:** YES (K2).
+- **Blocked:** NO (K2 resolved 2026-07-01).
 
 #### D1-T5 — `TaskField` table DDL (operational spine)
-- **Status:** DONE (commit f7aeaa0). Note: a 13-value `CHECK` was added to `TaskField.family` (the snapshot column) to match `InspectionType`/`InspectionChecklist` — the raw spec block left it bare, but the build brief's hard constraints and this task spec both require it.
-- **What to do:** extend `009_field_inspections.sql` with `TaskField`. Columns per spec §3, §4, migration block lines 297-336: UUID PK, `taskId` UUID UNIQUE FK to `Task`, `inspectionTypeId` UUID FK to `InspectionType`, snapshot `family` text + CHECK (same 13 values), static metadata (`siteAddress`, `siteCity`, `fieldContactName`, `fieldContactPhone`, `navigationUrl`, `specialInstructions`), live `fieldStatus` text + CHECK over **exactly the 10 values** (`ASSIGNED, CONFIRMED, DECLINED, NEEDS_MORE_INFO, EN_ROUTE, ARRIVED, FINISHED_FIELD, WAITING_FOR_INFO, HAS_PROBLEM, CANCELED` — NO `STARTED`), per-status timestamps (`assignedAt, confirmedAt, declinedAt, departedAt, arrivedAt, finishedAt`), `declinedReason` text, inline problem (`problemType` text + CHECK over the 7 declared values, `problemNote` text, `hasOpenProblem` bool), missing-info (`missingReportInfo` bool, `missingReportInfoNote` text), `managerNotifiedAt` timestamp, `updatedByUserId` UUID FK to `User`, `createdAt/updatedAt` timestamps. Index on `fieldStatus`; partial index `WHERE hasOpenProblem = true`. RLS deny-all.
-- **Definition of Done:** table created; the 10-value CHECK rejects any other `fieldStatus`; the 7-value CHECK rejects any other `problemType`; the unique constraint on `taskId` enforces 1:1; both indexes present; RLS deny-all verified.
+- **Status:** DONE (local, uncommitted K2 revision; original DDL commit f7aeaa0). K2 revision applied 2026-07-01: removed the old uniqueness constraint on `taskId`, added scheduling fields, and added `idx_taskfield_task_id`. Note: a 13-value `CHECK` was added to `TaskField.family` (the snapshot column) to match `InspectionType`/`InspectionChecklist` — the raw spec block left it bare, but the build brief's hard constraints and this task spec both require it.
+- **What to do:** extend `009_field_inspections.sql` with `TaskField`. Columns per spec §3, §4, migration block lines 297-336: UUID PK, `taskId` FK to `Task` (**not unique**; one `Task` can have multiple scheduled field visits), `inspectionTypeId` UUID FK to `InspectionType`, snapshot `family` text + CHECK (same 13 values), scheduling metadata (`appointmentTitle`, `scheduledStartAt`, `scheduledEndAt`, `durationMinutes`, `workerNotifiedAt`), static site metadata (`siteAddress`, `siteCity`, `fieldContactName`, `fieldContactPhone`, `navigationUrl`, `specialInstructions`), live `fieldStatus` text + CHECK over **exactly the 10 values** (`ASSIGNED, CONFIRMED, DECLINED, NEEDS_MORE_INFO, EN_ROUTE, ARRIVED, FINISHED_FIELD, WAITING_FOR_INFO, HAS_PROBLEM, CANCELED` — NO `STARTED`), per-status timestamps (`assignedAt, confirmedAt, declinedAt, departedAt, arrivedAt, finishedAt`), `declinedReason` text, inline problem (`problemType` text + CHECK over the 7 declared values, `problemNote` text, `hasOpenProblem` bool), missing-info (`missingReportInfo` bool, `missingReportInfoNote` text), `managerNotifiedAt` timestamp, `updatedByUserId` UUID FK to `User`, `createdAt/updatedAt` timestamps. `assignedAt` is row creation / system assignment time; `scheduledStartAt` is the planned inspection time. Index on `taskId`; index on `fieldStatus`; partial index `WHERE hasOpenProblem = true`. RLS deny-all.
+- **Definition of Done:** table created; `taskId` allows multiple rows for the same `Task`; normal `idx_taskfield_task_id` exists; the 10-value CHECK rejects any other `fieldStatus`; the 7-value CHECK rejects any other `problemType`; scheduling fields exist with `scheduledStartAt`, `scheduledEndAt`, and positive `durationMinutes`; indexes present; RLS deny-all verified.
 - **Reference:** GAP Domain 1 row 3. Spec §3, §4, lines 297-336.
 - **Dependencies:** D1-T1, D1-T2.
 - **Blocked:** no.
@@ -179,7 +180,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Definition of Done:** an inspector calling the menu trigger sees the v2 inspections menu items only; a non-inspector elevated user sees no inspector menu; resolved role is logged in the audit trail.
 - **Reference:** GAP Domain 5 row 1. Spec §1, §2.
 - **Dependencies:** K1, K3, K4.
-- **Blocked:** YES (until K1, K3, K4 close).
+- **Blocked:** NO (K1, K3, K4 closed).
 
 #### D5-T2 — Voice (`audio`) inbound: download + transcribe + route as text
 - **Status:** DONE (commit a628b10). New `src/whatsapp/voice.ts` (Meta 2-step download + Whisper `/v1/audio/transcriptions`, `whisper-1`, `language=he`, K7) + `src/__tests__/voice.test.ts` (11 tests, all pass). `webhook.ts` audio branch seeds `WhatsappAuditLog` with `mediaId`, transcribes, feeds transcript through the existing `handleIncomingMessage` text path; fallback text `לא הצלחתי להבין את ההודעה הקולית…` on null. `utils/auditLog.ts`: `writeAuditLog` now returns the inserted id + new `updateTranscribedMessage(id, text)` helper (never throws) — 3 unrelated callers (`routes/tasks.ts`, `scheduler/jobs/digestDispatcher.ts`, `ai/router.ts`) got 1-line `await` conversions to preserve `Promise<void>` contracts. Deviations: raw `https.request` (mirrors `sender.ts`) instead of fetch, no new dep; audit-log helper lives in `utils/auditLog.ts` (no `whatsappAuditLog.ts` service exists in this repo). `OPENAI_API_KEY` already recognized by preflight — missing key logs a warn and no-ops.
@@ -187,7 +188,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Definition of Done:** sending a Hebrew voice message via WhatsApp results in: (a) the transcript stored in `WhatsappAuditLog.transcribedMessage`, (b) the same downstream routing as if the transcript had been typed.
 - **Reference:** GAP Domain 5 row 2. Spec §5, §8, §9, §11, §14.
 - **Dependencies:** K7.
-- **Blocked:** YES (K7).
+- **Blocked:** NO (K7 closed).
 
 #### D5-T3 — AI intent set rewrite for field statuses
 - **Status:** DONE (commit a628b10). `ai/schema.ts` adds 3 new `AI_INTENTS` (`set_field_status`, `report_problem`, `report_missing_info`) + `FIELD_STATUS_TRANSITIONS` (5 values) + `FIELD_PROBLEM_TYPES` (7 values); JSON tool-call schema + Zod validator extended with strict `z.enum` (out-of-set values rejected per DoD). `types/index.ts`: `AIIntent` union extended, `FieldStatusTransition` + `FieldProblemType` exported. `intentParser.ts`: Hebrew few-shot mappings for all 5 transitions (יצאתי / הגעתי / סיימתי / מחכה למידע / יש בעיה), mapped + unmapped `problem_type` cases, missing-info notes, inline customer-ref ("יצאתי ללקוח כהן"). Legacy CRM intents preserved (X-T2 removes them). 20 new tests in `aiSchema.test.ts` across 8 describe blocks — all pass; existing 5 tests unchanged. Deviation: `transition` + `problem_type` land as top-level `AIIntentResult` fields (mirrors `field` / `new_value`) rather than inside `params` — required for strict `z.enum` rejection. Router untouched (`executeIntent` has a `default: helpText()` branch, no exhaustiveness fix needed) — the 3 new intents fall to `helpText()` until D2-T5 / T7 / T8 wire them.
@@ -204,14 +205,14 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Definition of Done:** an inspector sees exactly the 7 v2 items, numbered, Hebrew, no emojis; replying with a number triggers the corresponding `MenuAction`; `MENU_TRIGGER_RE` (existing) re-opens the menu.
 - **Reference:** GAP Domain 2 row 1. Spec §5.
 - **Dependencies:** D5-T1, K5, K6.
-- **Blocked:** YES (K5, K6 are decisions, K1 cascades from D5-T1).
+- **Blocked:** NO (K5, K6 closed; K1 axis resolved via D5-T1).
 
 #### D2-T2 — Inspection card emission on `TaskField` creation
-- **What to do:** new file `src/services/inspections.ts` for `TaskField` reads/writes. New emission path triggered by the K2 mechanism (DB trigger / polling / CRM hook). On creation: load `TaskField` + `InspectionType` + `Customer` + `InspectionChecklist` rows for the family + `User` (the assignee), assemble the card per spec §6 (type label, customer, address, date+time, contact, equipment list, navigation link), and call `sendButtonMessage` with 3 reply buttons: `1. מאשר`, `2. לא יכול להגיע`, `3. צריך פרטים נוספים`. Use deterministic payload IDs (e.g. `INSP_CONFIRM_<taskFieldId>`, `INSP_DECLINE_<taskFieldId>`, `INSP_NEED_INFO_<taskFieldId>`).
-- **Definition of Done:** creating a `TaskField` row in DB results in the assigned worker receiving one card with three labelled buttons matching spec §6 verbatim.
+- **What to do:** new file `src/services/inspections.ts` for `TaskField` reads/writes. New emission path detects created `TaskField` rows where `workerNotifiedAt IS NULL`; these rows come from the CRM field scheduling form using an existing `Task ID`. Load `TaskField` + `Task` + `InspectionType` + `Customer` + `InspectionChecklist` rows for the family + `User` from `Task.ownerId` (the assignee), assemble the card per spec §6 (type label, customer, address, `scheduledStartAt`, contact, equipment list, navigation link), and call `sendButtonMessage` with 3 reply buttons: `1. מאשר`, `2. לא יכול להגיע`, `3. צריך פרטים נוספים`. Use deterministic payload IDs (e.g. `INSP_CONFIRM_<taskFieldId>`, `INSP_DECLINE_<taskFieldId>`, `INSP_NEED_INFO_<taskFieldId>`). After successful send, stamp `workerNotifiedAt`.
+- **Definition of Done:** a created `TaskField` row with `workerNotifiedAt IS NULL` results in the assigned worker (`Task.ownerId`) receiving one card with three labelled buttons matching spec §6 verbatim; successful sends set `workerNotifiedAt`; repeated polling does not send duplicates.
 - **Reference:** GAP Domain 2 row 2. Spec §6.
 - **Dependencies:** D1-T5, D1-T6, K2.
-- **Blocked:** YES (K2). For end-to-end verification with a real family label, also B1.
+- **Blocked:** NO (K2 resolved). For end-to-end verification with a real family label, also B1.
 
 #### D2-T3 — Inspection card button replies → `fieldStatus` writes
 - **What to do:** extend `src/routes/webhook.ts` interactive-message handler (lines 162-170 today) to route the 3 stable payload IDs from D2-T2 to `TaskField` updates: `INSP_CONFIRM_*` → `fieldStatus = CONFIRMED` + `confirmedAt`; `INSP_DECLINE_*` → `fieldStatus = DECLINED` + `declinedAt` + prompt for short `declinedReason` (new `conversationContext.awaiting` state) + alert office; `INSP_NEED_INFO_*` → `fieldStatus = NEEDS_MORE_INFO` + prompt for free-text follow-up (new awaiting state).
@@ -221,12 +222,12 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** no (after D2-T2).
 
 #### D2-T4 — Worker morning reminder: today's inspections + numbered status update
-- **Status:** DONE (local, uncommitted). New `src/services/inspectionsQueries.ts` (read-only helpers — deliberately separate from the parallel-agent-owned `services/inspections.ts` write module) exports `getInspectionsForWorkerOnDate(userId, localDate)` — SELECTs from `TaskField` → `Task` → `Customer` (LEFT JOIN on `Task.customerId`) → `InspectionType`, filtered on `Task.ownerId = $1` (the CRM's assignment column — confirmed against `services/tasks.ts:192`, `auth/permissions.ts:61`), an `assignedAt` half-open UTC range derived from the user's local date, and excludes `CANCELED`/`DECLINED`. Ordered by `assignedAt`. New `formatInspectorMorning(items, user)` in `whatsapp/digestContent.ts` — Hebrew numbered list per spec §7, per-status Hebrew labels for all 8 actionable `fieldStatus` codes, empty-list one-liner (`אין בדיקות משובצות להיום`), null-tolerant customer/address/city (`לקוח לא ידוע` / `כתובת לא ידועה` / city segment dropped when null). `scheduler/jobs/digestDispatcher.ts` MORNING branch now routes on `row.role !== 'ADMIN'` (K1) — non-ADMIN → new inspector formatter; ADMIN → legacy `formatManagerMorning` untouched. `formatEmployeeMorning` + `getEmployeeMorningCounts` imports left in place per brief (X-T3 owns retirement). Per-day dedup via `claimDigestSend` untouched; advisory-lock + audit log preserved. Tests: `src/__tests__/inspectorMorning.test.ts` (5 pure-formatter cases — 0/1/N items, all 8 status labels, null degradation) + `src/__tests__/inspectorMorningDispatcher.test.ts` (4 dispatcher-routing cases — non-ADMIN routes to inspector, MANAGER routes to inspector per K1, ADMIN routes to legacy manager, false dedup claim skips send). `npx tsc --noEmit` clean; `npx vitest run` 146 passed / 7 skipped (RUN_DB_TESTS gated) / 0 failed. Deviations: (i) formatter tests split into a separate file from dispatcher tests because `vi.mock('../whatsapp/digestContent')` is file-hoisted and would replace the real function under test in the pure suite; (ii) `formatInspectorMorning` params carry `[name, count]` (2 vars) rather than per-item detail — the rich text carries the full list, the template params stay compact, mirroring `formatEmployeeMorning`'s [name, ...counts] shape.
-- **What to do:** extend `src/scheduler/jobs/digestDispatcher.ts` so that — for users identified as inspectors per K1/D5-T1 — the morning slot sends an inspections list (numbered) + a "choose a number to update status" prompt. New content formatter in `src/whatsapp/digestContent.ts` (replaces `formatEmployeeMorning` for inspectors; old CRM formatter handled by `X-T3`). Numbered-reply pattern reused from `src/ai/router.ts`. Per-day dedup via `src/services/digestSendLog.ts`.
+- **Status:** DONE (local, uncommitted; K2 scheduling revision applied). `getInspectionsForWorkerOnDate(userId, localDate)` now filters/orders by `scheduledStartAt` rather than `assignedAt`. The rest of the worker-morning formatter/dispatcher work remains as documented in the local status.
+- **What to do:** extend `src/scheduler/jobs/digestDispatcher.ts` so that — for users identified as inspectors per K1/D5-T1 — the morning slot sends inspections where `TaskField.scheduledStartAt` falls on the local day (numbered, ordered by `scheduledStartAt`) + a "choose a number to update status" prompt. New content formatter in `src/whatsapp/digestContent.ts` (replaces `formatEmployeeMorning` for inspectors; old CRM formatter handled by `X-T3`). Numbered-reply pattern reused from `src/ai/router.ts`. Per-day dedup via `src/services/digestSendLog.ts`.
 - **Definition of Done:** an inspector with N inspections today receives one Hebrew message listing all N numbered, with a status-update prompt; dispatcher dedup prevents a second send the same day.
 - **Reference:** GAP Domain 2 row 4. Spec §7.
 - **Dependencies:** D1-T5, D2-T1, D5-T1.
-- **Blocked:** YES (cascading K1 via D5-T1).
+- **Blocked:** NO (K1 axis resolved; query contract updated to `scheduledStartAt`).
 
 #### D2-T5 — Worker on-demand status transitions (departed / arrived / finished)
 - **Status:** DONE (local, uncommitted). `services/inspections.ts` gained `advanceFieldStatus({ taskFieldId, transition, updatedBy })` — 3-way switch on the `AdvanceTransition` union (`DEPARTED|ARRIVED|FINISHED`, narrowed at the type level so `WAITING_FOR_INFO`/`HAS_PROBLEM` are not accepted here; those still route through `writeMissingInfo`/`writeProblem`). FINISHED write is unconditional (only `WHERE id = $1` — no CHECK-current-status guard). Also added `resolveOpenTaskFieldByHint(userId, hint)` — parameterized ILIKE substring on `Customer.name` OR `TaskField.siteAddress` (`'%' || $2 || '%'`), same OPEN_FIELD_STATUSES filter as `findOpenTaskFieldForWorker`, empty-hint short-circuit. `ai/menu.ts` gained `statusUpdateMenu()` + `renderStatusUpdateMenu()` (3 items). `ai/router.ts`: menu route 3 replaced (`startStatusUpdateFlow` → `renderStatusUpdateMenu` → `status_choice` awaiting → `advanceFieldStatus` + "עדכנתי — סטטוס: …" reply; FINISHED opens the D2-T6 follow-up). D5-T3 `set_field_status` intent wired in `executeIntent`: DEPARTED/ARRIVED/FINISHED → `runAdvanceStatusDirect` (with hint via `resolveOpenTaskFieldByHint` when `intent.task_reference` set); WAITING_FOR_INFO → D2-T7 path (with `params.note` short-circuit); HAS_PROBLEM → D2-T8 path (with `problem_type` short-circuit). The previously-stubbed `missing_info_disambig`/`problem_disambig` are now wired via a shared `handleDisambigReply` that resolves the hint and transitions to the right follow-up state (`missing_info_note`/`problem_type_choice`); "ביטול" clears; no match keeps awaiting. New `AwaitingKind`s: `status_choice`, `status_disambig`. `pendingTransition?: FieldStatusTransition` added to `ConversationState` so a free-text disambig hint carries the requested transition across turns. Tests: `__tests__/inspections.test.ts` — 3 `advanceFieldStatus` cases (per transition, asserting sibling timestamps untouched, FINISHED assert no `AND "fieldStatus"` guard), 5 `resolveOpenTaskFieldByHint` cases (0/1/N + ILIKE parameterization + empty short-circuit). `__tests__/routerInspections.test.ts` — 7 D2-T5 menu-driven cases + 5 `set_field_status` intent cases + 6 disambig-resolution cases. Full suite: 233 pass / 7 skipped / 240 total (was 183/7/190). `npx tsc --noEmit` clean. No deviations.
@@ -250,7 +251,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Definition of Done:** the four `TaskField` fields are written; the office receives an alert containing the worker name, the inspection identity, and the missing-info note.
 - **Reference:** GAP Domain 2 row 6. Spec §8.
 - **Dependencies:** D1-T5, D5-T2, D5-T3.
-- **Blocked:** YES (K7 cascades via D5-T2).
+- **Blocked:** NO (D5-T2/K7 closed).
 
 #### D2-T8 — "Report a problem" flow (7-item numbered sub-menu)
 - **Status:** DONE (local, uncommitted). Shipped in the same commit as D2-T7 — the 4 write/query helpers live together in the new `src/services/inspections.ts`. `src/ai/menu.ts` gained `problemTypeMenu()` + `renderProblemTypeMenu()` exports (7 items numbered 1–7, Hebrew labels, `problemType` machine values verbatim from the CHECK constraint on `TaskField.problemType` in migration 009). `src/ai/router.ts`: menu route 4 replaced (findOpenTaskFieldForWorker → `renderProblemTypeMenu` → new `problem_type_choice` awaiting state; types 1–5 write directly with `note=null`; types 6 [PROFESSIONAL_ISSUE] / 7 [OTHER] transition to `problem_type_note` awaiting state and write on the follow-up reply; invalid number → resend menu with "בחר מספר תקין:" prefix, keep awaiting). D5-T3 free-text intent `report_problem` wired: skips the sub-menu when `problem_type` is set on the intent; otherwise runs the same menu-driven flow. Manager alert per spec §9 (בעיה מהשטח / עובד / בדיקה / לקוח / סוג / detail / לטיפול מנהל.) broadcast via `getManagersForBroadcast()`. Tests: 5 problem-type param tests (types 1–5 direct write); 2 elaboration tests (6, 7); invalid-input resend; ambiguous & no-open branches; D5-T3 direct-dispatch tests. Full suite: 183 pass / 7 skipped. `npx tsc --noEmit` clean.
@@ -261,14 +262,15 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** no.
 
 #### D2-T9 — Equipment reminder (morning roll-up by family)
-- **What to do:** new job (or piggyback on D2-T4) that, for each inspector with inspections today, aggregates the required equipment by joining each inspection's `family` to `InspectionChecklist` rows. Send one message listing the unique equipment items + 2 buttons via `sendButtonMessage`: `לקחתי הכל` / `חסר לי ציוד`. The second button → free-text prompt → manager alert.
+- **What to do:** new job (or piggyback on D2-T4) that, for each inspector with inspections where `TaskField.scheduledStartAt` falls today, aggregates the required equipment by joining each inspection's `family` to `InspectionChecklist` rows. Send one message listing the unique equipment items + 2 buttons via `sendButtonMessage`: `לקחתי הכל` / `חסר לי ציוד`. The second button → free-text prompt → manager alert.
 - **Definition of Done:** worker with two inspections in different families receives one consolidated equipment list (deduped); "חסר לי ציוד" handler captures the free-text item and alerts the manager.
 - **Reference:** GAP Domain 2 row 8. Spec §10.
 - **Dependencies:** D1-T3, D1-T5, D1-T6, D2-T4.
 - **Blocked:** no.
 
 #### D2-T10 — On-demand worker day summary (menu item 7)
-- **What to do:** new service method `dayFieldSummary(userId, date)` in `src/services/inspections.ts`. Reads today's `TaskField` rows for the worker, lists those at `FINISHED_FIELD`, counts `WAITING_FOR_INFO`. Then renders a 4-option menu (`הכל בוצע` / `חסר מידע לדוח` / `צריך לחזור ללקוח` / `בעיה פתוחה`); options 2-4 hand back into D2-T7 / a (light) "call back later" handler / D2-T8 respectively. **No `FieldWorkerDayClose` DB write** — deferred per §14.
+- **Status:** DONE (local, uncommitted; K2 scheduling revision applied). `getFieldSummaryForWorkerOnDate(userId, localDate)` now filters/orders by `scheduledStartAt` rather than `assignedAt`. The rest of the day-summary formatter/router work remains as documented in the local status.
+- **What to do:** new service method `dayFieldSummary(userId, date)` in `src/services/inspections.ts`. Reads today's `TaskField` rows for the worker by `scheduledStartAt`, lists those at `FINISHED_FIELD`, counts `WAITING_FOR_INFO`. Then renders a 4-option menu (`הכל בוצע` / `חסר מידע לדוח` / `צריך לחזור ללקוח` / `בעיה פתוחה`); options 2-4 hand back into D2-T7 / a (light) "call back later" handler / D2-T8 respectively. **No `FieldWorkerDayClose` DB write** — deferred per §14.
 - **Definition of Done:** the menu produces a Hebrew summary of today's finished inspections and the waiting-for-info count; options 2-4 hand off to existing flows; no new tables are written.
 - **Reference:** GAP Domain 2 row 9. Spec §11.
 - **Dependencies:** D1-T5, D2-T1, D2-T7, D2-T8.
@@ -294,15 +296,15 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **What to do:** new polling job in `src/scheduler/jobs/leadAssignmentNotifier.ts` (mirroring `completionNotifier.ts` lines 16-37). Polls `IncomingLead` for rows where `ownerId` just flipped from null to a `User.id`. Alert content: `fromName` / `fromEmail` / `subject` / `body` + "לטיפול ועדכון ב-CRM" (no phone; read-only). Dedup: use `IncomingLead.notifiedAt` — stamp it on the bot side after sending (NOT via a column on the CRM table — use a bot-side mirror table if `notifiedAt` is not writable, or confirm it is a bot-writable column).
 - **Definition of Done:** when `ownerId` flips from null to a `User` who is an inspector (`role !== 'ADMIN'`), that inspector receives one alert and only one; restarts don't re-alert.
 - **Reference:** GAP Domain 3 row 3. Spec §12.
-- **Dependencies:** D3-T1, K2 (the mechanism is the same shape as the `TaskField` creation mechanism).
-- **Blocked:** YES (K2 only — B2 resolved).
+- **Dependencies:** D3-T1. Optional: reuse generic polling/dedup infrastructure from D5-T6 if that helper exists, but lead assignment is independent of K2.
+- **Blocked:** NO (B2 and K2 resolved).
 
 #### D3-T4 — 1-hour escalation to Sasha for unassigned daytime leads
 - **What to do:** add to the polling job from D3-T3: any `IncomingLead` row where `ownerId IS NULL` and `receivedAt` is between 09:30-22:00 local and more than 1 hour ago → ONE alert to Sasha including the AI suggestion (D3-T5) or "לא נמצאה התאמה". Display: `fromName` / `fromEmail` / `subject` / `body`. Overnight leads (17:00-09:30) are skipped — covered by D3-T2. Dedup must guarantee exactly one event per lead.
 - **Definition of Done:** a lead with `receivedAt` at 11:00, still `ownerId IS NULL` at 12:00, triggers ONE Sasha alert; overnight leads never trigger; restarts don't re-fire.
 - **Reference:** GAP Domain 3 row 4. Spec §12.
 - **Dependencies:** D3-T1, D3-T3, D3-T5.
-- **Blocked:** NO (B2 resolved — D3-T3 still needs K2, but D3-T4 can be implemented in parallel once D3-T1 lands).
+- **Blocked:** NO (B2 resolved; lead assignment/escalation is independent of K2).
 
 #### D3-T5 — AI suggest-worker-by-role function
 - **Status:** DONE (local, uncommitted). Landed as new sibling file `src/ai/leadSuggester.ts` (not extended into `provider.ts`) exporting `suggestWorkerForLead(lead, candidates, provider?)`. Uses the existing `getProvider()` seam via `emitStructured`, strict JSON schema `{ userId: string|null, reason: string }`. Returns `{ userId: null, reason: 'לא נמצאה התאמה' }` on any of: empty candidates (no AI call), null provider, thrown error, hallucinated userId (not in candidate list). Never throws. Optional third `provider` param mirrors `parseIntent`'s pattern in `intentParser.ts:130-133` — real callers pass just two args; tests inject a mock directly. Per K1, inspector filtering (`role !== 'ADMIN'`) is the caller's responsibility. Tests: `src/__tests__/leadSuggester.test.ts` — 7/7 passing (empty candidates, disabled provider, valid pick, hallucinated id, provider throws, radiation sample, null-with-reason-kept).
@@ -315,8 +317,8 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 ### Domain 4 — Manager digest / exceptions (Yoram + Sasha)
 
 #### D4-T1 — Yoram exceptions digest (morning + evening) content
-- **Status:** PARTIAL — FIELD portion DONE (local, uncommitted). LEADS portion outstanding + B2-blocked (columns of `lead incoming` unresolved). D4-T2 (dispatcher branching Yoram vs. Sasha vs. other-elevated) NOT wired — only Yoram's single-user branch fires per K3 phone allow-list (`YORAM_PHONE`). New file `src/services/exceptionsQueries.ts` — read-only, parameterized: `getFieldExceptionCounts(localDate)` (5 counts per §13: בוצעו / לא אושרו / עם בעיה / ממתינות למידע / לא סגרו יום, all in ONE round-trip via `COUNT(*) FILTER` + a `bounds` CTE for the Asia/Jerusalem half-open window) + `getOpenFieldExceptions(localDate)` (LEFT JOIN Task→Customer, LEFT JOIN Task→User via `Task.ownerId`, WHERE `hasOpenProblem = true` OR (`missingReportInfo = true` AND `fieldStatus = 'WAITING_FOR_INFO'`), ordered by `managerNotifiedAt ASC NULLS LAST`). New formatters in `src/whatsapp/digestContent.ts`: `formatGalitManagerMorning` + `formatGalitManagerEndOfDay` (no emojis per spec, no CTA button; header + `שטח: בוצעו X · …` counts row + `לידים: (מחכה ל-B2 — טרם משולב)` TODO placeholder + numbered `פתוחים:` list or `אין חריגים פתוחים.` one-liner; null-tolerant worker/customer → `עובד לא ידוע`/`לקוח לא ידוע`; note fallback: `problemNote` / `missingReportInfoNote` → `problemType` Hebrew label from `problemTypeMenu()` → `—`). `src/scheduler/jobs/digestDispatcher.ts`: new Yoram branch in `buildContent` fires BEFORE both the D2-T4 inspector branch AND the legacy ADMIN branch when `normalizeIsraeliPhone(row.user_phone) === normalizeIsraeliPhone(YORAM_PHONE)`; `YORAM_PHONE` is cached OUTSIDE the `for (const row of rows)` loop so non-Yoram rows pay only a string-compare — no N+1 env-parse fan-out. Dedup ledger (`claimDigestSend(userId, MORNING|EVENING, localDate)`) untouched — Yoram writes the same digestType so the existing PK covers him. Legacy paths preserved when `YORAM_PHONE` unset/empty/unparseable. Phone normalization reuses `normalizeIsraeliPhone` from `src/auth/phoneNormalizer.ts` — no new helper. `src/config/preflight.ts`: added a production-only warning when `YORAM_PHONE` is unset; app never crashes on absence. `.env.example`: added `YORAM_PHONE=` block with K3/B2 context. Tests: `src/__tests__/galitManagerDigest.test.ts` (12 formatter cases — empty/N exceptions, null worker+customer, note-null-with-problemType fallback, note+problemType both null → `—`, null user name, counts row content, leads TODO present for both formatters) + `src/__tests__/galitManagerDispatcher.test.ts` (9 routing cases — MORNING+EVENING match, MORNING+EVENING unset, whitespace-only YORAM_PHONE, different-ADMIN-phone falls through to legacy, MANAGER whose phone matches STILL wins the Yoram branch, `claimDigestSend`-false skips send). Split into two files because `vi.mock('../whatsapp/digestContent', ...)` is file-hoisted and would replace the real formatters in the pure suite. `npx tsc --noEmit` clean; `npx vitest run` — 233 passed / 7 skipped / 240 total (baseline before this task was 183/7/190 per brief; the delta is Wave-2 test files landing between the brief being written and this task starting). Deviations: (1) LEADS portion deliberately not implemented (out of scope per brief — B2-blocked). (2) `getOpenFieldExceptions` takes `localDate` in its signature for API symmetry but does NOT filter by date — an open problem from yesterday is still open today; commented in the module. (3) `hasProblemToday` count considers rows either finished-today OR assigned-today-still-open, so a same-day problem counts even if unfinished. (4) preflight warning is `productionOnly`, following the precedent of other optional-in-dev keys.
-- **What to do:** new formatters `formatGalitManagerMorning` / `formatGalitManagerEndOfDay` in `src/whatsapp/digestContent.ts` (or rename and replace the existing `formatManagerMorning` / `formatManagerEndOfDay` per K4). New aggregation queries against `TaskField` for the 5 field counts (`בוצעו / לא אושרו / עם בעיה / ממתינות למידע / לא סגרו יום`) and against `lead incoming` for the leads numbers (מהלילה / לא שויכו). Also the numbered list of OPEN exceptions = workers + customers + free-text issue (from `problemNote` / `missingReportInfoNote`).
+- **Status:** PARTIAL — FIELD portion DONE (local, uncommitted). LEADS portion outstanding; B2 is resolved and no longer blocks it (`IncomingLead` columns are known). D4-T2 (dispatcher branching Yoram vs. Sasha vs. other-elevated) NOT wired — only Yoram's single-user branch fires per K3 phone allow-list (`YORAM_PHONE`). New file `src/services/exceptionsQueries.ts` — read-only, parameterized: `getFieldExceptionCounts(localDate)` (5 counts per §13: בוצעו / לא אושרו / עם בעיה / ממתינות למידע / לא סגרו יום, all in ONE round-trip via `COUNT(*) FILTER` + a `bounds` CTE for the Asia/Jerusalem half-open window) + `getOpenFieldExceptions(localDate)` (LEFT JOIN Task→Customer, LEFT JOIN Task→User via `Task.ownerId`, WHERE `hasOpenProblem = true` OR (`missingReportInfo = true` AND `fieldStatus = 'WAITING_FOR_INFO'`), ordered by `managerNotifiedAt ASC NULLS LAST`). New formatters in `src/whatsapp/digestContent.ts`: `formatGalitManagerMorning` + `formatGalitManagerEndOfDay` (no emojis per spec, no CTA button; header + field counts row + leads placeholder still pending integration + numbered `פתוחים:` list or `אין חריגים פתוחים.` one-liner; null-tolerant worker/customer → `עובד לא ידוע`/`לקוח לא ידוע`; note fallback: `problemNote` / `missingReportInfoNote` → `problemType` Hebrew label from `problemTypeMenu()` → `—`). `src/scheduler/jobs/digestDispatcher.ts`: new Yoram branch in `buildContent` fires BEFORE both the D2-T4 inspector branch AND the legacy ADMIN branch when `normalizeIsraeliPhone(row.user_phone) === normalizeIsraeliPhone(YORAM_PHONE)`; `YORAM_PHONE` is cached OUTSIDE the `for (const row of rows)` loop so non-Yoram rows pay only a string-compare — no N+1 env-parse fan-out. Dedup ledger (`claimDigestSend(userId, MORNING|EVENING, localDate)`) untouched — Yoram writes the same digestType so the existing PK covers him. Legacy paths preserved when `YORAM_PHONE` unset/empty/unparseable. Phone normalization reuses `normalizeIsraeliPhone` from `src/auth/phoneNormalizer.ts` — no new helper. `src/config/preflight.ts`: added a production-only warning when `YORAM_PHONE` is unset; app never crashes on absence. `.env.example`: added `YORAM_PHONE=` block with K3/B2 context. Tests: `src/__tests__/galitManagerDigest.test.ts` (12 formatter cases — empty/N exceptions, null worker+customer, note-null-with-problemType fallback, note+problemType both null → `—`, null user name, counts row content, leads TODO present for both formatters) + `src/__tests__/galitManagerDispatcher.test.ts` (9 routing cases — MORNING+EVENING match, MORNING+EVENING unset, whitespace-only YORAM_PHONE, different-ADMIN-phone falls through to legacy, MANAGER whose phone matches STILL wins the Yoram branch, `claimDigestSend`-false skips send). Split into two files because `vi.mock('../whatsapp/digestContent', ...)` is file-hoisted and would replace the real formatters in the pure suite. `npx tsc --noEmit` clean; `npx vitest run` — 233 passed / 7 skipped / 240 total (baseline before this task was 183/7/190 per brief; the delta is Wave-2 test files landing between the brief being written and this task starting). Deviations: (1) LEADS portion outstanding; B2 is resolved. (2) `getOpenFieldExceptions` takes `localDate` in its signature for API symmetry but does NOT filter by date — an open problem from yesterday is still open today; commented in the module. (3) `hasProblemToday` count considers rows either finished-today OR assigned-today-still-open, so a same-day problem counts even if unfinished. (4) preflight warning is `productionOnly`, following the precedent of other optional-in-dev keys.
+- **What to do:** new formatters `formatGalitManagerMorning` / `formatGalitManagerEndOfDay` in `src/whatsapp/digestContent.ts` (or rename and replace the existing `formatManagerMorning` / `formatManagerEndOfDay` per K4). New aggregation queries against `TaskField` for the 5 field counts (`בוצעו / לא אושרו / עם בעיה / ממתינות למידע / לא סגרו יום`) and against `IncomingLead` for the leads numbers (מהלילה / לא שויכו). Also the numbered list of OPEN exceptions = workers + customers + free-text issue (from `problemNote` / `missingReportInfoNote`).
 - **Definition of Done:** Yoram's morning and evening messages match the §13 format; counts come from `TaskField` queries; open-exceptions list is sorted (suggested: by `managerNotifiedAt`); dispatcher uses the existing 08:00/17:00 default times unchanged for Yoram.
 - **Reference:** GAP Domain 4 rows 1, 3. Spec §13.
 - **Dependencies:** D1-T5, D3-T1 (for the leads counts).
@@ -327,7 +329,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Definition of Done:** Yoram receives only the exceptions digest (D4-T1); Sasha receives only the leads digest (D3-T2); the test of "two elevated users get different content the same morning" passes.
 - **Reference:** GAP Domain 4 row 2. Spec §13.
 - **Dependencies:** D3-T2, D4-T1, K3, K4.
-- **Blocked:** YES (K3, K4).
+- **Blocked:** NO (K3, K4 closed).
 
 ### Domain 5 — Cross-cutting infra (remaining)
 
@@ -346,12 +348,12 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Dependencies:** D2-T2, D4-T1.
 - **Blocked:** no (technically; depends on Meta turnaround).
 
-#### D5-T6 — Polling-job template (shared by Task→inspection creation + lead-assignment detection)
-- **What to do:** if K2 resolves to option (b) polling, factor out a shared polling-job template (mirroring `completionNotifier.ts`). Used by D2-T2 (Task flag → create `TaskField`) and D3-T3 (`IncomingLead.ownerId` flip null→user → alert worker).
-- **Definition of Done:** one reusable polling helper exists; both consumers use it; dedup tables are isolated per consumer.
+#### D5-T6 — Polling-job template for unsent `TaskField` assignment cards
+- **What to do:** if D2-T2 uses polling, factor out a shared polling-job template (mirroring `completionNotifier.ts`). Primary consumer: D2-T2 detects created `TaskField` rows where `workerNotifiedAt IS NULL`, sends the inspection card, then stamps `workerNotifiedAt`. Optional consumer: D3-T3 may reuse the helper for `IncomingLead.ownerId` flip null→user → alert worker, but that lead flow is independent of K2.
+- **Definition of Done:** one reusable polling helper exists if polling is chosen; the `TaskField` assignment-card consumer uses `workerNotifiedAt` for dedup; any lead-assignment consumer has isolated dedup from field cards.
 - **Reference:** GAP Domain 1 row 4, Domain 3 row 3, Domain 5 cross-cutting. Spec §1.
-- **Dependencies:** K2.
-- **Blocked:** YES (K2).
+- **Dependencies:** D1-T5, D2-T2.
+- **Blocked:** NO (K2 resolved).
 
 ---
 
@@ -392,14 +394,14 @@ These tasks remove or rewrite Part 2 capabilities marked "dropped" or "to-rewrit
 - **Definition of Done:** the chosen option is implemented; for Yoram the new D4-T1 content is the only one that fires; no double-send to elevated users.
 - **Reference:** GAP Domain 4 row 4, GAP Part 2, "Manager morning + evening digest (CRM content)" row.
 - **Dependencies:** D4-T1, D4-T2, K4.
-- **Blocked:** YES (K4).
+- **Blocked:** NO (K4 closed).
 
 #### X-T6 — Digest preferences menu item (worker 6 / manager 7)
 - **What to do:** per K5, either remove the menu item entirely (default), keep as a hidden capability (free-text trigger only), or surface in the v2 worker menu. Code in `src/ai/router.ts showDigestSettings` + `handleDigestSettingsReply` + `handleDigestTimeReply` (lines 897-982) and `src/services/digestPreferences.ts` is infrastructure — KEEP the underlying service even if the menu entry is removed.
 - **Definition of Done:** the chosen exposure level is implemented; `UserDigestPreference` table and service untouched.
 - **Reference:** GAP Part 2, "Digest settings sub-menu" row.
 - **Dependencies:** K5.
-- **Blocked:** YES (K5).
+- **Blocked:** NO (K5 closed).
 
 #### X-T7 — Disable / retire `completionNotifier`
 - **Status:** DONE (commit a628b10). `scheduler/index.ts`: cron registration for `completionNotifier` is env-gated behind `COMPLETION_NOTIFIER_ENABLED` (default off), matching the `LEGACY_DAILY_SUMMARY_ENABLED` precedent on the same file. Comment references the v2 status-ownership rule (bot never writes `Task.status`) and points at `completionNotifier.ts` as the D5-T6 polling template per K2 brief §7. `completionNotifier.ts` itself and the `WhatsappCompletionNotification` table untouched. No scheduler test in repo — nothing to update. `tsc` + 106-baseline tests still pass.
@@ -428,9 +430,9 @@ Per Section 14 of the spec, deferred — NO tasks created for any of these:
 
 ## 6. Suggested execution order — milestones
 
-- **M1: External inputs received + decisions made.** ✅ B1 resolved (proceed with clear מק"טים). ✅ B2 resolved (`IncomingLead` table + columns confirmed). ✅ K1–K7 closed. **Only K2 remains** (Task→inspection mechanism).
+- **M1: External inputs received + decisions made.** ✅ B1 resolved (proceed with clear מק"טים). ✅ B2 resolved (`IncomingLead` table + columns confirmed). ✅ K1–K7 closed, including K2 (CRM scheduling form creates `TaskField` by existing `Task ID`).
 - **M2: DB foundation.** `D1-T1`, `D1-T2`, `D1-T3`, `D1-T4`, `D1-T5`, `D1-T6`. (Catalog seed `D1-T7` slides in as soon as B1 lands.)
-- **M3: Cross-cutting infra prerequisites.** `D5-T1` (inspector detection + role-based menu routing), `D5-T2` (voice), `D5-T3` (AI intents), `D5-T4` (button policy), `D5-T6` (shared polling template if K2 = polling).
+- **M3: Cross-cutting infra prerequisites.** `D5-T1` (inspector detection + role-based menu routing), `D5-T2` (voice), `D5-T3` (AI intents), `D5-T4` (button policy), `D5-T6` (unsent `TaskField` assignment-card polling template if polling is used).
 - **M4: Worker inspections menu + card + button replies.** `D2-T1`, `D2-T2`, `D2-T3`. End-to-end: a worker can confirm/decline/need-info on an assigned inspection.
 - **M5: Worker morning reminder + on-demand status transitions + finished follow-up.** `D2-T4`, `D2-T5`, `D2-T6`. End-to-end: a full inspection day from morning list to finished + notes.
 - **M6: Worker problem + missing-info + day-summary flows.** `D2-T7`, `D2-T8`, `D2-T9`, `D2-T10`. Worker side feature-complete for MVP.

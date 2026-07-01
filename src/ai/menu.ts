@@ -201,3 +201,41 @@ export function renderFinishedFollowUpMenu(): string {
     finishedFollowUpMenu().map((i) => `${i.n}. ${i.label}`).join('\n')
   );
 }
+
+// ── D2-T10 day-summary 4-option follow-up menu ──────────────────────────────
+// After the day summary (menu item 7) we prompt for one of 4 follow-ups
+// (spec §11): everything done / missing info / need to call back / open
+// problem. Options 2 and 4 hand off to the D2-T7 / D2-T8 flows (with
+// disambig when the worker has multiple open TaskFields). Option 3 is a
+// light "call-back reminder" — alert-only, no DB write per D2-T10 spec
+// ("no persistence per D2-T10 spec — alert-only"). Option 1 acknowledges
+// and clears without writing any DB row (NO FieldWorkerDayClose — deferred
+// per §14).
+
+export type DaySummaryFollowUpChoice =
+  | 'all_done'
+  | 'missing_info'
+  | 'callback_customer'
+  | 'open_problem';
+
+export interface DaySummaryFollowUpItem {
+  n: number;
+  label: string;
+  choice: DaySummaryFollowUpChoice;
+}
+
+export function daySummaryFollowUpMenu(): DaySummaryFollowUpItem[] {
+  return [
+    { n: 1, label: 'הכל בוצע',           choice: 'all_done'          },
+    { n: 2, label: 'חסר מידע לדוח',      choice: 'missing_info'      },
+    { n: 3, label: 'צריך לחזור ללקוח',   choice: 'callback_customer' },
+    { n: 4, label: 'בעיה פתוחה',         choice: 'open_problem'      },
+  ];
+}
+
+export function renderDaySummaryFollowUpMenu(): string {
+  return (
+    'יש מה להשלים?\n' +
+    daySummaryFollowUpMenu().map((i) => `${i.n}. ${i.label}`).join('\n')
+  );
+}

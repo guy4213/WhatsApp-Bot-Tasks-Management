@@ -18,6 +18,8 @@ const writeMissingInfo = vi.fn().mockResolvedValue(undefined);
 const writeProblem = vi.fn().mockResolvedValue(undefined);
 const notifyOfficeMissingInfo = vi.fn().mockResolvedValue(undefined);
 const notifyOfficeProblem = vi.fn().mockResolvedValue(undefined);
+const notifyOfficeMissingEquipment = vi.fn().mockResolvedValue(undefined);
+const dayFieldSummary = vi.fn().mockResolvedValue({ finished: [], waitingForInfoCount: 0 });
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: (...a: unknown[]) => findOpenTaskFieldForWorker(...a),
   resolveOpenTaskFieldByHint: (...a: unknown[]) => resolveOpenTaskFieldByHint(...a),
@@ -27,6 +29,8 @@ vi.mock('../services/inspections', () => ({
   writeProblem: (...a: unknown[]) => writeProblem(...a),
   notifyOfficeMissingInfo: (...a: unknown[]) => notifyOfficeMissingInfo(...a),
   notifyOfficeProblem: (...a: unknown[]) => notifyOfficeProblem(...a),
+  notifyOfficeMissingEquipment: (...a: unknown[]) => notifyOfficeMissingEquipment(...a),
+  dayFieldSummary: (...a: unknown[]) => dayFieldSummary(...a),
 }));
 
 const sendTextMessage = vi.fn().mockResolvedValue(undefined);
@@ -105,6 +109,8 @@ beforeEach(() => {
   writeProblem.mockReset(); writeProblem.mockResolvedValue(undefined);
   notifyOfficeMissingInfo.mockReset(); notifyOfficeMissingInfo.mockResolvedValue(undefined);
   notifyOfficeProblem.mockReset(); notifyOfficeProblem.mockResolvedValue(undefined);
+  notifyOfficeMissingEquipment.mockReset(); notifyOfficeMissingEquipment.mockResolvedValue(undefined);
+  dayFieldSummary.mockReset(); dayFieldSummary.mockResolvedValue({ finished: [], waitingForInfoCount: 0 });
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
   setContext.mockClear();
   clearContext.mockClear();
@@ -764,5 +770,99 @@ describe('D2-T5 — free-text hint resolves ambiguous open TaskField', () => {
     expect(resolveOpenTaskFieldByHint).not.toHaveBeenCalled();
     expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'בוטל.' });
     expect(ctxStore).toBeNull();
+  });
+});
+
+// ── D2-T9: equipment reminder button taps + missing-note flow ────────────────
+
+describe('D2-T9 — equipment reminder handling', () => {
+  const USER_ID = '11111111-2222-3333-4444-555555555555';
+  const LOCAL_DATE = '2026-07-01';
+
+  function equipUser(): ReturnType<typeof makeUser> {
+    return makeUser({ id: USER_ID });
+  }
+
+  it('"לקחתי הכל" tap → acks with a positive message and clears context', async () => {
+    const user = equipUser();
+    ctxStore = null;
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, `EQUIP_ALL_${USER_ID}_${LOCAL_DATE}`);
+    expect(sendTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('יום עבודה טוב');
+    expect(notifyOfficeMissingEquipment).not.toHaveBeenCalled();
+    expect(ctxStore).toBeNull();
+  });
+
+  it('"חסר לי ציוד" tap → prompts for the missing-equipment note and sets awaiting state', async () => {
+    const user = equipUser();
+    ctxStore = null;
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, `EQUIP_MISSING_${USER_ID}_${LOCAL_DATE}`);
+    expect(sendTextMessage).toHaveBeenCalledWith({
+      to: user.phone,
+      text: 'איזה ציוד חסר לך?',
+    });
+    expect(ctxStore).toMatchObject({
+      awaiting: 'equipment_missing_note',
+      equipmentLocalDate: LOCAL_DATE,
+    });
+    expect(notifyOfficeMissingEquipment).not.toHaveBeenCalled();
+  });
+
+  it('reply to the "חסר לי ציוד" prompt → notifies managers with the note + local date', async () => {
+    const user = equipUser();
+    ctxStore = {
+      awaiting: 'equipment_missing_note',
+      equipmentLocalDate: LOCAL_DATE,
+    };
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'חסר לי גלאי ראדון');
+    expect(notifyOfficeMissingEquipment).toHaveBeenCalledWith({
+      userId: user.id,
+      userName: user.name,
+      note: 'חסר לי גלאי ראדון',
+      localDate: LOCAL_DATE,
+    });
+    // Ack message + clear.
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('המשרד קיבל התראה');
+    expect(ctxStore).toBeNull();
+  });
+
+  it('empty reply while awaiting equipment note → re-prompts, does NOT notify', async () => {
+    const user = equipUser();
+    ctxStore = {
+      awaiting: 'equipment_missing_note',
+      equipmentLocalDate: LOCAL_DATE,
+    };
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, '   ');
+    expect(notifyOfficeMissingEquipment).not.toHaveBeenCalled();
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toBe('איזה ציוד חסר לך?');
+    // Awaiting state preserved.
+    expect(ctxStore).toMatchObject({ awaiting: 'equipment_missing_note' });
+  });
+
+  it('tap payload whose embedded userId does not match the caller → silently ignored', async () => {
+    const user = equipUser();
+    const otherUserId = '99999999-8888-7777-6666-555555555555';
+    ctxStore = null;
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, `EQUIP_ALL_${otherUserId}_${LOCAL_DATE}`);
+    // No prompt, no state change — the router logged a warn and returned.
+    expect(sendTextMessage).not.toHaveBeenCalled();
+    expect(setContext).not.toHaveBeenCalled();
+    expect(notifyOfficeMissingEquipment).not.toHaveBeenCalled();
+  });
+
+  it('menu item 5 (חסר ציוד) → opens the same missing-equipment prompt', async () => {
+    const user = equipUser();
+    await pressMenu(user, 5);
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toBe('איזה ציוד חסר לך?');
+    expect(ctxStore).toMatchObject({ awaiting: 'equipment_missing_note' });
+    // equipmentLocalDate is set to today (Asia/Jerusalem) — assert format only,
+    // not the exact date, so the test is timezone / calendar-stable.
+    const local = (ctxStore as { equipmentLocalDate?: string }).equipmentLocalDate ?? '';
+    expect(local).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

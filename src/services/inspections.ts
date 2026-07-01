@@ -25,6 +25,10 @@ import { pool } from '../db/connection';
 import { sendTextMessage } from '../whatsapp/sender';
 import { getManagersForBroadcast } from './pendingActions';
 import { moduleLogger } from '../utils/logger';
+import {
+  getFieldSummaryForWorkerOnDate,
+  type DayFieldSummary,
+} from './inspectionsQueries';
 import type { FieldProblemType } from '../types';
 
 const log = moduleLogger('inspections');
@@ -366,6 +370,24 @@ const PROBLEM_TYPE_LABELS_HE: Record<FieldProblemType, string> = {
   OTHER:                  'אחר',
 };
 
+// ── D2-T10: on-demand day summary (menu item 7) ─────────────────────────────
+// SPEC_FIELD_V2 §11. Thin wrapper delegating to the read query in
+// `inspectionsQueries.ts`. Kept as a service-layer entry point so the router
+// stays consistent with the other worker flows (all writes/reads live behind
+// `services/inspections.ts` from the router's perspective).
+
+/**
+ * Load today's field summary for a worker — the FINISHED_FIELD row list + the
+ * WAITING_FOR_INFO count. No writes; no `FieldWorkerDayClose` row (deferred
+ * per spec §14, out of scope for D2-T10).
+ */
+export async function dayFieldSummary(
+  userId: string,
+  localDate: string,
+): Promise<DayFieldSummary> {
+  return getFieldSummaryForWorkerOnDate(userId, localDate);
+}
+
 /** §9 manager alert: worker reported a problem on the inspection. */
 export async function notifyOfficeProblem(taskFieldId: string): Promise<void> {
   const ctx = await loadAlertContext(taskFieldId);
@@ -385,4 +407,50 @@ export async function notifyOfficeProblem(taskFieldId: string): Promise<void> {
     `סוג: ${typeHe}${detail}\n` +
     `לטיפול מנהל.`;
   await broadcastToManagers(text, taskFieldId);
+}
+
+// ── D2-T9: equipment reminder — missing-equipment alert to managers ─────────
+// SPEC_FIELD_V2 §10. The equipment reminder is NOT scoped to a specific
+// TaskField (a worker with 2 inspections gets ONE consolidated equipment list
+// and one alert covering both), so this alert takes a userId + free-text note
+// and looks up the worker name from `User` directly — bypassing the
+// `loadAlertContext` TaskField lookup used by §8/§9.
+
+/**
+ * Broadcast a Hebrew alert to every active MANAGER/ADMIN: worker reported
+ * they are missing equipment for today's inspections. No `TaskField` context
+ * is written — the equipment reminder is a per-worker daily roll-up, not a
+ * per-inspection event. If no manager is configured we log a warning and
+ * no-op (the note is not persisted on the worker's TaskField either, so
+ * there's nothing durable to reference — matches the §10 spec).
+ */
+export async function notifyOfficeMissingEquipment(input: {
+  userId: string;
+  userName: string | null;
+  note: string;
+  localDate: string;
+}): Promise<void> {
+  const { userId, userName, note, localDate } = input;
+  const worker = userName ?? '—';
+  const text =
+    `חסר ציוד לבוקר\n` +
+    `עובד: ${worker}\n` +
+    `תאריך: ${localDate}\n` +
+    `${note}\n` +
+    `לטיפול המשרד.`;
+  const managers = await getManagersForBroadcast();
+  if (managers.length === 0) {
+    log.warn(
+      { userId },
+      'notifyOfficeMissingEquipment: no MANAGER/ADMIN with a phone; alert not sent',
+    );
+    return;
+  }
+  await Promise.allSettled(
+    managers.map((m) =>
+      sendTextMessage({ to: m.phone, text }).catch((err) => {
+        log.error({ err, userId, managerId: m.id }, 'missing-equipment alert send failed');
+      }),
+    ),
+  );
 }
