@@ -52,7 +52,8 @@ import {
   type AdvanceTransition,
 } from '../services/inspections';
 import { getManagersForBroadcast } from '../services/pendingActions';
-import { formatDayFieldSummary } from '../whatsapp/digestContent';
+import { getInspectionsForWorkerOnDate } from '../services/inspectionsQueries';
+import { formatDayFieldSummary, formatInspectorDayList } from '../whatsapp/digestContent';
 import {
   matchDigestCommand, planDigestCommand, type DigestCommand,
 } from './digestCommands';
@@ -858,13 +859,18 @@ async function showMenu(user: ResolvedUser): Promise<void> {
   await sendTextMessage({ to: user.phone, text: renderMenu(user) });
 }
 
-/** Handle a reply while the main menu is open: a valid number routes, else re-prompt. */
+/** Handle a reply while the main menu is open: a valid number routes, else
+ *  fall through to the free-text / AI path. The menu prompt explicitly says
+ *  "אפשר גם פשוט לכתוב בקשה חופשית בכל עת" — blocking non-numeric replies
+ *  contradicted that. Any non-numeric input clears the menu context and re-enters
+ *  `handleAIMessage`, which resolves it via the intent parser. */
 async function handleMenuReply(user: ResolvedUser, trimmed: string): Promise<void> {
   const items = menuItemsFor(user);
   const idx = parseInt(trimmed, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
-    await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${items.length}.` });
-    return; // keep the menu context so the next number still works
+    await clearContext(user.phone);
+    await handleAIMessage(user, trimmed);
+    return;
   }
   await handleMenuRoute(user, items[idx - 1]);
 }
@@ -889,16 +895,17 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
       await sendTextMessage({ to: user.phone, text: action.guide });
       return;
 
-    // ── v2 inspector menu (SPEC_FIELD_V2 §5) — STUB handlers ─────────────────
-    // Real behavior lands in D2-T2 through D2-T10. Each stub sends a Hebrew
-    // placeholder plus the internal task IDs where the flow will be implemented.
+    // ── v2 inspector menu (SPEC_FIELD_V2 §5) — on-demand day list ───────────
+    // Menu items 1 (today) and 2 (tomorrow): fetch inspections via the same
+    // `getInspectionsForWorkerOnDate` query the scheduled morning digest uses,
+    // then render via the menu-friendly `formatInspectorDayList` (no greeting).
     case 'list_inspections_today':
       await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T4/T5).' });
+      await sendInspectorDayList(user, 'today');
       return;
     case 'list_inspections_tomorrow':
       await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T4/T5).' });
+      await sendInspectorDayList(user, 'tomorrow');
       return;
     case 'update_inspection_status':
       await startStatusUpdateFlow(user);
@@ -1564,6 +1571,24 @@ async function handleInspectionNeedInfoNoteReply(
 // ("TODO: no persistence per D2-T10 spec — alert-only"). Option 1
 // acknowledges and clears; NO FieldWorkerDayClose row is written (deferred
 // per §14).
+
+/**
+ * On-demand inspector list for menu items 1 (today) and 2 (tomorrow).
+ * `tomorrow` = 24h ahead in Asia/Jerusalem (24h > DST shift, so the calendar
+ * day always advances by 1). Handles empty result set with a friendly one-liner.
+ */
+async function sendInspectorDayList(
+  user: ResolvedUser,
+  when: 'today' | 'tomorrow',
+): Promise<void> {
+  const baseNow = when === 'today'
+    ? new Date()
+    : new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const localDate = localJerusalemDate(baseNow);
+  const items = await getInspectionsForWorkerOnDate(user.id, localDate);
+  const text = formatInspectorDayList(items, { when });
+  await sendTextMessage({ to: user.phone, text });
+}
 
 /** Compute the worker's local calendar day (Asia/Jerusalem) as 'YYYY-MM-DD'. */
 function localJerusalemDate(now: Date = new Date()): string {

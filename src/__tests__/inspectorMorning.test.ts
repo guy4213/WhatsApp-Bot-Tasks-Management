@@ -12,7 +12,7 @@
  * and would otherwise replace the real formatter under test here.
  */
 import { describe, expect, it } from 'vitest';
-import { formatInspectorMorning } from '../whatsapp/digestContent';
+import { formatInspectorMorning, formatInspectorDayList } from '../whatsapp/digestContent';
 import type { InspectionListItem } from '../services/inspectionsQueries';
 
 describe('formatInspectorMorning', () => {
@@ -123,5 +123,47 @@ describe('formatInspectorMorning', () => {
     // omitted entirely when siteCity is null.
     expect(text).not.toContain(', (טיפוס)');
     expect(text).toContain('(טיפוס)');
+  });
+});
+
+describe('formatInspectorDayList (menu items 1+2 — on-demand)', () => {
+  it('empty list → friendly one-liner without "בוקר טוב"', () => {
+    const todayText = formatInspectorDayList([], { when: 'today' });
+    expect(todayText).toBe('אין בדיקות משובצות להיום.');
+    expect(todayText).not.toContain('בוקר טוב');
+
+    const tomorrowText = formatInspectorDayList([], { when: 'tomorrow' });
+    expect(tomorrowText).toBe('אין בדיקות משובצות למחר.');
+  });
+
+  it('single item → numbered list with today header', () => {
+    const items: InspectionListItem[] = [
+      {
+        taskFieldId: 'tf-1', customerName: 'לקוח א', siteAddress: 'רח\' הרצל 1',
+        siteCity: 'תל אביב', fieldStatus: 'ASSIGNED', family: 'noise',
+        typeLabelHe: 'בדיקת רעש',
+      },
+    ];
+    const text = formatInspectorDayList(items, { when: 'today' });
+    expect(text).toContain('הבדיקות שלך להיום:');
+    expect(text).toContain('1. לקוח א — רח\' הרצל 1, תל אביב (בדיקת רעש)');
+    expect(text).toContain('סטטוס: משובצת');
+    expect(text).not.toContain('בוקר טוב');
+    expect(text).not.toContain('בחר מספר לעדכון סטטוס');
+  });
+
+  it('tomorrow header + null fields degrade to placeholders', () => {
+    const items: InspectionListItem[] = [
+      {
+        taskFieldId: 'tf-y', customerName: null, siteAddress: null, siteCity: null,
+        fieldStatus: 'CONFIRMED', family: 'general', typeLabelHe: 'טיפוס',
+      },
+    ];
+    const text = formatInspectorDayList(items, { when: 'tomorrow' });
+    expect(text).toContain('הבדיקות שלך למחר:');
+    expect(text).toContain('לקוח לא ידוע');
+    expect(text).toContain('כתובת לא ידועה');
+    expect(text).toContain('סטטוס: אושרה');
+    expect(text).not.toContain(', (טיפוס)');
   });
 });

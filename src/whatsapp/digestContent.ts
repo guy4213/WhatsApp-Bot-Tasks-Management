@@ -149,6 +149,32 @@ export function formatInspectorMorning(
   return { text, params, buttons: [] };
 }
 
+/**
+ * On-demand inspector day list — invoked from worker menu items 1 (today) and
+ * 2 (tomorrow). Reuses the same status labels + numbered layout as
+ * `formatInspectorMorning`, but with a menu-friendly header (no "בוקר טוב")
+ * and no template-params return (this is a one-off in-window send, not a
+ * scheduled digest). Returns the raw Hebrew string.
+ */
+export function formatInspectorDayList(
+  items: InspectionListItem[],
+  opts: { when: 'today' | 'tomorrow' },
+): string {
+  const whenLabel = opts.when === 'today' ? 'להיום' : 'למחר';
+  if (items.length === 0) {
+    return `אין בדיקות משובצות ${whenLabel}.`;
+  }
+  const lines = items.map((item, i) => {
+    const customer = item.customerName ?? 'לקוח לא ידוע';
+    const address = item.siteAddress ?? 'כתובת לא ידועה';
+    const city = item.siteCity ? `, ${item.siteCity}` : '';
+    const statusHe = fieldStatusLabelHe(item.fieldStatus);
+    return `${i + 1}. ${customer} — ${address}${city} (${item.typeLabelHe})\n` +
+           `   סטטוס: ${statusHe}`;
+  });
+  return `הבדיקות שלך ${whenLabel}:\n\n${lines.join('\n')}`;
+}
+
 /** Manager/Admin morning — company totals + per-employee breakdown. Template vars: name + 4 counts. */
 export function formatManagerMorning(name: string, co: CompanyMorning): DigestContent {
   const params = [
