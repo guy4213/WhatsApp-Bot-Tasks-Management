@@ -53,17 +53,17 @@ const EMOJI_PREFIX_RE = /^[\p{Emoji}️‍︎]+\s*/u;
 // The CRM appends exactly this pattern to auto-generated Task titles.
 const CRM_SUFFIX_RE = /\s*[—\-]{1,2}\s*[^—\-]+\s*[—\-]{1,2}\s*\d{4}-\d{2}-\d{2}\s*$/u;
 
-const MAX_LABEL_CHARS = 50;
-
 /**
- * Derive a short, clean inspection label from the raw Task.title.
+ * Derive a clean, FULL inspection label from the raw Task.title.
+ *
+ * Product owner: show the full inspection type text — do NOT truncate.
  *
  * Steps:
  *   1. Strip leading emoji characters (CRM adds e.g. "🧪" prefix).
  *   2. Strip trailing CRM auto-suffix " — <worker> — <yyyy-mm-dd>".
  *   3. If the remaining string is empty or only whitespace, fall back to
  *      `inspectionTypeLabelHe` (the InspectionType.labelHe field).
- *   4. Truncate to MAX_LABEL_CHARS with "…" if needed.
+ *   4. Return the full text verbatim — NO truncation.
  */
 export function hebrewShortLabel(
   taskTitle: string | null | undefined,
@@ -72,22 +72,10 @@ export function hebrewShortLabel(
   if (!taskTitle || !taskTitle.trim()) return inspectionTypeLabelHe;
 
   let label = taskTitle.trim();
-
-  // 1. Strip emoji prefix
   label = label.replace(EMOJI_PREFIX_RE, '').trim();
-
-  // 2. Strip CRM trailing suffix (worker — date)
   label = label.replace(CRM_SUFFIX_RE, '').trim();
 
-  // 3. Fallback
-  if (!label) return inspectionTypeLabelHe;
-
-  // 4. Truncate
-  if (label.length > MAX_LABEL_CHARS) {
-    label = label.slice(0, MAX_LABEL_CHARS).trimEnd() + '…';
-  }
-
-  return label;
+  return label || inspectionTypeLabelHe;
 }
 
 // ── formatHebrewDateTime ──────────────────────────────────────────────────────
@@ -195,15 +183,21 @@ export interface InspectionListRowData {
 }
 
 /**
- * Format a 2-line inspection list row:
+ * Format an inspection list row with ONE FIELD PER LINE (product owner UX rule):
  *
- *   1. סוג בדיקה: בדיקת רעש ממעלית
- *      תאריך: 01/07 | שעה: 09:00 | עיר: רמת גן | סטטוס: משובצת
+ *   סוג בדיקה: בדיקת רעש ממעלית
+ *   תאריך: 01/07
+ *   שעה: 09:00
+ *   עיר: רמת גן
+ *   סטטוס: משובצת
+ *
+ * The row does NOT include the leading "N. " numbering — the caller prepends
+ * that before "סוג בדיקה" and joins rows with a blank line between them.
  *
  * Blank line between rows is NOT inserted here — the caller joins with "\n\n".
  *
  * @param row           row data
- * @param showWorker    if true, append worker name to the second line (for product searches)
+ * @param showWorker    if true, add a "שם עובד" line (for product/customer searches)
  */
 export function formatInspectionListRow(
   row: InspectionListRowData,
@@ -226,22 +220,15 @@ export function formatInspectionListRow(
     if (day && month) ddmm = `${day}/${month}`;
   }
 
-  const status = fieldStatusHe(row.fieldStatus);
+  // One field per line, no indent inside the row (caller controls the numbering)
+  const lines: string[] = [`${LABELS.TYPE}: ${label}`];
+  if (ddmm) lines.push(`${LABELS.DATE}: ${ddmm}`);
+  lines.push(`${LABELS.TIME}: ${row.timeHm ?? '--:--'}`);
+  if (row.siteCity) lines.push(`${LABELS.CITY}: ${row.siteCity}`);
+  lines.push(`${LABELS.STATUS}: ${fieldStatusHe(row.fieldStatus)}`);
+  if (showWorker && row.workerName) lines.push(`${LABELS.WORKER}: ${row.workerName}`);
 
-  // Line 1: inspection type label
-  const line1 = `${LABELS.TYPE}: ${label}`;
-
-  // Line 2: date | time | city | status (compact labeled pipe format for list rows)
-  const line2Parts: string[] = [];
-  if (ddmm) line2Parts.push(`${LABELS.DATE}: ${ddmm}`);
-  line2Parts.push(`${LABELS.TIME}: ${row.timeHm ?? '--:--'}`);
-  if (row.siteCity) line2Parts.push(`${LABELS.CITY}: ${row.siteCity}`);
-  line2Parts.push(`${LABELS.STATUS}: ${status}`);
-  if (showWorker && row.workerName) line2Parts.push(`${LABELS.WORKER}: ${row.workerName}`);
-
-  const line2 = `   ${line2Parts.join(' | ')}`;
-
-  return `${line1}\n${line2}`;
+  return lines.join('\n');
 }
 
 // ── formatInspectionDetail ────────────────────────────────────────────────────
@@ -354,10 +341,11 @@ export const LEAD_LABELS = {
 } as const;
 
 /**
- * Format a 2-line lead list row:
+ * Format a lead list row with ONE FIELD PER LINE (product owner UX rule):
  *
  *   שולח: משפחת כהן (david@example.com)
- *   נושא: בדיקת קרינה בנתניה  ·  התקבל: 06/07, 21:03
+ *   נושא: בדיקת קרינה בנתניה
+ *   התקבל: 06/07, 21:03
  */
 export function formatLeadListRow(row: LeadListRowData): string {
   const name  = row.fromName ?? '—';
@@ -378,9 +366,10 @@ export function formatLeadListRow(row: LeadListRowData): string {
     if (day && month) when = `${day}/${month}, ${hh}:${min}`;
   }
 
-  const line1 = `${LEAD_LABELS.SENDER}: ${name}${email}`;
-  const line2 = when
-    ? `   ${LEAD_LABELS.SUBJECT}: ${subj}  ·  ${LEAD_LABELS.RECEIVED}: ${when}`
-    : `   ${LEAD_LABELS.SUBJECT}: ${subj}`;
-  return `${line1}\n${line2}`;
+  const lines: string[] = [
+    `${LEAD_LABELS.SENDER}: ${name}${email}`,
+    `${LEAD_LABELS.SUBJECT}: ${subj}`,
+  ];
+  if (when) lines.push(`${LEAD_LABELS.RECEIVED}: ${when}`);
+  return lines.join('\n');
 }

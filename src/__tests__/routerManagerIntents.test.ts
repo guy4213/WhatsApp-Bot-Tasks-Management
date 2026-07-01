@@ -338,8 +338,8 @@ describe('intent: list_today_field_inspections', () => {
     await handleAIMessage(admin, 'תציג לי את בדיקות השטח להיום');
     expect(getTodayFieldInspections).toHaveBeenCalled();
     const msg = lastMsg();
-    expect(msg).toContain('1. דני');
-    expect(msg).toContain('2. יוסי');
+    expect(msg).toContain('שם עובד: דני');
+    expect(msg).toContain('שם עובד: יוסי');
   });
 
   it('sets awaiting to mgr_today_pick_task with task ids', async () => {
@@ -548,7 +548,8 @@ describe('intent: search_task', () => {
     mockParseIntent(makeIntent('search_task', { params: { searchBy: 'product', query: '10156' } }));
     await handleAIMessage(admin, 'בדיקות מק"ט 10156');
     expect(searchTasksByProductCode).toHaveBeenCalledWith('10156');
-    expect(lastMsg()).toContain('1. יוסי');
+    // Product search now shows worker on its own labeled line
+    expect(lastMsg()).toContain('שם עובד: יוסי');
   });
 
   it('with no params shows search sub-menu', async () => {

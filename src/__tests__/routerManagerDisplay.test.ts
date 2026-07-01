@@ -52,16 +52,12 @@ describe('hebrewShortLabel', () => {
     expect(hebrewShortLabel('   ', 'בדיקת קרינה')).toBe('בדיקת קרינה');
   });
 
-  it('truncates labels longer than 50 chars with ellipsis', () => {
-    const longTitle = 'א'.repeat(55);
+  it('returns the FULL text — no truncation (product owner UX rule)', () => {
+    const longTitle = 'א'.repeat(200);
     const result = hebrewShortLabel(longTitle, 'fallback');
-    expect(result.length).toBeLessThanOrEqual(51); // 50 chars + '…'
-    expect(result.endsWith('…')).toBe(true);
-  });
-
-  it('returns label unchanged when exactly 50 chars', () => {
-    const exactly50 = 'א'.repeat(50);
-    expect(hebrewShortLabel(exactly50, 'fallback')).toBe(exactly50);
+    expect(result).toBe(longTitle);
+    expect(result.length).toBe(200);
+    expect(result.endsWith('…')).toBe(false);
   });
 
   it('uses the label when taskTitle is just an emoji', () => {
@@ -116,10 +112,11 @@ describe('formatInspectionListRow', () => {
     fieldStatus: 'CONFIRMED',
   };
 
-  it('returns 2 lines separated by a newline', () => {
+  it('returns one field per line (product owner UX rule)', () => {
     const result = formatInspectionListRow(baseRow);
     const lines = result.split('\n');
-    expect(lines).toHaveLength(2);
+    // At minimum: type + time + city + status = 4 lines. Date not present in baseRow.
+    expect(lines.length).toBeGreaterThanOrEqual(4);
   });
 
   it('line 1 is "סוג בדיקה: <label>" (standard vocabulary)', () => {
@@ -127,12 +124,11 @@ describe('formatInspectionListRow', () => {
     expect(result.split('\n')[0]).toBe('סוג בדיקה: בדיקת רעש');
   });
 
-  it('line 2 contains labeled time, city, and Hebrew status', () => {
+  it('each field is on its own line — time, city, status separately', () => {
     const result = formatInspectionListRow(baseRow);
-    const line2 = result.split('\n')[1];
-    expect(line2).toContain('שעה: 09:00');
-    expect(line2).toContain('עיר: רמת גן');
-    expect(line2).toContain('סטטוס: אושרה'); // CONFIRMED → 'אושרה'
+    expect(result).toContain('\nשעה: 09:00');
+    expect(result).toContain('\nעיר: רמת גן');
+    expect(result).toContain('\nסטטוס: אושרה'); // CONFIRMED → 'אושרה'
   });
 
   it('uses dateStr for DD/MM when provided', () => {
@@ -150,19 +146,16 @@ describe('formatInspectionListRow', () => {
     expect(result).toContain('15/07');
   });
 
-  it('shows worker name on line 2 when showWorker=true', () => {
+  it('shows worker name on its own line when showWorker=true', () => {
     const row: InspectionListRowData = { ...baseRow, workerName: 'דני' };
     const result = formatInspectionListRow(row, true);
-    const line2 = result.split('\n')[1];
-    expect(line2).toContain('דני');
+    expect(result).toContain('\nשם עובד: דני');
   });
 
   it('does NOT show worker name when showWorker=false (default)', () => {
     const row: InspectionListRowData = { ...baseRow, workerName: 'דני' };
     const result = formatInspectionListRow(row);
-    // Worker appears in line 2 only when showWorker=true
-    const line2 = result.split('\n')[1];
-    expect(line2).not.toContain('דני');
+    expect(result).not.toContain('דני');
   });
 
   it('shows "סוג בדיקה: <label>" derived from taskTitle (emoji + CRM suffix stripped)', () => {
@@ -340,10 +333,10 @@ describe('formatLeadListRow', () => {
     receivedAt: new Date('2026-07-06T18:03:00Z'), // 21:03 Jerusalem time
   };
 
-  it('returns 2 lines separated by a newline', () => {
+  it('returns one field per line — sender + subject + received', () => {
     const result = formatLeadListRow(baseRow);
     const lines = result.split('\n');
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
   });
 
   it('line 1 contains "שולח:" label with name and email in parentheses', () => {
@@ -354,13 +347,10 @@ describe('formatLeadListRow', () => {
     expect(line1).toContain('(david@example.com)');
   });
 
-  it('line 2 contains labeled subject and formatted date/time with "התקבל:" label', () => {
+  it('each field is on its own line — subject and received time separately', () => {
     const result = formatLeadListRow(baseRow);
-    const line2 = result.split('\n')[1];
-    expect(line2).toContain('נושא: בדיקת קרינה בנתניה');
-    expect(line2).toContain('התקבל:');
-    expect(line2).toContain('06/07');
-    expect(line2).toContain('21:03');
+    expect(result).toContain('\nנושא: בדיקת קרינה בנתניה');
+    expect(result).toMatch(/\nהתקבל: 06\/07, 21:03/);
   });
 
   it('falls back to "—" when fromName is null', () => {

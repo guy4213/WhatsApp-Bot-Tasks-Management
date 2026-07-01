@@ -314,8 +314,8 @@ describe('item 2 — today\'s field inspections', () => {
 
     await handleAIMessage(admin, '2');
     const msg = lastMsg();
-    expect(msg).toContain('1. דני');
-    expect(msg).toContain('2. יוסי');
+    expect(msg).toContain('שם עובד: דני');
+    expect(msg).toContain('שם עובד: יוסי');
     expect(msg).toContain('אושרה'); // Hebrew status for CONFIRMED
   });
 
@@ -616,7 +616,8 @@ describe('item 6 — search sub-menu', () => {
     await handleAIMessage(admin, '9');
     expect(searchTasksByProductCode).toHaveBeenCalledWith('9');
     const msg = lastMsg();
-    expect(msg).toContain('1. עובד');
+    // Product search now shows worker on its own labeled line
+    expect(msg).toContain('שם עובד: עובד');
   });
 
   it('empty search query sends error message', async () => {

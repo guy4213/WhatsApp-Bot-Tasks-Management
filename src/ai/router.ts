@@ -1028,11 +1028,10 @@ async function executeIntent(
             fieldStatus: r.fieldStatus,
             workerName: r.workerName,
           };
-          // For product search, show worker name above the row.
-          // For worker search, omit worker (already the search context).
+          // For product search, include worker in the row; for worker/customer
+          // search, the worker/customer is already the search context.
           const showWorker = searchBy === 'product';
-          const workerPrefix = showWorker && r.workerName ? `${r.workerName}\n   ` : '';
-          return `${i + 1}. ${workerPrefix}${formatInspectionListRow(rowData)}`;
+          return `${i + 1}. ${formatInspectionListRow(rowData, showWorker)}`;
         });
 
         await setContext(user.phone, {
@@ -3510,8 +3509,8 @@ async function showMgrTodayInspections(user: ResolvedUser): Promise<void> {
       workerName: r.workerName,
       dateStr: localDate,
     };
-    const worker = r.workerName ? `${r.workerName}\n   ` : '';
-    return `${i + 1}. ${worker}${formatInspectionListRow(rowData)}`;
+    // Today's org-wide list: include worker name for each row
+    return `${i + 1}. ${formatInspectionListRow(rowData, true)}`;
   });
 
   await setContext(user.phone, {
@@ -4036,11 +4035,10 @@ async function handleMgrSearchAwaitQueryReply(
       fieldStatus: r.fieldStatus,
       workerName: r.workerName,
     };
-    // For product search, show worker name above the row.
-    // For worker search, omit worker (already the search context).
+    // For product search, include worker in the row; for worker/customer
+    // search, the worker/customer is already the search context.
     const showWorker = kind === 'product';
-    const workerPrefix = showWorker && r.workerName ? `${r.workerName}\n   ` : '';
-    return `${i + 1}. ${workerPrefix}${formatInspectionListRow(rowData)}`;
+    return `${i + 1}. ${formatInspectionListRow(rowData, showWorker)}`;
   });
 
   await setContext(user.phone, {
