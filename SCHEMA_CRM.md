@@ -94,7 +94,7 @@ resolution helper" below.
 - `service text`
 - `assignedTechnicianId text` — FK → `User.id`
 
-### `IncomingLead` ⚠️ NOT-NULL ownerId
+### `IncomingLead`
 - `id text NOT NULL` — PK
 - `subject text NOT NULL`
 - `body text`
@@ -102,8 +102,12 @@ resolution helper" below.
 - `fromEmail text`
 - `receivedAt timestamp NOT NULL`
 - `status` — enum `IncomingLeadStatus` (values include `NEW`)
-- **`ownerId text NOT NULL`** ← the bot's D3 code assumes this can be NULL for
-  "unassigned" leads. **THAT IS INCORRECT** — see "Known bot bugs" below.
+- **`ownerId text` — nullable in practice.** The Prisma schema declares it as
+  `NOT NULL`, but in this database an unassigned lead has `ownerId IS NULL`.
+  All the bot's D3 flows (`findOvernightUnassignedLeads`,
+  `findEscalationCandidates`, `findUnassignedLeadsForAssignment`) correctly
+  filter `WHERE "ownerId" IS NULL` — do NOT change this to a sentinel-user
+  check.
 - `transferredToId text` — nullable
 - `taskId text` — nullable
 - `notifiedAt timestamp` — nullable
@@ -163,27 +167,6 @@ Order of precedence:
 
 If ALL six are NULL/empty, the bot may display "לקוח לא ידוע" but this
 indicates a data-quality issue that should be flagged, not silenced.
-
----
-
-## Known bot bugs (2026-07-01)
-
-### 🔴 IncomingLead.ownerId is NOT NULL — bot assumes NULL
-
-The bot's leads flow (`findOvernightUnassignedLeads`, `findEscalationCandidates`,
-`findUnassignedLeadsForAssignment`) all filter `WHERE "ownerId" IS NULL`. Per
-the schema, `IncomingLead.ownerId` is `NOT NULL` — so these queries return
-zero rows always, breaking the D3-T2 morning digest, D3-T4 escalation, and
-D3-T6 assignment UX.
-
-**Needs product decision:** what actually represents "unassigned" in this DB?
-Options being considered:
-- A specific `User.id` sentinel (e.g., a shared "sales inbox" user)
-- `IncomingLead.status = 'NEW'`
-- Some other convention
-
-Once resolved: update the three `WHERE ownerId IS NULL` clauses in
-`src/services/incomingLeads.ts` accordingly.
 
 ---
 

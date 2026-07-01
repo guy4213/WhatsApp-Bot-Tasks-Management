@@ -944,15 +944,27 @@ async function executeIntent(
             return pool.query<TodayFieldInspectionRow>(
               `SELECT
                  tf.id AS "taskFieldId", tf."taskId" AS "taskId",
-                 u.name AS "workerName", c.name AS "customerName",
+                 u.name AS "workerName",
+                 -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+                 COALESCE(
+                   c.name,
+                   l."fullName",
+                   NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+                   l.company,
+                   p.client,
+                   il."fromName"
+                 ) AS "customerName",
                  to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI') AS "timeHm",
                  tf."siteCity" AS "siteCity", tf."fieldStatus" AS "fieldStatus",
                  tf.family AS family, it."labelHe" AS "typeLabelHe"
                FROM "TaskField" tf
                JOIN "Task" t             ON t.id  = tf."taskId"
                JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-               LEFT JOIN "Customer" c    ON c.id  = t."customerId"
-               LEFT JOIN "User" u        ON u.id  = t."ownerId"
+               LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+               LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+               LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+               LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+               LEFT JOIN "User" u          ON u.id  = t."ownerId"
                WHERE c.name ILIKE '%' || $1 || '%'
                ORDER BY tf."scheduledStartAt" DESC LIMIT 20`,
               [query],
@@ -3747,15 +3759,27 @@ async function handleMgrSearchAwaitQueryReply(
       return pool.query<TodayFieldInspectionRow>(
         `SELECT
            tf.id AS "taskFieldId", tf."taskId" AS "taskId",
-           u.name AS "workerName", c.name AS "customerName",
+           u.name AS "workerName",
+           -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+           COALESCE(
+             c.name,
+             l."fullName",
+             NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+             l.company,
+             p.client,
+             il."fromName"
+           ) AS "customerName",
            to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI') AS "timeHm",
            tf."siteCity" AS "siteCity", tf."fieldStatus" AS "fieldStatus",
            tf.family AS family, it."labelHe" AS "typeLabelHe"
          FROM "TaskField" tf
          JOIN "Task" t             ON t.id  = tf."taskId"
          JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-         LEFT JOIN "Customer" c    ON c.id  = t."customerId"
-         LEFT JOIN "User" u        ON u.id  = t."ownerId"
+         LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+         LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+         LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+         LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+         LEFT JOIN "User" u          ON u.id  = t."ownerId"
          WHERE c.name ILIKE '%' || $1 || '%'
          ORDER BY tf."scheduledStartAt" DESC LIMIT 20`,
         [trimmed],

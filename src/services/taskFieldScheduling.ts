@@ -91,7 +91,15 @@ export async function findOpenTasksForOwner(
       `SELECT
          t.id, t."productName", t.title,
          t."customerId",
-         c.name AS "customerName",
+         -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+         COALESCE(
+           c.name,
+           l."fullName",
+           NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+           l.company,
+           p.client,
+           il."fromName"
+         ) AS "customerName",
          it."labelHe" AS "inspectionLabelHe",
          it.family AS "inspectionFamily",
          it.id AS "inspectionTypeId",
@@ -102,7 +110,10 @@ export async function findOpenTasksForOwner(
          c."contactPhone" AS "fieldContactPhone",
          c."navigationUrl" AS "navigationUrl"
        FROM "Task" t
-       LEFT JOIN "Customer" c ON c.id = t."customerId"
+       LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+       LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+       LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+       LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
        LEFT JOIN "InspectionType" it ON it.code = t."productName"
        WHERE t."ownerId" = $1
          AND t.status NOT IN ('DONE', 'CANCELED')
@@ -156,7 +167,15 @@ export async function findOpenTasksForAdmin(limit = 10): Promise<TaskCandidate[]
       `SELECT
          t.id, t."productName", t.title,
          t."customerId",
-         c.name AS "customerName",
+         -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+         COALESCE(
+           c.name,
+           l."fullName",
+           NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+           l.company,
+           p.client,
+           il."fromName"
+         ) AS "customerName",
          it."labelHe" AS "inspectionLabelHe",
          it.family AS "inspectionFamily",
          it.id AS "inspectionTypeId",
@@ -167,7 +186,10 @@ export async function findOpenTasksForAdmin(limit = 10): Promise<TaskCandidate[]
          c."contactPhone" AS "fieldContactPhone",
          c."navigationUrl" AS "navigationUrl"
        FROM "Task" t
-       LEFT JOIN "Customer" c ON c.id = t."customerId"
+       LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+       LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+       LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+       LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
        LEFT JOIN "InspectionType" it ON it.code = t."productName"
        WHERE t.status NOT IN ('DONE', 'CANCELED')
        ORDER BY t."updatedAt" DESC
@@ -257,7 +279,15 @@ export async function findOpenTasksForCustomer(
       `SELECT
          t.id, t."productName", t.title,
          t."customerId",
-         c.name AS "customerName",
+         -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+         COALESCE(
+           c.name,
+           l."fullName",
+           NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+           l.company,
+           p.client,
+           il."fromName"
+         ) AS "customerName",
          it."labelHe" AS "inspectionLabelHe",
          it.family AS "inspectionFamily",
          it.id AS "inspectionTypeId",
@@ -268,7 +298,10 @@ export async function findOpenTasksForCustomer(
          c."contactPhone" AS "fieldContactPhone",
          c."navigationUrl" AS "navigationUrl"
        FROM "Task" t
-       LEFT JOIN "Customer" c ON c.id = t."customerId"
+       LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+       LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+       LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+       LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
        LEFT JOIN "InspectionType" it ON it.code = t."productName"
        WHERE t."customerId" = $1
          AND t.status NOT IN ('DONE', 'CANCELED')

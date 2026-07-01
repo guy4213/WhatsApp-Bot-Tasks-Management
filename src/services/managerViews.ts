@@ -156,7 +156,15 @@ export async function getTodayFieldInspections(
        tf.id                                                           AS "taskFieldId",
        tf."taskId"                                                     AS "taskId",
        u.name                                                          AS "workerName",
-       c.name                                                          AS "customerName",
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                                                               AS "customerName",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                       AS "timeHm",
        tf."siteCity"                                                   AS "siteCity",
@@ -166,8 +174,11 @@ export async function getTodayFieldInspections(
      FROM "TaskField" tf
      JOIN "Task" t             ON t.id  = tf."taskId"
      JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-     LEFT JOIN "Customer" c    ON c.id  = t."customerId"
-     LEFT JOIN "User" u        ON u.id  = t."ownerId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     LEFT JOIN "User" u          ON u.id  = t."ownerId"
      WHERE tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
        AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
      ORDER BY tf."scheduledStartAt" ASC`,
@@ -248,7 +259,15 @@ export async function getFieldExceptionRows(
        tf.id              AS "taskFieldId",
        tf."taskId"        AS "taskId",
        u.name             AS "workerName",
-       c.name             AS "customerName",
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                  AS "customerName",
        tf."siteCity"      AS "siteCity",
        tf."fieldStatus"   AS "fieldStatus",
        CASE
@@ -259,9 +278,12 @@ export async function getFieldExceptionRows(
          ELSE NULL
        END                AS description
      FROM "TaskField" tf
-     JOIN "Task" t         ON t.id  = tf."taskId"
-     LEFT JOIN "Customer" c ON c.id  = t."customerId"
-     LEFT JOIN "User" u     ON u.id  = t."ownerId"
+     JOIN "Task" t             ON t.id  = tf."taskId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     LEFT JOIN "User" u          ON u.id  = t."ownerId"
      WHERE ${whereClause}
      ORDER BY tf."scheduledStartAt" ASC`,
     params,
@@ -355,7 +377,15 @@ export async function getWorkerDayDetail(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       c.name                                                            AS "customerName",
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                                                                 AS "customerName",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
        tf."siteCity"                                                     AS "siteCity",
@@ -367,8 +397,11 @@ export async function getWorkerDayDetail(
      FROM "TaskField" tf
      JOIN "Task" t             ON t.id  = tf."taskId"
      JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-     LEFT JOIN "Customer" c    ON c.id  = t."customerId"
-     LEFT JOIN "User" u        ON u.id  = t."ownerId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     LEFT JOIN "User" u          ON u.id  = t."ownerId"
      WHERE t."ownerId" = $1
        AND tf."scheduledStartAt" >= ($2::date)                       AT TIME ZONE 'Asia/Jerusalem'
        AND tf."scheduledStartAt" <  (($2::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
@@ -421,7 +454,15 @@ export async function searchTasksByWorkerName(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       c.name                                                            AS "customerName",
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                                                                 AS "customerName",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
        tf."siteCity"                                                     AS "siteCity",
@@ -431,8 +472,11 @@ export async function searchTasksByWorkerName(
      FROM "TaskField" tf
      JOIN "Task" t             ON t.id  = tf."taskId"
      JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-     LEFT JOIN "Customer" c    ON c.id  = t."customerId"
-     LEFT JOIN "User" u        ON u.id  = t."ownerId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     LEFT JOIN "User" u          ON u.id  = t."ownerId"
      WHERE u.name ILIKE '%' || $1 || '%'
      ORDER BY tf."scheduledStartAt" DESC
      LIMIT 20`,
@@ -465,7 +509,15 @@ export async function searchTasksByProductCode(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       c.name                                                            AS "customerName",
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                                                                 AS "customerName",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
        tf."siteCity"                                                     AS "siteCity",
@@ -475,8 +527,11 @@ export async function searchTasksByProductCode(
      FROM "TaskField" tf
      JOIN "Task" t             ON t.id  = tf."taskId"
      JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-     LEFT JOIN "Customer" c    ON c.id  = t."customerId"
-     LEFT JOIN "User" u        ON u.id  = t."ownerId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     LEFT JOIN "User" u          ON u.id  = t."ownerId"
      WHERE t."productName" = $1
      ORDER BY tf."scheduledStartAt" DESC
      LIMIT 20`,
@@ -525,7 +580,15 @@ export async function getTaskFieldDetail(
        tf.id                     AS "taskFieldId",
        tf."taskId"               AS "taskId",
        u.name                    AS "workerName",
-       c.name                    AS "customerName",
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                         AS "customerName",
        tf."siteAddress"          AS "siteAddress",
        tf."siteCity"             AS "siteCity",
        tf."fieldContactName"     AS "fieldContactName",
@@ -543,8 +606,11 @@ export async function getTaskFieldDetail(
      FROM "TaskField" tf
      JOIN "Task" t             ON t.id  = tf."taskId"
      JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-     LEFT JOIN "Customer" c    ON c.id  = t."customerId"
-     LEFT JOIN "User" u        ON u.id  = t."ownerId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     LEFT JOIN "User" u          ON u.id  = t."ownerId"
      WHERE tf.id = $1`,
     [taskFieldId],
   );

@@ -57,7 +57,15 @@ export async function getInspectionsForWorkerOnDate(
   }>(
     `SELECT
        tf.id                       AS "taskFieldId",
-       c.name                      AS "customerName",
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                           AS "customerName",
        tf."siteAddress"            AS "siteAddress",
        tf."siteCity"               AS "siteCity",
        tf."fieldStatus"            AS "fieldStatus",
@@ -66,7 +74,10 @@ export async function getInspectionsForWorkerOnDate(
      FROM "TaskField" tf
      JOIN "Task" t             ON t.id  = tf."taskId"
      JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-     LEFT JOIN "Customer" c    ON c.id  = t."customerId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
      WHERE t."ownerId" = $1
        AND tf."scheduledStartAt" >= ($2::date) AT TIME ZONE 'Asia/Jerusalem'
        AND tf."scheduledStartAt" <  (($2::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
@@ -111,7 +122,15 @@ export async function getFieldSummaryForWorkerOnDate(
   }>(
     `SELECT
        tf.id                       AS "taskFieldId",
-       c.name                      AS "customerName",
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                           AS "customerName",
        tf."siteAddress"            AS "siteAddress",
        tf."siteCity"               AS "siteCity",
        tf."fieldStatus"            AS "fieldStatus",
@@ -120,7 +139,10 @@ export async function getFieldSummaryForWorkerOnDate(
      FROM "TaskField" tf
      JOIN "Task" t             ON t.id  = tf."taskId"
      JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-     LEFT JOIN "Customer" c    ON c.id  = t."customerId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
      WHERE t."ownerId" = $1
        AND tf."scheduledStartAt" >= ($2::date) AT TIME ZONE 'Asia/Jerusalem'
        AND tf."scheduledStartAt" <  (($2::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'

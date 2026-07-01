@@ -118,14 +118,23 @@ export async function listTasks(
            t.status, t.type, t."createdAt", t."updatedAt",
            t."ownerId", t."customerId", t."leadId", t."projectId",
            u.name        AS "ownerName",
-           c.name        AS "customerName",
+           -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+           COALESCE(
+             c.name,
+             l."fullName",
+             NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+             l.company,
+             p.client,
+             il."fromName"
+           )             AS "customerName",
            l."fullName"  AS "leadName",
            p.name        AS "projectName"
     FROM "Task" t
-    JOIN "User" u       ON u.id = t."ownerId"
-    LEFT JOIN "Customer" c ON c.id = t."customerId"
-    LEFT JOIN "Lead"     l ON l.id = t."leadId"
-    LEFT JOIN "Project"  p ON p.id = t."projectId"
+    JOIN "User" u             ON u.id  = t."ownerId"
+    LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+    LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+    LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+    LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
     ${where}
     ${orderBy}
     LIMIT $${limitParam} OFFSET $${offsetParam}

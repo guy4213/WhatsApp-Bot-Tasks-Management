@@ -126,10 +126,21 @@ export type OpenTaskFieldResult =
 export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTaskFieldResult> {
   const result = await pool.query<{ taskFieldId: string; customerName: string | null }>(
     `SELECT tf.id            AS "taskFieldId",
-            c.name           AS "customerName"
+            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+            COALESCE(
+              c.name,
+              l."fullName",
+              NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+              l.company,
+              p.client,
+              il."fromName"
+            )                AS "customerName"
        FROM "TaskField" tf
-       JOIN "Task"      t  ON t.id = tf."taskId"
-       LEFT JOIN "Customer" c ON c.id = t."customerId"
+       JOIN "Task"           t  ON t.id  = tf."taskId"
+       LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+       LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+       LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+       LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
       WHERE t."ownerId"    = $1
         AND tf."fieldStatus" = ANY($2::text[])
       ORDER BY tf."assignedAt"`,
@@ -374,10 +385,21 @@ export async function resolveOpenTaskFieldByHint(
   if (!trimmed) return null;
   const result = await pool.query<{ taskFieldId: string; customerName: string | null }>(
     `SELECT tf.id            AS "taskFieldId",
-            c.name           AS "customerName"
+            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+            COALESCE(
+              c.name,
+              l."fullName",
+              NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+              l.company,
+              p.client,
+              il."fromName"
+            )                AS "customerName"
        FROM "TaskField" tf
-       JOIN "Task"      t  ON t.id = tf."taskId"
-       LEFT JOIN "Customer" c ON c.id = t."customerId"
+       JOIN "Task"           t  ON t.id  = tf."taskId"
+       LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+       LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+       LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+       LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
       WHERE t."ownerId"      = $1
         AND tf."fieldStatus" = ANY($3::text[])
         AND (
@@ -422,16 +444,27 @@ async function loadAlertContext(taskFieldId: string): Promise<AlertContext | nul
   }>(
     `SELECT u.name              AS "workerName",
             it."labelHe"        AS "familyLabelHe",
-            c.name              AS "customerName",
+            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+            COALESCE(
+              c.name,
+              l."fullName",
+              NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+              l.company,
+              p.client,
+              il."fromName"
+            )                   AS "customerName",
             tf."siteCity"       AS "siteCity",
             tf."missingReportInfoNote" AS "missingReportInfoNote",
             tf."problemType"    AS "problemType",
             tf."problemNote"    AS "problemNote"
        FROM "TaskField" tf
-       JOIN "Task"      t  ON t.id = tf."taskId"
+       JOIN "Task"           t  ON t.id  = tf."taskId"
        JOIN "InspectionType" it ON it.id = tf."inspectionTypeId"
-       LEFT JOIN "User"     u  ON u.id = t."ownerId"
-       LEFT JOIN "Customer" c  ON c.id = t."customerId"
+       LEFT JOIN "User"          u  ON u.id  = t."ownerId"
+       LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+       LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+       LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+       LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
       WHERE tf.id = $1`,
     [taskFieldId],
   );
