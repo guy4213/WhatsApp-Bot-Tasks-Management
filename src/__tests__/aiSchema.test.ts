@@ -71,21 +71,141 @@ describe('AI_INTENTS — v2 field-inspector kinds', () => {
 
   it('contains the known active intents (X-T2 removed legacy CRM kinds; new intents added by later tasks)', () => {
     // Original 6 (X-T2) plus later additions: D2-T11 schedule_task_field,
-    // D2-T12/13/14 correction intents, D3-T6 assign_lead.
+    // D2-T12/13/14 correction intents, D3-T6 assign_lead,
+    // and 7 manager-facing intents.
     const expected = [
       'assign_lead',
       'correct_inspection_type',
       'correct_task_field_site',
       'get_task',
       'help',
+      'list_open_exceptions',
+      'list_pending_leads',
+      'list_today_field_inspections',
+      'management_snapshot',
+      'open_manager_menu',
       'reassign_task',
       'report_missing_info',
       'report_problem',
       'schedule_task_field',
+      'search_task',
       'set_field_status',
       'unknown',
+      'workers_day_overview',
     ];
     expect([...AI_INTENTS].sort()).toEqual(expected);
+  });
+});
+
+// ── Manager-facing intents ───────────────────────────────────────────────────
+
+describe('AI_INTENTS — manager-facing kinds', () => {
+  it('includes all 7 new manager intents', () => {
+    expect(AI_INTENTS).toContain('open_manager_menu');
+    expect(AI_INTENTS).toContain('management_snapshot');
+    expect(AI_INTENTS).toContain('list_today_field_inspections');
+    expect(AI_INTENTS).toContain('list_open_exceptions');
+    expect(AI_INTENTS).toContain('list_pending_leads');
+    expect(AI_INTENTS).toContain('workers_day_overview');
+    expect(AI_INTENTS).toContain('search_task');
+  });
+});
+
+describe('parseIntentResult — manager intents', () => {
+  it('validates management_snapshot with no params', () => {
+    const r = parseIntentResult({ intent: 'management_snapshot', confidence: 0.92 });
+    expect(r.intent).toBe('management_snapshot');
+    expect(r.confidence).toBe(0.92);
+  });
+
+  it('validates list_today_field_inspections', () => {
+    const r = parseIntentResult({ intent: 'list_today_field_inspections', confidence: 0.95 });
+    expect(r.intent).toBe('list_today_field_inspections');
+  });
+
+  it('validates list_open_exceptions with filter param', () => {
+    const r = parseIntentResult({
+      intent: 'list_open_exceptions', confidence: 0.9,
+      params: { filter: 'has_problem' },
+    });
+    expect(r.intent).toBe('list_open_exceptions');
+    expect(r.params.filter).toBe('has_problem');
+  });
+
+  it('validates list_open_exceptions without filter (defaults to open)', () => {
+    const r = parseIntentResult({ intent: 'list_open_exceptions', confidence: 0.88 });
+    expect(r.intent).toBe('list_open_exceptions');
+    expect(r.params).toEqual({});
+  });
+
+  it('validates list_pending_leads with filter=unassigned', () => {
+    const r = parseIntentResult({
+      intent: 'list_pending_leads', confidence: 0.9,
+      params: { filter: 'unassigned' },
+    });
+    expect(r.intent).toBe('list_pending_leads');
+    expect(r.params.filter).toBe('unassigned');
+  });
+
+  it('validates list_pending_leads with filter=escalated', () => {
+    const r = parseIntentResult({
+      intent: 'list_pending_leads', confidence: 0.9,
+      params: { filter: 'escalated' },
+    });
+    expect(r.params.filter).toBe('escalated');
+  });
+
+  it('validates workers_day_overview without workerName (all-workers view)', () => {
+    const r = parseIntentResult({ intent: 'workers_day_overview', confidence: 0.9 });
+    expect(r.intent).toBe('workers_day_overview');
+    expect(r.params.workerName).toBeUndefined();
+  });
+
+  it('validates workers_day_overview with workerName', () => {
+    const r = parseIntentResult({
+      intent: 'workers_day_overview', confidence: 0.9,
+      params: { workerName: 'דני' },
+    });
+    expect(r.params.workerName).toBe('דני');
+  });
+
+  it('validates search_task with searchBy and query', () => {
+    const r = parseIntentResult({
+      intent: 'search_task', confidence: 0.95,
+      params: { searchBy: 'customer', query: 'כהן' },
+    });
+    expect(r.intent).toBe('search_task');
+    expect(r.params.searchBy).toBe('customer');
+    expect(r.params.query).toBe('כהן');
+  });
+
+  it('validates search_task with searchBy=worker', () => {
+    const r = parseIntentResult({
+      intent: 'search_task', confidence: 0.9,
+      params: { searchBy: 'worker', query: 'יוסי' },
+    });
+    expect(r.params.searchBy).toBe('worker');
+    expect(r.params.query).toBe('יוסי');
+  });
+
+  it('validates search_task with searchBy=product', () => {
+    const r = parseIntentResult({
+      intent: 'search_task', confidence: 0.9,
+      params: { searchBy: 'product', query: '10156' },
+    });
+    expect(r.params.searchBy).toBe('product');
+    expect(r.params.query).toBe('10156');
+  });
+
+  it('validates search_task with no params (sub-menu will show)', () => {
+    const r = parseIntentResult({ intent: 'search_task', confidence: 0.75 });
+    expect(r.intent).toBe('search_task');
+    expect(r.params).toEqual({});
+  });
+
+  it('validates open_manager_menu', () => {
+    const r = parseIntentResult({ intent: 'open_manager_menu', confidence: 0.95 });
+    expect(r.intent).toBe('open_manager_menu');
   });
 });
 

@@ -505,6 +505,15 @@ These tasks remove or rewrite Part 2 capabilities marked "dropped" or "to-rewrit
 
 ## 4.6 Manager unified menu (2026-07-01)
 
+### D5-T8 — Role-aware AI intent parser + manager free-text intents
+- **Status:** DONE (local, uncommitted). Motivation: manager typing/dictating "תציג לי את בדיקות השטח להיום" was misrouted to `get_task` (single-task disambiguation) because the AI prompt was inspector-only. Now `buildSystemPrompt` splits by user level: workers get worker intents + few-shots, manager-level users get a manager-focused prompt with 25+ Hebrew examples covering voice-transcription quirks ("בבקשה", "אני רוצה", "תציג לי" prefixes).
+- **New AI_INTENTS (7):** `open_manager_menu`, `management_snapshot`, `list_today_field_inspections`, `list_open_exceptions` (with `params.filter`), `list_pending_leads` (with `params.filter`), `workers_day_overview` (with `params.workerName`), `search_task` (with `params.searchBy` + `params.query`).
+- **Extended `INTENT_JSON_SCHEMA`:** `params.searchBy`, `params.query`, `params.workerName`, `params.filter` declared so LLM tool call passes validation.
+- **Router (`executeIntent`):** 7 new case branches — each dispatches to the existing manager-menu handler (D5-T7). No duplicated business logic. Auth check: `isManagerMenuUser(user)` gates all 7; workers get `unknown` handling.
+- **Fallback improvement:** when a manager-level user's intent parses as `unknown`, the router appends "תרצה לראות את התפריט? כתוב 'תפריט'." — replaces the previous generic dead-end.
+- **Tests:** `managerIntents.test.ts` (43 cases — Hebrew phrase → intent + params), `routerManagerIntents.test.ts` (33 cases — dispatch + auth + fallback), extended `aiSchema.test.ts` (13 cases). +93 tests total, all pass. Full suite 618/625 (7 pre-existing skips). tsc clean.
+- **Deviation:** test for `open_manager_menu` uses "תן לי את התפריט" instead of exact "תפריט" because "תפריט" alone is matched by the deterministic `MENU_TRIGGER_RE` *before* the AI parser is reached (intentional — menu trigger is deterministic).
+
 ### D5-T7 — Unified 6-item manager menu
 - **Status:** DONE (local, uncommitted). Replaced the retired legacy `managerMenu()` with a 6-item top-level menu ("תמונת מצב ניהולית / בדיקות שטח להיום / חריגים ודיווחים / לידים ממתינים לטיפול / עובדים וסיכומי יום / חיפוש משימה / בדיקה"). Menu opens for `role IN ('ADMIN','MANAGER')` OR `isExceptionsViewer(name)` OR `isLeadsViewer(name)` — regular field workers keep the §5 spec 7-item menu unchanged.
 - **Sub-menus + flows wired:**

@@ -17,6 +17,14 @@ export const AI_INTENTS = [
   'schedule_task_field',
   // D3-T6: Sasha lead-assignment via WhatsApp.
   'assign_lead',
+  // Manager-facing intents — role-aware (requires isManagerMenuUser).
+  'open_manager_menu',           // show the manager menu
+  'management_snapshot',         // item 1: org-wide snapshot
+  'list_today_field_inspections', // item 2: today's field inspections (org-wide)
+  'list_open_exceptions',        // item 3: exceptions / deviations list
+  'list_pending_leads',          // item 4: leads awaiting assignment
+  'workers_day_overview',        // item 5: all-workers or specific-worker day overview
+  'search_task',                 // item 6: search by customer / worker / product
 ] as const;
 
 // Editable fields the model may target with edit_field.
@@ -60,7 +68,13 @@ export const INTENT_JSON_SCHEMA: Record<string, unknown> = {
     params: {
       type: 'object',
       additionalProperties: true,
-      description: 'Intent-specific extras: title, type, dueDate (ISO), priority, filter, ownerId, customerId, leadId, projectId, note',
+      description: 'Intent-specific extras: title, type, dueDate (ISO), priority, filter, ownerId, customerId, leadId, projectId, note, searchBy (customer|worker|product), query (search term), workerName (for workers_day_overview), filter (open|not_confirmed|has_problem|waiting_for_info|not_closed for list_open_exceptions; unassigned|escalated for list_pending_leads)',
+      properties: {
+        searchBy: { type: 'string', enum: ['customer', 'worker', 'product'], description: 'For search_task: the dimension to search by' },
+        query: { type: 'string', description: 'For search_task: the search term' },
+        workerName: { type: 'string', description: 'For workers_day_overview: the specific worker name (omit for all-workers view)' },
+        filter: { type: 'string', description: 'For list_open_exceptions: open|not_confirmed|has_problem|waiting_for_info|not_closed. For list_pending_leads: unassigned|escalated' },
+      },
     },
     missing_fields: { type: 'array', items: { type: 'string' } },
     clarification: { type: ['string', 'null'], description: 'A short question in Hebrew to ask the user when info is missing or ambiguous' },

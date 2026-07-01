@@ -193,7 +193,15 @@ export type AIIntent =
   | 'reassign_task'             // reassign a Task to another worker (MANAGER/ADMIN only)
   | 'correct_inspection_type'   // correct the inspection type on a TaskField (with confirmation)
   // D3-T6: Sasha lead-assignment via WhatsApp.
-  | 'assign_lead';              // assign an unassigned IncomingLead to a worker
+  | 'assign_lead'               // assign an unassigned IncomingLead to a worker
+  // Manager-facing intents (role-aware).
+  | 'open_manager_menu'          // show the manager menu
+  | 'management_snapshot'        // item 1: org-wide snapshot
+  | 'list_today_field_inspections' // item 2: today's field inspections (org-wide)
+  | 'list_open_exceptions'       // item 3: exceptions / deviations list
+  | 'list_pending_leads'         // item 4: leads awaiting assignment
+  | 'workers_day_overview'       // item 5: all-workers or specific-worker day overview
+  | 'search_task';               // item 6: search by customer / worker / product
 
 // v2 inspector-side sub-enums (SPEC_FIELD_V2 §4, §7, §9). These are the SUBSET
 // of `fieldStatus` transitions a worker can trigger via free text — the office-

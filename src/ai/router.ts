@@ -239,10 +239,13 @@ async function routeIntent(user: ResolvedUser, intent: AIIntentResult): Promise<
   //    Either way, record the event in the audit log.
   if (intent.intent === 'unknown' || intent.confidence < CONF_LOW) {
     await auditEvent(user, 'unknown', null, 'SKIPPED', intent.clarification ?? 'unrecognized request');
+    const mgrSuffix = isManagerMenuUser(user)
+      ? '\nתרצה לראות את התפריט? כתוב "תפריט".'
+      : '';
     await sendTextMessage({
       to: user.phone,
-      text: intent.clarification
-        ?? 'לא הצלחתי להבין את הבקשה. נסה לנסח מחדש, למשל: "צור משימה תיאום ללקוח X" או "הצג את המשימות שלי להיום".',
+      text: (intent.clarification
+        ?? 'לא הצלחתי להבין את הבקשה. נסה לנסח מחדש, למשל: "צור משימה תיאום ללקוח X" או "הצג את המשימות שלי להיום".') + mgrSuffix,
     });
     return;
   }
@@ -676,6 +679,258 @@ async function executeIntent(
     case 'correct_inspection_type':
       await startCorrectInspectionTypeFlow(user, intent);
       return;
+
+    // ── Manager-facing intents (role-aware) ─────────────────────────────────
+    // All require isManagerMenuUser(user). Workers get a rejection.
+
+    case 'open_manager_menu':
+      if (!isManagerMenuUser(user)) {
+        await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
+        return;
+      }
+      await showMenu(user);
+      return;
+
+    case 'management_snapshot':
+      if (!isManagerMenuUser(user)) {
+        await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
+        return;
+      }
+      await clearContext(user.phone);
+      await showMgrSnapshot(user);
+      return;
+
+    case 'list_today_field_inspections':
+      if (!isManagerMenuUser(user)) {
+        await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
+        return;
+      }
+      await showMgrTodayInspections(user);
+      return;
+
+    case 'list_open_exceptions': {
+      if (!isManagerMenuUser(user)) {
+        await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
+        return;
+      }
+      // Map the optional params.filter to a FieldExceptionFilter.
+      const exFilter = typeof intent.params?.filter === 'string'
+        ? intent.params.filter.trim()
+        : 'open';
+      const exFilterMap: Record<string, import('../services/managerViews').FieldExceptionFilter> = {
+        open: 'open_exceptions',
+        not_confirmed: 'not_confirmed',
+        has_problem: 'has_problem',
+        waiting_for_info: 'waiting_for_info',
+        not_closed: 'not_closed',
+        // Aliases that LLM may emit
+        open_exceptions: 'open_exceptions',
+      };
+      const resolvedExFilter: import('../services/managerViews').FieldExceptionFilter =
+        exFilterMap[exFilter] ?? 'open_exceptions';
+      const localDateEx = localJerusalemDate();
+      const exRows = await getFieldExceptionRows(localDateEx, resolvedExFilter);
+      if (exRows.length === 0) {
+        await showMgrExceptionsSub(user);
+        return;
+      }
+      const exLines = exRows.map((r, i) => {
+        const worker = r.workerName ?? '—';
+        const customer = r.customerName ?? '—';
+        const city = r.siteCity ?? '—';
+        const status = mgrFieldStatusHe(r.fieldStatus);
+        const desc = r.description ? ` — ${r.description}` : '';
+        return `${i + 1}. ${worker} | ${customer} | ${city} | ${status}${desc}`;
+      });
+      await setContext(user.phone, {
+        awaiting: 'mgr_exceptions_pick_row',
+        mgrTaskFieldIds: exRows.map((r) => r.taskFieldId),
+        mgrTaskIds: exRows.map((r) => r.taskId),
+      });
+      await sendChunked(user.phone,
+        `חריגים (${exRows.length}):\n${exLines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
+      );
+      return;
+    }
+
+    case 'list_pending_leads': {
+      if (!isManagerMenuUser(user)) {
+        await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
+        return;
+      }
+      const leadsFilter = typeof intent.params?.filter === 'string'
+        ? intent.params.filter.trim()
+        : 'unassigned';
+      if (leadsFilter === 'escalated') {
+        // Show escalation candidates list
+        const { findEscalationCandidates } = await import('../services/incomingLeads');
+        const escLeads = await findEscalationCandidates(20);
+        if (escLeads.length === 0) {
+          await sendTextMessage({ to: user.phone, text: 'אין לידים שעברו שעה ללא שיוך כרגע.' });
+          return;
+        }
+        const escLines = escLeads.map((l, i) => `${i + 1}. ${l.fromName ?? '—'} — ${l.subject ?? '(ללא נושא)'}`);
+        await setContext(user.phone, {
+          awaiting: 'mgr_leads_pick_row',
+          mgrLeadIds: escLeads.map((l) => l.id),
+          mgrLeadNames: escLeads.map((l) => l.fromName ?? '—'),
+        });
+        await sendChunked(user.phone, `לידים שעברו שעה ללא שיוך (${escLeads.length}):\n${escLines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
+      } else {
+        // Default: unassigned
+        const unassLeads = await findUnassignedLeadsForAssignment(20);
+        if (unassLeads.length === 0) {
+          await sendTextMessage({ to: user.phone, text: 'אין כרגע לידים לא משויכים.' });
+          return;
+        }
+        const unassLines = unassLeads.map((l, i) => `${i + 1}. ${l.fromName ?? '—'} — ${l.subject ?? '(ללא נושא)'}`);
+        await setContext(user.phone, {
+          awaiting: 'mgr_leads_pick_row',
+          mgrLeadIds: unassLeads.map((l) => l.id),
+          mgrLeadNames: unassLeads.map((l) => l.fromName ?? '—'),
+        });
+        await sendChunked(user.phone, `לידים לא משויכים (${unassLeads.length}):\n${unassLines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
+      }
+      return;
+    }
+
+    case 'workers_day_overview': {
+      if (!isManagerMenuUser(user)) {
+        await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
+        return;
+      }
+      const workerName = typeof intent.params?.workerName === 'string'
+        ? intent.params.workerName.trim()
+        : null;
+      const localDateW = localJerusalemDate();
+      if (workerName) {
+        // Named worker — find them in today's overview and show detail.
+        const allWorkers = await getAllWorkersDayOverview(localDateW);
+        const matched = allWorkers.find((w) =>
+          w.workerName.includes(workerName) || workerName.includes(w.workerName),
+        );
+        if (!matched) {
+          // Fallback: show the full overview with a note.
+          if (allWorkers.length === 0) {
+            await sendTextMessage({ to: user.phone, text: `לא נמצאו בדיקות היום עבור "${workerName}".` });
+            return;
+          }
+          const lines = allWorkers.map((r) => `${r.workerName}: ${r.finished}/${r.total} · חריגים ${r.exceptions}`);
+          await clearContext(user.phone);
+          await sendChunked(user.phone, `לא מצאתי עובד בשם "${workerName}". סיכום יום — ${fmtDDMM(localDateW)}:\n${lines.join('\n')}`);
+          return;
+        }
+        // Show detail for the matched worker.
+        const detail = await getWorkerDayDetail(matched.workerId, localDateW);
+        const lines = detail.inspections.map((r, i) => {
+          const customer = r.customerName ?? 'לקוח לא ידוע';
+          const time = r.timeHm ?? '--:--';
+          const city = r.siteCity ?? '—';
+          const status = mgrFieldStatusHe(r.fieldStatus);
+          return `${i + 1}. ${customer} | ${time} | ${city} | ${status}`;
+        });
+        const summary = `סיכום: ${detail.finished}/${detail.total} בוצעו, חריגים פתוחים: ${detail.openExceptions}`;
+        await clearContext(user.phone);
+        await sendChunked(user.phone, `${matched.workerName} — היום (${fmtDDMM(localDateW)}):\n${lines.join('\n')}\n\n${summary}`);
+      } else {
+        // All workers table view.
+        const allWorkers = await getAllWorkersDayOverview(localDateW);
+        if (allWorkers.length === 0) {
+          await sendTextMessage({ to: user.phone, text: `אין עובדים עם בדיקות היום (${fmtDDMM(localDateW)}).` });
+          return;
+        }
+        const lines = allWorkers.map((r) => `${r.workerName}: ${r.finished}/${r.total} · חריגים ${r.exceptions}`);
+        await clearContext(user.phone);
+        await sendChunked(user.phone, `סיכום יום — ${fmtDDMM(localDateW)}:\n${lines.join('\n')}`);
+      }
+      return;
+    }
+
+    case 'search_task': {
+      if (!isManagerMenuUser(user)) {
+        await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
+        return;
+      }
+      const searchBy = typeof intent.params?.searchBy === 'string'
+        ? intent.params.searchBy.trim() as 'customer' | 'worker' | 'product'
+        : null;
+      const query = typeof intent.params?.query === 'string'
+        ? intent.params.query.trim()
+        : null;
+
+      if (!searchBy && !query) {
+        // Nothing specified — show the search sub-menu.
+        await showMgrSearchSub(user);
+        return;
+      }
+
+      if (searchBy && !query) {
+        // Know dimension but not the query — prompt for it.
+        const promptMap: Record<string, string> = {
+          customer: 'שם לקוח / חלק ממנו:',
+          worker: 'שם עובד / חלק ממנו:',
+          product: 'מק"ט (קוד מוצר):',
+        };
+        await setContext(user.phone, { awaiting: 'mgr_search_await_query', mgrSearchKind: searchBy });
+        await sendTextMessage({ to: user.phone, text: promptMap[searchBy] ?? 'מה לחפש?' });
+        return;
+      }
+
+      // Both searchBy and query present — run the search directly.
+      if (searchBy && query) {
+        let searchResults: TodayFieldInspectionRow[] = [];
+        if (searchBy === 'customer') {
+          const { rows } = await import('../db/connection').then(async ({ pool }) => {
+            return pool.query<TodayFieldInspectionRow>(
+              `SELECT
+                 tf.id AS "taskFieldId", tf."taskId" AS "taskId",
+                 u.name AS "workerName", c.name AS "customerName",
+                 to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI') AS "timeHm",
+                 tf."siteCity" AS "siteCity", tf."fieldStatus" AS "fieldStatus",
+                 tf.family AS family, it."labelHe" AS "typeLabelHe"
+               FROM "TaskField" tf
+               JOIN "Task" t             ON t.id  = tf."taskId"
+               JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
+               LEFT JOIN "Customer" c    ON c.id  = t."customerId"
+               LEFT JOIN "User" u        ON u.id  = t."ownerId"
+               WHERE c.name ILIKE '%' || $1 || '%'
+               ORDER BY tf."scheduledStartAt" DESC LIMIT 20`,
+              [query],
+            );
+          });
+          searchResults = rows;
+        } else if (searchBy === 'worker') {
+          searchResults = await searchTasksByWorkerName(query);
+        } else if (searchBy === 'product') {
+          searchResults = await searchTasksByProductCode(query);
+        }
+
+        if (searchResults.length === 0) {
+          await sendTextMessage({ to: user.phone, text: `לא נמצאו תוצאות עבור "${query}". נסה שוב.` });
+          return;
+        }
+
+        const srLines = searchResults.map((r, i) => {
+          const worker = r.workerName ?? '—';
+          const customer = r.customerName ?? '—';
+          const time = r.timeHm ?? '--:--';
+          const city = r.siteCity ?? '—';
+          const status = mgrFieldStatusHe(r.fieldStatus);
+          return `${i + 1}. ${worker} | ${customer} | ${time} | ${city} | ${status}`;
+        });
+
+        await setContext(user.phone, {
+          awaiting: 'mgr_search_pick_task',
+          mgrTaskFieldIds: searchResults.map((r) => r.taskFieldId),
+          mgrTaskIds: searchResults.map((r) => r.taskId),
+          mgrSearchKind: searchBy,
+        });
+        await sendChunked(user.phone,
+          `תוצאות חיפוש "${query}" (${searchResults.length}):\n${srLines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
+        );
+      }
+      return;
+    }
 
     default:
       await sendTextMessage({ to: user.phone, text: helpText() });
