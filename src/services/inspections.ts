@@ -156,6 +156,126 @@ export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTa
 
 export type AdvanceTransition = 'DEPARTED' | 'ARRIVED' | 'FINISHED';
 
+// ── D2-T3: inspection card button-reply writes (CONFIRM/DECLINE/NEED_INFO) ──
+// SPEC §6/§7. Three deterministic transitions triggered by the three buttons
+// on the assignment card:
+//   1 → CONFIRMED  + confirmedAt
+//   2 → DECLINED   + declinedAt + declinedReason (+ office alert)
+//   3 → NEEDS_MORE_INFO (+ follow-up note captured in fieldNotes + office alert)
+// These are DIFFERENT from the on-demand DEPARTED/ARRIVED/FINISHED transitions
+// in `advanceFieldStatus` — different columns are stamped and DECLINED requires
+// a captured reason.
+
+export interface ConfirmInspectionParams {
+  taskFieldId: string;
+  updatedBy: string;
+}
+
+/** §6 button 1 → CONFIRMED + confirmedAt. */
+export async function confirmInspection(params: ConfirmInspectionParams): Promise<void> {
+  const { taskFieldId, updatedBy } = params;
+  await pool.query(
+    `UPDATE "TaskField"
+        SET "fieldStatus"     = 'CONFIRMED',
+            "confirmedAt"     = now(),
+            "updatedByUserId" = $2,
+            "updatedAt"       = now()
+      WHERE id = $1`,
+    [taskFieldId, updatedBy],
+  );
+  log.info({ taskFieldId, updatedBy }, 'confirmInspection: CONFIRMED written');
+}
+
+export interface DeclineInspectionParams {
+  taskFieldId: string;
+  reason: string;
+  updatedBy: string;
+}
+
+/** §6 button 2 → DECLINED + declinedAt + declinedReason. */
+export async function declineInspection(params: DeclineInspectionParams): Promise<void> {
+  const { taskFieldId, reason, updatedBy } = params;
+  await pool.query(
+    `UPDATE "TaskField"
+        SET "fieldStatus"     = 'DECLINED',
+            "declinedAt"      = now(),
+            "declinedReason"  = $2,
+            "updatedByUserId" = $3,
+            "updatedAt"       = now()
+      WHERE id = $1`,
+    [taskFieldId, reason, updatedBy],
+  );
+  log.info({ taskFieldId, updatedBy }, 'declineInspection: DECLINED written');
+}
+
+export interface RequestMoreInfoParams {
+  taskFieldId: string;
+  note: string;
+  updatedBy: string;
+}
+
+/**
+ * §6 button 3 → NEEDS_MORE_INFO. The worker's follow-up text is persisted into
+ * `fieldNotes` (no dedicated column exists on `TaskField` for assignment-time
+ * questions; the field-notes column is the most natural home per the migration
+ * comment "field notes + single inline problem"). Later flows that also write
+ * `fieldNotes` (D2-T6 finished follow-up) may overwrite it — acceptable, since
+ * the office has already been notified via the alert. `managerNotifiedAt` is
+ * stamped so the durable write survives an outbound send failure.
+ */
+export async function requestMoreInfo(params: RequestMoreInfoParams): Promise<void> {
+  const { taskFieldId, note, updatedBy } = params;
+  await pool.query(
+    `UPDATE "TaskField"
+        SET "fieldStatus"       = 'NEEDS_MORE_INFO',
+            "fieldNotes"        = $2,
+            "managerNotifiedAt" = now(),
+            "updatedByUserId"   = $3,
+            "updatedAt"         = now()
+      WHERE id = $1`,
+    [taskFieldId, note, updatedBy],
+  );
+  log.info({ taskFieldId, updatedBy }, 'requestMoreInfo: NEEDS_MORE_INFO written');
+}
+
+/** §6 office alert on button 2 (DECLINED). Broadcast to every MANAGER/ADMIN. */
+export async function notifyOfficeDeclined(taskFieldId: string, reason: string): Promise<void> {
+  const ctx = await loadAlertContext(taskFieldId);
+  if (!ctx) {
+    log.warn({ taskFieldId }, 'notifyOfficeDeclined: TaskField not found');
+    return;
+  }
+  const worker   = ctx.workerName    ?? '—';
+  const family   = ctx.familyLabelHe ?? '—';
+  const customer = ctx.customerName  ?? '—';
+  const city     = ctx.siteCity      ? ` (${ctx.siteCity})` : '';
+  const text =
+    `בדיקה סורבה\n` +
+    `עובד: ${worker} · בדיקה: ${family} · לקוח: ${customer}${city}\n` +
+    `סיבה: ${reason}\n` +
+    `יש לשבץ מחדש.`;
+  await broadcastToManagers(text, taskFieldId);
+}
+
+/** §6 office alert on button 3 (NEEDS_MORE_INFO). Broadcast to every MANAGER/ADMIN. */
+export async function notifyOfficeNeedsMoreInfo(taskFieldId: string, note: string): Promise<void> {
+  const ctx = await loadAlertContext(taskFieldId);
+  if (!ctx) {
+    log.warn({ taskFieldId }, 'notifyOfficeNeedsMoreInfo: TaskField not found');
+    return;
+  }
+  const worker   = ctx.workerName    ?? '—';
+  const family   = ctx.familyLabelHe ?? '—';
+  const customer = ctx.customerName  ?? '—';
+  const city     = ctx.siteCity      ? ` (${ctx.siteCity})` : '';
+  const text =
+    `בקשת פרטים נוספים לבדיקה\n` +
+    `עובד: ${worker} · בדיקה: ${family} · לקוח: ${customer}${city}\n` +
+    `${note}\n` +
+    `לטיפול המשרד.`;
+  await broadcastToManagers(text, taskFieldId);
+}
+
 export interface AdvanceFieldStatusParams {
   taskFieldId: string;
   transition: AdvanceTransition;

@@ -8,6 +8,7 @@ import { runDeadlineExceededAlert,
          runDeadlineApproachingAlert }  from './jobs/deadlineAlerts';
 import { runCompletionNotifier }        from './jobs/completionNotifier';
 import { runDigestDispatcher }          from './jobs/digestDispatcher';
+import { runAssignmentCardNotifier }    from './jobs/assignmentCardNotifier';
 import { recoverInboundQueue }          from '../routes/webhook';
 
 const log = moduleLogger('scheduler');
@@ -18,14 +19,15 @@ const TZ = 'Asia/Jerusalem';
 // instance holds it, this instance skips. Prevents N× runs in multi-instance.
 
 const JOB_LOCK_IDS = {
-  expireActions:        1001,
-  dueDateReminder:      1002,
-  deadlineExceeded:     1003,
-  deadlineApproaching:  1004,
-  dailySummary:         1005,
-  completionNotifier:   1006,
-  queueRecovery:        1007,
-  digestDispatcher:     1008,
+  expireActions:          1001,
+  dueDateReminder:        1002,
+  deadlineExceeded:       1003,
+  deadlineApproaching:    1004,
+  dailySummary:           1005,
+  completionNotifier:     1006,
+  queueRecovery:          1007,
+  digestDispatcher:       1008,
+  assignmentCardNotifier: 1009,
 } as const;
 
 async function withJobLock(lockId: number, name: string, fn: () => Promise<void>): Promise<void> {
@@ -80,6 +82,12 @@ export function startScheduler(): void {
   // 5 minutes and fires each user's morning/evening digest when their local time
   // falls in the window (default ON for everyone; opt-out/retime via the menu).
   cron.schedule('*/5 * * * *', safe('digestDispatcher', JOB_LOCK_IDS.digestDispatcher, runDigestDispatcher), { timezone: TZ });
+
+  // D5-T6: every 2 minutes, poll for TaskField rows created by the CRM
+  // scheduling form with `workerNotifiedAt IS NULL`, send the §6 inspection
+  // card (D2-T2), and stamp `workerNotifiedAt`. Advisory lock guards against
+  // duplicate sends across instances.
+  cron.schedule('*/2 * * * *', safe('assignmentCardNotifier', JOB_LOCK_IDS.assignmentCardNotifier, runAssignmentCardNotifier), { timezone: TZ });
 
   // Legacy fixed 17:00 daily summary — OFF by default. Its replacement is the
   // evening digest above. Re-enable only via LEGACY_DAILY_SUMMARY_ENABLED=true.

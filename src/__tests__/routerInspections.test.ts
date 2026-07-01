@@ -20,6 +20,11 @@ const notifyOfficeMissingInfo = vi.fn().mockResolvedValue(undefined);
 const notifyOfficeProblem = vi.fn().mockResolvedValue(undefined);
 const notifyOfficeMissingEquipment = vi.fn().mockResolvedValue(undefined);
 const dayFieldSummary = vi.fn().mockResolvedValue({ finished: [], waitingForInfoCount: 0 });
+const confirmInspection = vi.fn().mockResolvedValue(undefined);
+const declineInspection = vi.fn().mockResolvedValue(undefined);
+const requestMoreInfo = vi.fn().mockResolvedValue(undefined);
+const notifyOfficeDeclined = vi.fn().mockResolvedValue(undefined);
+const notifyOfficeNeedsMoreInfo = vi.fn().mockResolvedValue(undefined);
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: (...a: unknown[]) => findOpenTaskFieldForWorker(...a),
   resolveOpenTaskFieldByHint: (...a: unknown[]) => resolveOpenTaskFieldByHint(...a),
@@ -31,6 +36,11 @@ vi.mock('../services/inspections', () => ({
   notifyOfficeProblem: (...a: unknown[]) => notifyOfficeProblem(...a),
   notifyOfficeMissingEquipment: (...a: unknown[]) => notifyOfficeMissingEquipment(...a),
   dayFieldSummary: (...a: unknown[]) => dayFieldSummary(...a),
+  confirmInspection: (...a: unknown[]) => confirmInspection(...a),
+  declineInspection: (...a: unknown[]) => declineInspection(...a),
+  requestMoreInfo: (...a: unknown[]) => requestMoreInfo(...a),
+  notifyOfficeDeclined: (...a: unknown[]) => notifyOfficeDeclined(...a),
+  notifyOfficeNeedsMoreInfo: (...a: unknown[]) => notifyOfficeNeedsMoreInfo(...a),
 }));
 
 const sendTextMessage = vi.fn().mockResolvedValue(undefined);
@@ -111,6 +121,11 @@ beforeEach(() => {
   notifyOfficeProblem.mockReset(); notifyOfficeProblem.mockResolvedValue(undefined);
   notifyOfficeMissingEquipment.mockReset(); notifyOfficeMissingEquipment.mockResolvedValue(undefined);
   dayFieldSummary.mockReset(); dayFieldSummary.mockResolvedValue({ finished: [], waitingForInfoCount: 0 });
+  confirmInspection.mockReset(); confirmInspection.mockResolvedValue(undefined);
+  declineInspection.mockReset(); declineInspection.mockResolvedValue(undefined);
+  requestMoreInfo.mockReset(); requestMoreInfo.mockResolvedValue(undefined);
+  notifyOfficeDeclined.mockReset(); notifyOfficeDeclined.mockResolvedValue(undefined);
+  notifyOfficeNeedsMoreInfo.mockReset(); notifyOfficeNeedsMoreInfo.mockResolvedValue(undefined);
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
   setContext.mockClear();
   clearContext.mockClear();
@@ -864,5 +879,85 @@ describe('D2-T9 — equipment reminder handling', () => {
     // not the exact date, so the test is timezone / calendar-stable.
     const local = (ctxStore as { equipmentLocalDate?: string }).equipmentLocalDate ?? '';
     expect(local).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+// ── D2-T3: inspection-card button taps ──────────────────────────────────────
+
+describe('D2-T3 — inspection card button replies', () => {
+  const TFID = '11111111-1111-1111-1111-111111111111';
+
+  it('INSP_CONFIRM_* → writes CONFIRMED + ack, clears state', async () => {
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(makeUser(), `INSP_CONFIRM_${TFID}`);
+    expect(confirmInspection).toHaveBeenCalledWith({ taskFieldId: TFID, updatedBy: 'u-worker' });
+    expect(sendTextMessage.mock.calls[0][0].text).toBe('הבדיקה אושרה. תודה.');
+    expect(clearContext).toHaveBeenCalled();
+  });
+
+  it('INSP_DECLINE_* → prompts for reason, sets awaiting state (does NOT write yet)', async () => {
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(makeUser(), `INSP_DECLINE_${TFID}`);
+    expect(declineInspection).not.toHaveBeenCalled();
+    expect(sendTextMessage.mock.calls[0][0].text).toBe('מדוע אינך יכול להגיע? כתוב סיבה קצרה.');
+    expect(ctxStore).toMatchObject({ awaiting: 'inspection_decline_reason', taskFieldId: TFID });
+  });
+
+  it('DECLINE flow: reason reply → writes DECLINED + declinedReason + office alert', async () => {
+    const { handleAIMessage } = await loadRouter();
+    // Step 1: tap decline
+    await handleAIMessage(makeUser(), `INSP_DECLINE_${TFID}`);
+    sendTextMessage.mockClear();
+    // Step 2: reply with reason
+    await handleAIMessage(makeUser(), 'הרכב במוסך');
+    expect(declineInspection).toHaveBeenCalledWith({
+      taskFieldId: TFID,
+      reason: 'הרכב במוסך',
+      updatedBy: 'u-worker',
+    });
+    expect(notifyOfficeDeclined).toHaveBeenCalledWith(TFID, 'הרכב במוסך');
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toBe('עדכנתי. המשרד קיבל התראה.');
+  });
+
+  it('DECLINE flow: empty reason keeps awaiting state, re-prompts', async () => {
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(makeUser(), `INSP_DECLINE_${TFID}`);
+    sendTextMessage.mockClear();
+    await handleAIMessage(makeUser(), '   ');
+    expect(declineInspection).not.toHaveBeenCalled();
+    expect(sendTextMessage.mock.calls[0][0].text).toBe('מדוע אינך יכול להגיע? כתוב סיבה קצרה.');
+    expect(ctxStore).toMatchObject({ awaiting: 'inspection_decline_reason', taskFieldId: TFID });
+  });
+
+  it('INSP_NEED_INFO_* → prompts for note, sets awaiting state (does NOT write yet)', async () => {
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(makeUser(), `INSP_NEED_INFO_${TFID}`);
+    expect(requestMoreInfo).not.toHaveBeenCalled();
+    expect(sendTextMessage.mock.calls[0][0].text).toBe('אילו פרטים חסרים? כתוב מה צריך.');
+    expect(ctxStore).toMatchObject({ awaiting: 'inspection_need_info_note', taskFieldId: TFID });
+  });
+
+  it('NEED_INFO flow: note reply → writes NEEDS_MORE_INFO + office alert', async () => {
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(makeUser(), `INSP_NEED_INFO_${TFID}`);
+    sendTextMessage.mockClear();
+    await handleAIMessage(makeUser(), 'צריך אישור כניסה מוקדם יותר');
+    expect(requestMoreInfo).toHaveBeenCalledWith({
+      taskFieldId: TFID,
+      note: 'צריך אישור כניסה מוקדם יותר',
+      updatedBy: 'u-worker',
+    });
+    expect(notifyOfficeNeedsMoreInfo).toHaveBeenCalledWith(TFID, 'צריך אישור כניסה מוקדם יותר');
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toBe('עדכנתי. המשרד קיבל התראה.');
+  });
+
+  it('unrecognized INSP_* payloads do not match — fall through to normal routing', async () => {
+    const { handleAIMessage } = await loadRouter();
+    // Not a real inspection tap — the AI provider stub means we'll go through
+    // parseIntent which is a rejected mock; the router catches and replies.
+    await handleAIMessage(makeUser(), 'INSP_FOOBAR_notauuid');
+    expect(confirmInspection).not.toHaveBeenCalled();
+    expect(declineInspection).not.toHaveBeenCalled();
+    expect(requestMoreInfo).not.toHaveBeenCalled();
   });
 });

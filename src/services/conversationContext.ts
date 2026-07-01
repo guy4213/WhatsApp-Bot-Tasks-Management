@@ -30,7 +30,12 @@ export type AwaitingKind =
   | 'callback_customer_note'
   // D2-T9: worker tapped "חסר לי ציוד" on the morning equipment reminder →
   // next inbound text is the free-text description of what is missing.
-  | 'equipment_missing_note';
+  | 'equipment_missing_note'
+  // D2-T3: worker tapped a §6 inspection-card reply button → next inbound text
+  // completes the flow. `_reason` follows the DECLINE button (short reason);
+  // `_note` follows the NEED_INFO button (free-text follow-up).
+  | 'inspection_decline_reason'
+  | 'inspection_need_info_note';
 
 export interface ConversationState {
   awaiting: AwaitingKind;

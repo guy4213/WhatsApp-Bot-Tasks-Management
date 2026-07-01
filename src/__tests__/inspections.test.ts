@@ -480,3 +480,112 @@ describe('notifyOfficeMissingEquipment', () => {
     expect(sendTextMessage).not.toHaveBeenCalled();
   });
 });
+
+// ── D2-T3: confirmInspection / declineInspection / requestMoreInfo ──────────
+
+describe('confirmInspection', () => {
+  it('writes CONFIRMED + confirmedAt, parameterized', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    const { confirmInspection } = await import('../services/inspections');
+    await confirmInspection({ taskFieldId: 'tf-1', updatedBy: 'u-9' });
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/UPDATE\s+"TaskField"/);
+    expect(sql).toMatch(/"fieldStatus"\s*=\s*'CONFIRMED'/);
+    expect(sql).toMatch(/"confirmedAt"\s*=\s*now\(\)/);
+    expect(sql).toMatch(/"updatedByUserId"\s*=\s*\$2/);
+    expect(sql).toMatch(/WHERE\s+id\s*=\s*\$1/);
+    expect(params).toEqual(['tf-1', 'u-9']);
+  });
+});
+
+describe('declineInspection', () => {
+  it('writes DECLINED + declinedAt + declinedReason, parameterized', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    const { declineInspection } = await import('../services/inspections');
+    await declineInspection({ taskFieldId: 'tf-2', reason: 'הרכב במוסך', updatedBy: 'u-9' });
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/"fieldStatus"\s*=\s*'DECLINED'/);
+    expect(sql).toMatch(/"declinedAt"\s*=\s*now\(\)/);
+    expect(sql).toMatch(/"declinedReason"\s*=\s*\$2/);
+    expect(sql).toMatch(/"updatedByUserId"\s*=\s*\$3/);
+    expect(params).toEqual(['tf-2', 'הרכב במוסך', 'u-9']);
+  });
+});
+
+describe('requestMoreInfo', () => {
+  it('writes NEEDS_MORE_INFO + fieldNotes + managerNotifiedAt, parameterized', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    const { requestMoreInfo } = await import('../services/inspections');
+    await requestMoreInfo({ taskFieldId: 'tf-3', note: 'צריך אישור כניסה', updatedBy: 'u-9' });
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/"fieldStatus"\s*=\s*'NEEDS_MORE_INFO'/);
+    expect(sql).toMatch(/"fieldNotes"\s*=\s*\$2/);
+    expect(sql).toMatch(/"managerNotifiedAt"\s*=\s*now\(\)/);
+    expect(sql).toMatch(/"updatedByUserId"\s*=\s*\$3/);
+    expect(params).toEqual(['tf-3', 'צריך אישור כניסה', 'u-9']);
+  });
+});
+
+describe('notifyOfficeDeclined', () => {
+  it('broadcasts a §6 alert with worker + type + customer + reason', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{
+        workerName: 'דני',
+        familyLabelHe: 'בדיקת קרינה',
+        customerName: 'משה כהן',
+        siteCity: 'רעננה',
+        missingReportInfoNote: null,
+        problemType: null,
+        problemNote: null,
+      }],
+    });
+    getManagersForBroadcast.mockResolvedValueOnce([
+      { id: 'm-1', name: 'יורם', phone: '972500000001' },
+    ]);
+    const { notifyOfficeDeclined } = await import('../services/inspections');
+
+    await notifyOfficeDeclined('tf-x', 'הרכב במוסך');
+
+    expect(sendTextMessage).toHaveBeenCalledTimes(1);
+    const body = sendTextMessage.mock.calls[0][0].text;
+    expect(body).toContain('בדיקה סורבה');
+    expect(body).toContain('דני');
+    expect(body).toContain('בדיקת קרינה');
+    expect(body).toContain('משה כהן');
+    expect(body).toContain('רעננה');
+    expect(body).toContain('סיבה: הרכב במוסך');
+    expect(body).toContain('יש לשבץ מחדש.');
+  });
+});
+
+describe('notifyOfficeNeedsMoreInfo', () => {
+  it('broadcasts a §6 alert with worker + customer + note', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{
+        workerName: 'דני',
+        familyLabelHe: 'בדיקת רעש',
+        customerName: 'משה כהן',
+        siteCity: 'הרצליה',
+        missingReportInfoNote: null,
+        problemType: null,
+        problemNote: null,
+      }],
+    });
+    getManagersForBroadcast.mockResolvedValueOnce([
+      { id: 'm-1', name: 'יורם', phone: '972500000001' },
+    ]);
+    const { notifyOfficeNeedsMoreInfo } = await import('../services/inspections');
+
+    await notifyOfficeNeedsMoreInfo('tf-y', 'צריך אישור כניסה');
+
+    expect(sendTextMessage).toHaveBeenCalledTimes(1);
+    const body = sendTextMessage.mock.calls[0][0].text;
+    expect(body).toContain('בקשת פרטים נוספים לבדיקה');
+    expect(body).toContain('דני');
+    expect(body).toContain('משה כהן');
+    expect(body).toContain('צריך אישור כניסה');
+    expect(body).toContain('לטיפול המשרד.');
+  });
+});

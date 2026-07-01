@@ -14,7 +14,11 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Bash(Select-String -Pattern '\\\\.env')",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Skill(update-config)",
+      "Edit",
+      "Write",
+      "Bash(git *)"
     ]
   }
 }

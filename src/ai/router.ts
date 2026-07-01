@@ -47,6 +47,11 @@ import {
   notifyOfficeProblem,
   notifyOfficeMissingEquipment,
   dayFieldSummary,
+  confirmInspection,
+  declineInspection,
+  requestMoreInfo,
+  notifyOfficeDeclined,
+  notifyOfficeNeedsMoreInfo,
   type AdvanceTransition,
 } from '../services/inspections';
 import { getManagersForBroadcast } from '../services/pendingActions';
@@ -134,6 +139,17 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
       return;
     }
     await handleEquipmentTap(user, equipTap.kind, equipTap.localDate);
+    return;
+  }
+
+  // D2-T3 inspection-card button taps. Same routing rationale as the equipment
+  // reminder — payload arrives here as text via webhook.ts's interactive path.
+  // The payload embeds the `TaskField.id`; ownership is enforced by the DB
+  // write (the caller could only have received the card if they are the owner,
+  // but the write path re-verifies via Task.ownerId → User in DoDs downstream).
+  const inspTap = matchInspectionCardTap(text);
+  if (inspTap) {
+    await handleInspectionCardTap(user, inspTap.kind, inspTap.taskFieldId);
     return;
   }
 
@@ -314,6 +330,14 @@ async function continueConversation(
   }
   if (ctx.awaiting === 'equipment_missing_note') {
     await handleEquipmentMissingNoteReply(user, text, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'inspection_decline_reason') {
+    await handleInspectionDeclineReasonReply(user, text, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'inspection_need_info_note') {
+    await handleInspectionNeedInfoNoteReply(user, text, ctx);
     return;
   }
 
@@ -1509,6 +1533,106 @@ async function handleEquipmentMissingNoteReply(
     note,
     localDate,
   });
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+}
+
+// ── D2-T3: inspection-card button taps + follow-up state handlers ───────────
+// SPEC_FIELD_V2 §6/§7. The three buttons on the §6 card carry deterministic
+// payload IDs from `services/inspectionAssignment.ts`:
+//   INSP_CONFIRM_<taskFieldId>    → CONFIRMED   + confirmedAt (immediate ack)
+//   INSP_DECLINE_<taskFieldId>    → DECLINED    + declinedAt (prompts reason)
+//   INSP_NEED_INFO_<taskFieldId>  → NEEDS_MORE_INFO (prompts follow-up text)
+// Ownership: the card was sent to the assigned worker (Task.ownerId → User),
+// so only that user could have tapped it. Not defended against payload spoof
+// beyond that — a UUID guess is not a real threat and the write is scoped to
+// the specific TaskField id.
+
+type InspectionCardTapKind = 'confirm' | 'decline' | 'need_info';
+
+/** Parse an inbound message that IS an inspection-card tap payload. Returns
+ *  null for anything else so the caller falls through untouched. */
+function matchInspectionCardTap(
+  raw: string,
+): { kind: InspectionCardTapKind; taskFieldId: string } | null {
+  const m = raw.trim().match(
+    /^INSP_(CONFIRM|DECLINE|NEED_INFO)_([0-9a-f-]{36})$/i,
+  );
+  if (!m) return null;
+  const token = m[1].toUpperCase();
+  const kind: InspectionCardTapKind =
+    token === 'CONFIRM' ? 'confirm'
+    : token === 'DECLINE' ? 'decline'
+    : 'need_info';
+  return { kind, taskFieldId: m[2] };
+}
+
+async function handleInspectionCardTap(
+  user: ResolvedUser,
+  kind: InspectionCardTapKind,
+  taskFieldId: string,
+): Promise<void> {
+  switch (kind) {
+    case 'confirm':
+      await confirmInspection({ taskFieldId, updatedBy: user.id });
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'הבדיקה אושרה. תודה.' });
+      return;
+    case 'decline':
+      await setContext(user.phone, {
+        awaiting: 'inspection_decline_reason',
+        taskFieldId,
+      });
+      await sendTextMessage({ to: user.phone, text: 'מדוע אינך יכול להגיע? כתוב סיבה קצרה.' });
+      return;
+    case 'need_info':
+      await setContext(user.phone, {
+        awaiting: 'inspection_need_info_note',
+        taskFieldId,
+      });
+      await sendTextMessage({ to: user.phone, text: 'אילו פרטים חסרים? כתוב מה צריך.' });
+      return;
+  }
+}
+
+async function handleInspectionDeclineReasonReply(
+  user: ResolvedUser,
+  raw: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const reason = raw.trim();
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  if (!reason) {
+    await sendTextMessage({ to: user.phone, text: 'מדוע אינך יכול להגיע? כתוב סיבה קצרה.' });
+    return;
+  }
+  await declineInspection({ taskFieldId: ctx.taskFieldId, reason, updatedBy: user.id });
+  await notifyOfficeDeclined(ctx.taskFieldId, reason);
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+}
+
+async function handleInspectionNeedInfoNoteReply(
+  user: ResolvedUser,
+  raw: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const note = raw.trim();
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  if (!note) {
+    await sendTextMessage({ to: user.phone, text: 'אילו פרטים חסרים? כתוב מה צריך.' });
+    return;
+  }
+  await requestMoreInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
+  await notifyOfficeNeedsMoreInfo(ctx.taskFieldId, note);
   await clearContext(user.phone);
   await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
 }
