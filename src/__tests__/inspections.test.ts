@@ -462,7 +462,7 @@ describe('notifyOfficeMissingEquipment', () => {
     });
 
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('עובד: —');
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('שם עובד: —');
   });
 
   it('no-ops when no MANAGER/ADMIN is configured (logs a warning, does not throw)', async () => {

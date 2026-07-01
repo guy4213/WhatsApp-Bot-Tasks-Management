@@ -47,6 +47,7 @@ export interface OpenFieldException {
   taskFieldId: string;
   workerName: string | null;
   customerName: string | null;
+  taskTitle?: string | null;  // optional: present when a display label hint is needed
   siteAddress: string | null;
   kind: 'problem' | 'missing_info';
   note: string | null;         // problemNote for kind='problem'; missingReportInfoNote for kind='missing_info'
@@ -155,6 +156,7 @@ export async function getOpenFieldExceptions(
     taskFieldId: string;
     workerName: string | null;
     customerName: string | null;
+    taskTitle: string | null;
     siteAddress: string | null;
     kind: 'problem' | 'missing_info';
     note: string | null;
@@ -164,17 +166,16 @@ export async function getOpenFieldExceptions(
     `SELECT
        tf.id                         AS "taskFieldId",
        u.name                        AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                             AS "customerName",
+       t.title                       AS "taskTitle",
        tf."siteAddress"              AS "siteAddress",
        CASE
          WHEN tf."hasOpenProblem" = true

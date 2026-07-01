@@ -118,16 +118,14 @@ export async function listTasks(
            t.status, t.type, t."createdAt", t."updatedAt",
            t."ownerId", t."customerId", t."leadId", t."projectId",
            u.name        AS "ownerName",
-           -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+           -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
            COALESCE(
              c.name,
              l."fullName",
              NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
              l.company,
              p.client,
-             il."fromName",
-             NULLIF(TRIM(t.title), ''),
-             NULLIF(TRIM(t.description), '')
+             il."fromName"
            )             AS "customerName",
            l."fullName"  AS "leadName",
            p.name        AS "projectName"

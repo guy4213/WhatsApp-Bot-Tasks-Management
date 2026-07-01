@@ -598,8 +598,10 @@ describe('item 6 — search sub-menu', () => {
     await handleAIMessage(admin, 'דני');
     expect(searchTasksByWorkerName).toHaveBeenCalledWith('דני');
     const msg = lastMsg();
-    // worker search: per-row format omits redundant worker column → shows customer | time | city | status
-    expect(msg).toContain('1. לקוח | 10:00 | ת"א');
+    // worker search: 2-line row — "סוג בדיקה: <label>" on line 1, labeled time/city/status on line 2
+    expect(msg).toContain('סוג בדיקה: רעש');
+    expect(msg).toContain('שעה: 10:00');
+    expect(msg).toContain('עיר: ת"א');
     expect(ctxStore).toMatchObject({ awaiting: 'mgr_search_pick_task' });
   });
 

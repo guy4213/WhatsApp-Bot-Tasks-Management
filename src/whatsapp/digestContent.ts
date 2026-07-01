@@ -283,20 +283,40 @@ function problemTypeLabelHe(code: string): string {
   return item?.label ?? code;
 }
 
-/** Compact single-line counts row per §13 (`שטח: בוצעו X · לא אושרו Y · …`). */
-function formatCountsLine(c: FieldExceptionCounts): string {
+/**
+ * Labeled multi-line counts block per product-owner UX update.
+ *
+ * שטח:
+ * - בוצעו: X
+ * - לא אושרו: Y
+ * - עם בעיה: Z
+ * - ממתין למידע: W
+ * - לא סגרו יום: V
+ */
+function formatCountsBlock(c: FieldExceptionCounts): string {
   return (
-    `שטח: בוצעו ${c.finishedFieldToday} · ` +
-    `לא אושרו ${c.notConfirmedToday} · ` +
-    `עם בעיה ${c.hasProblemToday} · ` +
-    `ממתינות למידע ${c.waitingForInfoToday} · ` +
-    `לא סגרו יום ${c.notClosedDayToday}`
+    `שטח:\n` +
+    `- בוצעו: ${c.finishedFieldToday}\n` +
+    `- לא אושרו: ${c.notConfirmedToday}\n` +
+    `- עם בעיה: ${c.hasProblemToday}\n` +
+    `- ממתין למידע: ${c.waitingForInfoToday}\n` +
+    `- לא סגרו יום: ${c.notClosedDayToday}`
   );
 }
 
-/** Render the leads summary line per spec §13: "לידים: X מהלילה · Y לא שויכו". */
-function formatLeadsLine(lc: YoramLeadCounts): string {
-  return `לידים: ${lc.overnight} מהלילה · ${lc.unassigned} לא שויכו`;
+/**
+ * Labeled multi-line leads block per product-owner UX update.
+ *
+ * לידים:
+ * - מהלילה: X
+ * - לא שויכו: Y
+ */
+function formatLeadsBlock(lc: YoramLeadCounts): string {
+  return (
+    `לידים:\n` +
+    `- מהלילה: ${lc.overnight}\n` +
+    `- לא שויכו: ${lc.unassigned}`
+  );
 }
 
 /** Render one row of the numbered "פתוחים:" list. */
@@ -344,9 +364,9 @@ export function formatGalitManagerMorning(input: {
     : `פתוחים:\n${exceptions.map((e, i) => formatExceptionRow(e, i + 1)).join('\n')}`;
 
   const text =
-    `סיכום גלית — בוקר טוב ${name}\n` +
-    `${formatCountsLine(counts)}\n` +
-    `${formatLeadsLine(leadCounts)}\n\n` +
+    `סיכום גלית — בוקר טוב ${name}\n\n` +
+    `${formatCountsBlock(counts)}\n\n` +
+    `${formatLeadsBlock(leadCounts)}\n\n` +
     `${openBlock}`;
 
   return { text, params, buttons: [] };
@@ -383,9 +403,9 @@ export function formatGalitManagerEndOfDay(input: {
     : `פתוחים:\n${exceptions.map((e, i) => formatExceptionRow(e, i + 1)).join('\n')}`;
 
   const text =
-    `סיכום סוף יום — ${name}\n` +
-    `${formatCountsLine(counts)}\n` +
-    `${formatLeadsLine(leadCounts)}\n\n` +
+    `סיכום סוף יום — ${name}\n\n` +
+    `${formatCountsBlock(counts)}\n\n` +
+    `${formatLeadsBlock(leadCounts)}\n\n` +
     `${openBlock}`;
 
   return { text, params, buttons: [] };
@@ -564,20 +584,26 @@ export function formatSashaLeadsMorning(
 
   const sugMap = new Map(suggestions.map((s) => [s.leadId, s]));
 
+  // Standard label vocabulary for Sasha lead rows
+  const L_SENDER  = 'שולח';
+  const L_SUBJECT = 'נושא';
+  const L_BODY    = 'תוכן';
+  const L_SUGGES  = 'הצעת שיבוץ';
+
   const rows = leads.map((lead, i) => {
     const parts: string[] = [];
     const sender = [
       lead.fromName,
       lead.fromEmail ? `(${lead.fromEmail})` : null,
     ].filter(Boolean).join(' ');
-    parts.push(`${i + 1}. ${sender || 'לא ידוע'}`);
-    if (lead.subject) parts.push(`   נושא: ${lead.subject}`);
-    if (lead.body?.trim()) parts.push(`   הודעה: ${truncate(lead.body, LEAD_BODY_MAX)}`);
+    parts.push(`${i + 1}. ${L_SENDER}: ${sender || 'לא ידוע'}`);
+    if (lead.subject) parts.push(`   ${L_SUBJECT}: ${lead.subject}`);
+    if (lead.body?.trim()) parts.push(`   ${L_BODY}: ${truncate(lead.body, LEAD_BODY_MAX)}`);
     const sug = sugMap.get(lead.id);
     if (sug) {
       const sugLine = sug.workerName
-        ? `הצעת שיבוץ: ${sug.workerName} — ${sug.reason}`
-        : 'הצעת שיבוץ: לא נמצאה התאמה';
+        ? `${L_SUGGES}: ${sug.workerName} — ${sug.reason}`
+        : `${L_SUGGES}: לא נמצאה התאמה`;
       parts.push(`   ${sugLine}`);
     }
     return parts.join('\n');

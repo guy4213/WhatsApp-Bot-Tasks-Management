@@ -120,15 +120,20 @@ describe('getEquipmentLabels', () => {
 // ── formatInspectionCard ─────────────────────────────────────────────────────
 
 describe('formatInspectionCard', () => {
-  it('renders the §6 layout with type, customer, address, date/time, contact, equipment, nav, choices', () => {
+  it('renders the §6 layout with descriptive labels for type, customer, address, date/time, contact, equipment, nav, choices', () => {
     const body = formatInspectionCard(makeRow(), ['מד ELF', 'מד RF', 'חצובה', 'טופס שטח']);
     expect(body).toContain('שובצה לך בדיקה חדשה.');
-    expect(body).toContain('סוג: בדיקת קרינה מרשת החשמל');
-    expect(body).toContain('לקוח: משה כהן');
-    expect(body).toContain('כתובת: אחוזה 100, רעננה');
+    // Standard label vocabulary
+    expect(body).toContain('סוג בדיקה:');
+    expect(body).toContain('בדיקת קרינה מרשת החשמל');
+    expect(body).toContain('שם לקוח:');
+    expect(body).toContain('משה כהן');
+    expect(body).toContain('כתובת האתר:');
+    expect(body).toContain('אחוזה 100, רעננה');
     expect(body).toContain('תאריך:');
     expect(body).toContain('שעה:');
-    expect(body).toContain('איש קשר: משה, 050-0000000');
+    expect(body).toContain('איש קשר:');
+    expect(body).toContain('משה, 050-0000000');
     expect(body).toContain('ציוד נדרש:');
     expect(body).toContain('- מד ELF');
     expect(body).toContain('- מד RF');
@@ -140,7 +145,7 @@ describe('formatInspectionCard', () => {
     expect(body).toContain('3. צריך פרטים נוספים');
   });
 
-  it('omits missing optional lines rather than inventing placeholders', () => {
+  it('shows Hebrew placeholders for missing customer/address; omits optional contact/nav/equipment', () => {
     const body = formatInspectionCard(
       makeRow({
         customerName: null,
@@ -152,11 +157,16 @@ describe('formatInspectionCard', () => {
       }),
       [],
     );
-    expect(body).not.toMatch(/לקוח:/);
-    expect(body).not.toMatch(/כתובת:/);
-    expect(body).not.toMatch(/איש קשר:/);
-    expect(body).not.toMatch(/ניווט:/);
-    expect(body).not.toMatch(/ציוד נדרש:/);
+    // Customer label present but value is Hebrew placeholder
+    expect(body).toContain('שם לקוח:');
+    expect(body).toContain('אין פרטי לקוח');
+    // Address label present but value is Hebrew placeholder
+    expect(body).toContain('כתובת האתר:');
+    expect(body).toContain('אין כתובת רשומה');
+    // Optional fields truly omitted
+    expect(body).not.toContain('איש קשר:');
+    expect(body).not.toContain('ניווט:');
+    expect(body).not.toContain('ציוד נדרש:');
     // choices always present
     expect(body).toContain('1. מאשר');
   });

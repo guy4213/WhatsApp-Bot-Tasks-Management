@@ -21,6 +21,7 @@ const log = moduleLogger('inspectionsQueries');
 export interface InspectionListItem {
   taskFieldId: string;
   customerName: string | null;
+  taskTitle?: string | null;  // optional: present when callers need a display label
   siteAddress: string | null;
   siteCity: string | null;
   fieldStatus: string;
@@ -49,6 +50,7 @@ export async function getInspectionsForWorkerOnDate(
   const { rows } = await pool.query<{
     taskFieldId: string;
     customerName: string | null;
+    taskTitle: string | null;
     siteAddress: string | null;
     siteCity: string | null;
     fieldStatus: string;
@@ -57,17 +59,16 @@ export async function getInspectionsForWorkerOnDate(
   }>(
     `SELECT
        tf.id                       AS "taskFieldId",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                           AS "customerName",
+       t.title                     AS "taskTitle",
        tf."siteAddress"            AS "siteAddress",
        tf."siteCity"               AS "siteCity",
        tf."fieldStatus"            AS "fieldStatus",
@@ -116,6 +117,7 @@ export async function getFieldSummaryForWorkerOnDate(
   const { rows } = await pool.query<{
     taskFieldId: string;
     customerName: string | null;
+    taskTitle: string | null;
     siteAddress: string | null;
     siteCity: string | null;
     fieldStatus: string;
@@ -124,17 +126,16 @@ export async function getFieldSummaryForWorkerOnDate(
   }>(
     `SELECT
        tf.id                       AS "taskFieldId",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                           AS "customerName",
+       t.title                     AS "taskTitle",
        tf."siteAddress"            AS "siteAddress",
        tf."siteCity"               AS "siteCity",
        tf."fieldStatus"            AS "fieldStatus",

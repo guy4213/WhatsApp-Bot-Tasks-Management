@@ -25,6 +25,7 @@ import { pool } from '../db/connection';
 import { sendTextMessage } from '../whatsapp/sender';
 import { getManagersForBroadcast } from './pendingActions';
 import { moduleLogger } from '../utils/logger';
+import { LABELS } from '../ai/inspectionFormatters';
 import {
   getFieldSummaryForWorkerOnDate,
   type DayFieldSummary,
@@ -108,7 +109,7 @@ export async function writeProblem(params: WriteProblemParams): Promise<void> {
 // ── Open-TaskField lookup ────────────────────────────────────────────────────
 
 export type OpenTaskFieldResult =
-  | { taskFieldId: string; customerName: string | null }
+  | { taskFieldId: string; customerName: string | null; taskTitle: string | null }
   | { ambiguous: true; count: number }
   | null;
 
@@ -124,19 +125,18 @@ export type OpenTaskFieldResult =
  * against `src/services/tasks.ts` — no `assigneeId` column exists on `Task`).
  */
 export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTaskFieldResult> {
-  const result = await pool.query<{ taskFieldId: string; customerName: string | null }>(
+  const result = await pool.query<{ taskFieldId: string; customerName: string | null; taskTitle: string | null }>(
     `SELECT tf.id            AS "taskFieldId",
-            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+            -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
             COALESCE(
               c.name,
               l."fullName",
               NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
               l.company,
               p.client,
-              il."fromName",
-              NULLIF(TRIM(t.title), ''),
-              NULLIF(TRIM(t.description), '')
-            )                AS "customerName"
+              il."fromName"
+            )                AS "customerName",
+            t.title          AS "taskTitle"
        FROM "TaskField" tf
        JOIN "Task"           t  ON t.id  = tf."taskId"
        LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
@@ -153,6 +153,7 @@ export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTa
     return {
       taskFieldId: result.rows[0].taskFieldId,
       customerName: result.rows[0].customerName,
+      taskTitle: result.rows[0].taskTitle,
     };
   }
   return { ambiguous: true, count: result.rowCount ?? result.rows.length };
@@ -264,7 +265,7 @@ export async function notifyOfficeDeclined(taskFieldId: string, reason: string):
   const city     = ctx.siteCity      ? ` (${ctx.siteCity})` : '';
   const text =
     `בדיקה סורבה\n` +
-    `עובד: ${worker} · בדיקה: ${family} · לקוח: ${customer}${city}\n` +
+    `${LABELS.WORKER}: ${worker} · ${LABELS.TYPE}: ${family} · ${LABELS.CUSTOMER}: ${customer}${city}\n` +
     `סיבה: ${reason}\n` +
     `יש לשבץ מחדש.`;
   await broadcastToManagers(text, taskFieldId);
@@ -283,7 +284,7 @@ export async function notifyOfficeNeedsMoreInfo(taskFieldId: string, note: strin
   const city     = ctx.siteCity      ? ` (${ctx.siteCity})` : '';
   const text =
     `בקשת פרטים נוספים לבדיקה\n` +
-    `עובד: ${worker} · בדיקה: ${family} · לקוח: ${customer}${city}\n` +
+    `${LABELS.WORKER}: ${worker} · ${LABELS.TYPE}: ${family} · ${LABELS.CUSTOMER}: ${customer}${city}\n` +
     `${note}\n` +
     `לטיפול המשרד.`;
   await broadcastToManagers(text, taskFieldId);
@@ -365,7 +366,7 @@ export async function writeFieldNotes(params: WriteFieldNotesParams): Promise<vo
 // ── D2-T5: disambiguation by free-text hint (customer name / site address) ──
 
 export type ResolveOpenTaskFieldResult =
-  | { taskFieldId: string; customerName: string | null }
+  | { taskFieldId: string; customerName: string | null; taskTitle: string | null }
   | { ambiguous: true; count: number }
   | null;
 
@@ -385,19 +386,18 @@ export async function resolveOpenTaskFieldByHint(
 ): Promise<ResolveOpenTaskFieldResult> {
   const trimmed = hint.trim();
   if (!trimmed) return null;
-  const result = await pool.query<{ taskFieldId: string; customerName: string | null }>(
+  const result = await pool.query<{ taskFieldId: string; customerName: string | null; taskTitle: string | null }>(
     `SELECT tf.id            AS "taskFieldId",
-            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+            -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
             COALESCE(
               c.name,
               l."fullName",
               NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
               l.company,
               p.client,
-              il."fromName",
-              NULLIF(TRIM(t.title), ''),
-              NULLIF(TRIM(t.description), '')
-            )                AS "customerName"
+              il."fromName"
+            )                AS "customerName",
+            t.title          AS "taskTitle"
        FROM "TaskField" tf
        JOIN "Task"           t  ON t.id  = tf."taskId"
        LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
@@ -418,6 +418,7 @@ export async function resolveOpenTaskFieldByHint(
     return {
       taskFieldId: result.rows[0].taskFieldId,
       customerName: result.rows[0].customerName,
+      taskTitle: result.rows[0].taskTitle,
     };
   }
   return { ambiguous: true, count: result.rowCount ?? result.rows.length };
@@ -448,16 +449,14 @@ async function loadAlertContext(taskFieldId: string): Promise<AlertContext | nul
   }>(
     `SELECT u.name              AS "workerName",
             it."labelHe"        AS "familyLabelHe",
-            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+            -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
             COALESCE(
               c.name,
               l."fullName",
               NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
               l.company,
               p.client,
-              il."fromName",
-              NULLIF(TRIM(t.title), ''),
-              NULLIF(TRIM(t.description), '')
+              il."fromName"
             )                   AS "customerName",
             tf."siteCity"       AS "siteCity",
             tf."missingReportInfoNote" AS "missingReportInfoNote",
@@ -513,7 +512,7 @@ export async function notifyOfficeMissingInfo(taskFieldId: string): Promise<void
   const note     = ctx.missingReportInfoNote ?? '';
   const text =
     `חסר מידע לדוח\n` +
-    `עובד: ${worker} · בדיקה: ${family} · לקוח: ${customer}${city}\n` +
+    `${LABELS.WORKER}: ${worker} · ${LABELS.TYPE}: ${family} · ${LABELS.CUSTOMER}: ${customer}${city}\n` +
     `${note}\n` +
     `לטיפול המשרד.`;
   await broadcastToManagers(text, taskFieldId);
@@ -562,8 +561,8 @@ export async function notifyOfficeProblem(taskFieldId: string): Promise<void> {
   const detail   = ctx.problemNote ? `\n${ctx.problemNote}` : '';
   const text =
     `בעיה מהשטח\n` +
-    `עובד: ${worker} · בדיקה: ${family} · לקוח: ${customer}${city}\n` +
-    `סוג: ${typeHe}${detail}\n` +
+    `${LABELS.WORKER}: ${worker} · ${LABELS.TYPE}: ${family} · ${LABELS.CUSTOMER}: ${customer}${city}\n` +
+    `סוג בעיה: ${typeHe}${detail}\n` +
     `לטיפול מנהל.`;
   await broadcastToManagers(text, taskFieldId);
 }
@@ -593,8 +592,8 @@ export async function notifyOfficeMissingEquipment(input: {
   const worker = userName ?? '—';
   const text =
     `חסר ציוד לבוקר\n` +
-    `עובד: ${worker}\n` +
-    `תאריך: ${localDate}\n` +
+    `${LABELS.WORKER}: ${worker}\n` +
+    `${LABELS.DATE}: ${localDate}\n` +
     `${note}\n` +
     `לטיפול המשרד.`;
   const managers = await getManagersForBroadcast();

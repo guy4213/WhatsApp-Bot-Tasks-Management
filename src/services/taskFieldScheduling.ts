@@ -91,16 +91,14 @@ export async function findOpenTasksForOwner(
       `SELECT
          t.id, t."productName", t.title,
          t."customerId",
-         -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+         -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
          COALESCE(
            c.name,
            l."fullName",
            NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
            l.company,
            p.client,
-           il."fromName",
-           NULLIF(TRIM(t.title), ''),
-           NULLIF(TRIM(t.description), '')
+           il."fromName"
          ) AS "customerName",
          it."labelHe" AS "inspectionLabelHe",
          it.family AS "inspectionFamily",
@@ -169,16 +167,14 @@ export async function findOpenTasksForAdmin(limit = 10): Promise<TaskCandidate[]
       `SELECT
          t.id, t."productName", t.title,
          t."customerId",
-         -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+         -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
          COALESCE(
            c.name,
            l."fullName",
            NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
            l.company,
            p.client,
-           il."fromName",
-           NULLIF(TRIM(t.title), ''),
-           NULLIF(TRIM(t.description), '')
+           il."fromName"
          ) AS "customerName",
          it."labelHe" AS "inspectionLabelHe",
          it.family AS "inspectionFamily",
@@ -283,16 +279,14 @@ export async function findOpenTasksForCustomer(
       `SELECT
          t.id, t."productName", t.title,
          t."customerId",
-         -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+         -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
          COALESCE(
            c.name,
            l."fullName",
            NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
            l.company,
            p.client,
-           il."fromName",
-           NULLIF(TRIM(t.title), ''),
-           NULLIF(TRIM(t.description), '')
+           il."fromName"
          ) AS "customerName",
          it."labelHe" AS "inspectionLabelHe",
          it.family AS "inspectionFamily",

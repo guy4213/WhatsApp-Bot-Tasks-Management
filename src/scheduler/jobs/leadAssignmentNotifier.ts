@@ -42,17 +42,23 @@ function renderSender(fromName: string | null, fromEmail: string | null): string
   return parts.join(' ') || 'לא ידוע';
 }
 
+// Standard Hebrew lead labels (inline — appear in 2 functions here)
+const L_SENDER  = 'שולח';
+const L_SUBJECT = 'נושא';
+const L_BODY    = 'תוכן';
+const L_SUGGES  = 'הצעת שיבוץ';
+
 // ── D3-T3 alert ──────────────────────────────────────────────────────────────
 
 function formatWorkerAssignmentAlert(lead: AssignedLeadRow): string {
   const lines: string[] = [
     'ליד חדש שויך אליך:',
     '',
-    `שם: ${renderSender(lead.fromName, lead.fromEmail)}`,
+    `${L_SENDER}: ${renderSender(lead.fromName, lead.fromEmail)}`,
   ];
-  if (lead.subject) lines.push(`נושא: ${lead.subject}`);
+  if (lead.subject) lines.push(`${L_SUBJECT}: ${lead.subject}`);
   const body = renderLeadBody(lead.body);
-  if (body) lines.push(`הודעה: ${body}`);
+  if (body) lines.push(`${L_BODY}: ${body}`);
   lines.push('', 'לטיפול ועדכון ב-CRM');
   return lines.join('\n');
 }
@@ -98,14 +104,14 @@ function formatEscalationAlert(
   const lines: string[] = [
     'ליד ממתין לשיבוץ — מעל שעה:',
     '',
-    `שם: ${renderSender(lead.fromName, lead.fromEmail)}`,
+    `${L_SENDER}: ${renderSender(lead.fromName, lead.fromEmail)}`,
   ];
-  if (lead.subject) lines.push(`נושא: ${lead.subject}`);
+  if (lead.subject) lines.push(`${L_SUBJECT}: ${lead.subject}`);
   const body = renderLeadBody(lead.body);
-  if (body) lines.push(`הודעה: ${body}`);
+  if (body) lines.push(`${L_BODY}: ${body}`);
   const sugLine = workerName
-    ? `הצעת שיבוץ: ${workerName} — ${reason}`
-    : 'הצעת שיבוץ: לא נמצאה התאמה';
+    ? `${L_SUGGES}: ${workerName} — ${reason}`
+    : `${L_SUGGES}: לא נמצאה התאמה`;
   lines.push('', sugLine, 'לשיבוץ ב-CRM');
   return lines.join('\n');
 }

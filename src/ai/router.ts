@@ -86,6 +86,18 @@ import {
 } from '../services/incomingLeads';
 import { suggestWorkerForLead } from './leadSuggester';
 import { extractFromContext, extractNote, type ExtractionRequest } from './contextExtractor';
+// Display helpers for manager-menu inspection list rows and detail views (Bug 2 fix).
+import {
+  hebrewShortLabel,
+  formatHebrewDateTime,
+  formatInspectionListRow,
+  formatInspectionDetail,
+  formatLeadListRow,
+  fieldStatusHe as inspFieldStatusHe,
+  type InspectionListRowData,
+  type InspectionDetailData,
+  type LeadListRowData,
+} from './inspectionFormatters';
 // D2-T12/T13/T14: site metadata correction, task reassign, inspection type correction.
 import {
   updateSiteMetadata,
@@ -800,12 +812,11 @@ async function executeIntent(
         return;
       }
       const exLines = exRows.map((r, i) => {
-        const worker = r.workerName ?? '—';
-        const customer = r.customerName ?? '—';
-        const city = r.siteCity ?? '—';
+        const shortLabel = hebrewShortLabel(r.taskTitle, r.workerName ?? '—');
+        const city   = r.siteCity ?? '—';
         const status = mgrFieldStatusHe(r.fieldStatus);
-        const desc = r.description ? ` — ${r.description}` : '';
-        return `${i + 1}. ${worker} | ${customer} | ${city} | ${status}${desc}`;
+        const desc   = r.description ? `\n   ${r.description}` : '';
+        return `${i + 1}. ${shortLabel}\n   ${city}  ·  ${status}${desc}`;
       });
       await setContext(user.phone, {
         awaiting: 'mgr_exceptions_pick_row',
@@ -813,7 +824,7 @@ async function executeIntent(
         mgrTaskIds: exRows.map((r) => r.taskId),
       });
       await sendChunked(user.phone,
-        `חריגים (${exRows.length}):\n${exLines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
+        `חריגים (${exRows.length}):\n\n${exLines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
       );
       return;
     }
@@ -834,13 +845,21 @@ async function executeIntent(
           await sendTextMessage({ to: user.phone, text: 'אין לידים שעברו שעה ללא שיוך כרגע.' });
           return;
         }
-        const escLines = escLeads.map((l, i) => `${i + 1}. ${l.fromName ?? '—'} — ${l.subject ?? '(ללא נושא)'}`);
+        const escLines = escLeads.map((l, i) => {
+          const rowData: LeadListRowData = {
+            fromName: l.fromName ?? null,
+            fromEmail: l.fromEmail ?? null,
+            subject: l.subject ?? null,
+            receivedAt: l.receivedAt ?? null,
+          };
+          return `${i + 1}. ${formatLeadListRow(rowData)}`;
+        });
         await setContext(user.phone, {
           awaiting: 'mgr_leads_pick_row',
           mgrLeadIds: escLeads.map((l) => l.id),
           mgrLeadNames: escLeads.map((l) => l.fromName ?? '—'),
         });
-        await sendChunked(user.phone, `לידים שעברו שעה ללא שיוך (${escLeads.length}):\n${escLines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
+        await sendChunked(user.phone, `לידים שעברו שעה ללא שיוך (${escLeads.length}):\n\n${escLines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
       } else {
         // Default: unassigned
         const unassLeads = await findUnassignedLeadsForAssignment(20);
@@ -848,13 +867,21 @@ async function executeIntent(
           await sendTextMessage({ to: user.phone, text: 'אין כרגע לידים לא משויכים.' });
           return;
         }
-        const unassLines = unassLeads.map((l, i) => `${i + 1}. ${l.fromName ?? '—'} — ${l.subject ?? '(ללא נושא)'}`);
+        const unassLines = unassLeads.map((l, i) => {
+          const rowData: LeadListRowData = {
+            fromName: l.fromName ?? null,
+            fromEmail: l.fromEmail ?? null,
+            subject: l.subject ?? null,
+            receivedAt: l.receivedAt ?? null,
+          };
+          return `${i + 1}. ${formatLeadListRow(rowData)}`;
+        });
         await setContext(user.phone, {
           awaiting: 'mgr_leads_pick_row',
           mgrLeadIds: unassLeads.map((l) => l.id),
           mgrLeadNames: unassLeads.map((l) => l.fromName ?? '—'),
         });
-        await sendChunked(user.phone, `לידים לא משויכים (${unassLeads.length}):\n${unassLines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
+        await sendChunked(user.phone, `לידים לא משויכים (${unassLeads.length}):\n\n${unassLines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
       }
       return;
     }
@@ -888,15 +915,19 @@ async function executeIntent(
         // Show detail for the matched worker.
         const detail = await getWorkerDayDetail(matched.workerId, localDateW);
         const lines = detail.inspections.map((r, i) => {
-          const customer = r.customerName ?? 'לקוח לא ידוע';
-          const time = r.timeHm ?? '--:--';
-          const city = r.siteCity ?? '—';
-          const status = mgrFieldStatusHe(r.fieldStatus);
-          return `${i + 1}. ${customer} | ${time} | ${city} | ${status}`;
+          const rowData: InspectionListRowData = {
+            taskTitle: r.taskTitle,
+            typeLabelHe: r.typeLabelHe,
+            timeHm: r.timeHm,
+            siteCity: r.siteCity,
+            fieldStatus: r.fieldStatus,
+            dateStr: localDateW,
+          };
+          return `${i + 1}. ${formatInspectionListRow(rowData)}`;
         });
         const summary = `סיכום: ${detail.finished}/${detail.total} בוצעו, חריגים פתוחים: ${detail.openExceptions}`;
         await clearContext(user.phone);
-        await sendChunked(user.phone, `${matched.workerName} — היום (${fmtDDMM(localDateW)}):\n${lines.join('\n')}\n\n${summary}`);
+        await sendChunked(user.phone, `${matched.workerName} — היום (${fmtDDMM(localDateW)}):\n\n${lines.join('\n\n')}\n\n${summary}`);
       } else {
         // All workers table view.
         const allWorkers = await getAllWorkersDayOverview(localDateW);
@@ -950,17 +981,16 @@ async function executeIntent(
               `SELECT
                  tf.id AS "taskFieldId", tf."taskId" AS "taskId",
                  u.name AS "workerName",
-                 -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+                 -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
                  COALESCE(
                    c.name,
                    l."fullName",
                    NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
                    l.company,
                    p.client,
-                   il."fromName",
-                   NULLIF(TRIM(t.title), ''),
-                   NULLIF(TRIM(t.description), '')
+                   il."fromName"
                  ) AS "customerName",
+                 t.title AS "taskTitle",
                  to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI') AS "timeHm",
                  tf."siteCity" AS "siteCity", tf."fieldStatus" AS "fieldStatus",
                  tf.family AS family, it."labelHe" AS "typeLabelHe"
@@ -990,20 +1020,19 @@ async function executeIntent(
         }
 
         const srLines = searchResults.map((r, i) => {
-          const worker = r.workerName ?? '—';
-          const customer = r.customerName ?? '—';
-          const time = r.timeHm ?? '--:--';
-          const city = r.siteCity ?? '—';
-          const status = mgrFieldStatusHe(r.fieldStatus);
-          // When searching by worker, customer is the informative identifier; skip redundant worker column.
-          // When searching by customer, worker + time + city + status is the useful view; skip customer.
-          // When searching by product, both worker and customer are informative identifiers.
-          if (searchBy === 'worker') {
-            return `${i + 1}. ${customer} | ${time} | ${city} | ${status}`;
-          } else if (searchBy === 'customer') {
-            return `${i + 1}. ${worker} | ${time} | ${city} | ${status}`;
-          }
-          return `${i + 1}. ${worker} | ${customer} | ${time} | ${city} | ${status}`;
+          const rowData: InspectionListRowData = {
+            taskTitle: r.taskTitle,
+            typeLabelHe: r.typeLabelHe,
+            timeHm: r.timeHm,
+            siteCity: r.siteCity,
+            fieldStatus: r.fieldStatus,
+            workerName: r.workerName,
+          };
+          // For product search, show worker name above the row.
+          // For worker search, omit worker (already the search context).
+          const showWorker = searchBy === 'product';
+          const workerPrefix = showWorker && r.workerName ? `${r.workerName}\n   ` : '';
+          return `${i + 1}. ${workerPrefix}${formatInspectionListRow(rowData)}`;
         });
 
         await setContext(user.phone, {
@@ -1013,7 +1042,7 @@ async function executeIntent(
           mgrSearchKind: searchBy,
         });
         await sendChunked(user.phone,
-          `תוצאות חיפוש "${query}" (${searchResults.length}):\n${srLines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
+          `תוצאות חיפוש '${query}' — ${searchResults.length} בדיקות:\n\n${srLines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
         );
       }
       return;
@@ -2366,9 +2395,13 @@ async function startAssignLeadFlow(user: ResolvedUser): Promise<void> {
   }
 
   const lines = leads.map((l, i) => {
-    const name = l.fromName ?? '—';
-    const subj = l.subject ?? '(ללא נושא)';
-    return `${i + 1}. ${name} — ${subj}`;
+    const rowData: LeadListRowData = {
+      fromName: l.fromName ?? null,
+      fromEmail: l.fromEmail ?? null,
+      subject: l.subject ?? null,
+      receivedAt: l.receivedAt ?? null,
+    };
+    return `${i + 1}. ${formatLeadListRow(rowData)}`;
   });
 
   await setContext(user.phone, {
@@ -2378,7 +2411,7 @@ async function startAssignLeadFlow(user: ResolvedUser): Promise<void> {
   });
   await sendTextMessage({
     to: user.phone,
-    text: `לידים ללא שיוך (${leads.length}):\n${lines.join('\n')}\n\nהשב במספר כדי לבחור ליד.`,
+    text: `לידים ללא שיוך (${leads.length}):\n\n${lines.join('\n\n')}\n\nהשב במספר כדי לבחור ליד.`,
   });
 }
 
@@ -3428,21 +3461,9 @@ async function handleScheduleConfirmReply(
 // All queries are READ-ONLY via managerViews.ts. CRM writes go through the
 // existing services (taskFieldCorrections, incomingLeads.assignLead).
 
-const FIELD_STATUS_HE_MGR: Record<string, string> = {
-  ASSIGNED: 'משובצת',
-  CONFIRMED: 'אושרה',
-  EN_ROUTE: 'בדרך',
-  ARRIVED: 'באתר',
-  WAITING_FOR_INFO: 'ממתין למידע',
-  HAS_PROBLEM: 'עם בעיה',
-  NEEDS_MORE_INFO: 'צריך פרטים',
-  FINISHED_FIELD: 'הסתיים בשטח',
-  DECLINED: 'דחה',
-  CANCELED: 'בוטל',
-};
-
+/** Delegate to the shared formatter helper (Bug 2 fix). */
 function mgrFieldStatusHe(status: string): string {
-  return FIELD_STATUS_HE_MGR[status] ?? status;
+  return inspFieldStatusHe(status);
 }
 
 /** Format DD/MM from a YYYY-MM-DD string (no TZ shift). */
@@ -3480,12 +3501,17 @@ async function showMgrTodayInspections(user: ResolvedUser): Promise<void> {
   }
 
   const lines = rows.map((r, i) => {
-    const worker = r.workerName ?? 'לא ידוע';
-    const customer = r.customerName ?? 'לקוח לא ידוע';
-    const time = r.timeHm ?? '--:--';
-    const city = r.siteCity ?? '—';
-    const status = mgrFieldStatusHe(r.fieldStatus);
-    return `${i + 1}. ${worker} | ${customer} | ${time} | ${city} | ${status}`;
+    const rowData: InspectionListRowData = {
+      taskTitle: r.taskTitle,
+      typeLabelHe: r.typeLabelHe,
+      timeHm: r.timeHm,
+      siteCity: r.siteCity,
+      fieldStatus: r.fieldStatus,
+      workerName: r.workerName,
+      dateStr: localDate,
+    };
+    const worker = r.workerName ? `${r.workerName}\n   ` : '';
+    return `${i + 1}. ${worker}${formatInspectionListRow(rowData)}`;
   });
 
   await setContext(user.phone, {
@@ -3494,7 +3520,7 @@ async function showMgrTodayInspections(user: ResolvedUser): Promise<void> {
     mgrTaskIds: rows.map((r) => r.taskId),
   });
   await sendChunked(user.phone,
-    `בדיקות שטח היום — ${fmtDDMM(localDate)} (${rows.length}):\n${lines.join('\n')}\n\nבחר מספר לפרטים ופעולות, או "חזרה" לתפריט.`,
+    `בדיקות שטח היום — ${fmtDDMM(localDate)} (${rows.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים ופעולות, או "חזרה" לתפריט.`,
   );
 }
 
@@ -3598,12 +3624,11 @@ async function handleMgrExceptionsSubReply(user: ResolvedUser, trimmed: string):
   }
 
   const lines = rows.map((r, i) => {
-    const worker = r.workerName ?? '—';
-    const customer = r.customerName ?? '—';
-    const city = r.siteCity ?? '—';
+    const shortLabel = hebrewShortLabel(r.taskTitle, r.workerName ?? '—');
+    const city   = r.siteCity ?? '—';
     const status = mgrFieldStatusHe(r.fieldStatus);
-    const desc = r.description ? ` — ${r.description}` : '';
-    return `${i + 1}. ${worker} | ${customer} | ${city} | ${status}${desc}`;
+    const desc   = r.description ? `\n   ${r.description}` : '';
+    return `${i + 1}. ${shortLabel}\n   ${city}  ·  ${status}${desc}`;
   });
 
   await setContext(user.phone, {
@@ -3612,7 +3637,7 @@ async function handleMgrExceptionsSubReply(user: ResolvedUser, trimmed: string):
     mgrTaskIds: rows.map((r) => r.taskId),
   });
   await sendChunked(user.phone,
-    `${label} (${rows.length}):\n${lines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
+    `${label} (${rows.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
   );
 }
 
@@ -3684,16 +3709,20 @@ async function handleMgrLeadsSubReply(user: ResolvedUser, trimmed: string): Prom
       return;
     }
     const lines = leads.map((l, i) => {
-      const name = l.fromName ?? '—';
-      const subj = l.subject ?? '(ללא נושא)';
-      return `${i + 1}. ${name} — ${subj}`;
+      const rowData: LeadListRowData = {
+        fromName: l.fromName ?? null,
+        fromEmail: l.fromEmail ?? null,
+        subject: l.subject ?? null,
+        receivedAt: l.receivedAt ?? null,
+      };
+      return `${i + 1}. ${formatLeadListRow(rowData)}`;
     });
     await setContext(user.phone, {
       awaiting: 'mgr_leads_pick_row',
       mgrLeadIds: leads.map((l) => l.id),
       mgrLeadNames: leads.map((l) => l.fromName ?? '—'),
     });
-    await sendChunked(user.phone, `לידים לא משויכים (${leads.length}):\n${lines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
+    await sendChunked(user.phone, `לידים לא משויכים (${leads.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
     return;
   }
 
@@ -3707,16 +3736,20 @@ async function handleMgrLeadsSubReply(user: ResolvedUser, trimmed: string): Prom
       return;
     }
     const lines = leads.map((l, i) => {
-      const name = l.fromName ?? '—';
-      const subj = l.subject ?? '(ללא נושא)';
-      return `${i + 1}. ${name} — ${subj}`;
+      const rowData: LeadListRowData = {
+        fromName: l.fromName ?? null,
+        fromEmail: l.fromEmail ?? null,
+        subject: l.subject ?? null,
+        receivedAt: l.receivedAt ?? null,
+      };
+      return `${i + 1}. ${formatLeadListRow(rowData)}`;
     });
     await setContext(user.phone, {
       awaiting: 'mgr_leads_pick_row',
       mgrLeadIds: leads.map((l) => l.id),
       mgrLeadNames: leads.map((l) => l.fromName ?? '—'),
     });
-    await sendChunked(user.phone, `לידים שעברו שעה ללא שיוך (${leads.length}):\n${lines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
+    await sendChunked(user.phone, `לידים שעברו שעה ללא שיוך (${leads.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
     return;
   }
 
@@ -3844,17 +3877,21 @@ async function handleMgrWorkersPickWorkerReply(
   }
 
   const lines = detail.inspections.map((r, i) => {
-    const customer = r.customerName ?? 'לקוח לא ידוע';
-    const time = r.timeHm ?? '--:--';
-    const city = r.siteCity ?? '—';
-    const status = mgrFieldStatusHe(r.fieldStatus);
-    return `${i + 1}. ${customer} | ${time} | ${city} | ${status}`;
+    const rowData: InspectionListRowData = {
+      taskTitle: r.taskTitle,
+      typeLabelHe: r.typeLabelHe,
+      timeHm: r.timeHm,
+      siteCity: r.siteCity,
+      fieldStatus: r.fieldStatus,
+      dateStr: localDate,
+    };
+    return `${i + 1}. ${formatInspectionListRow(rowData)}`;
   });
   const summary = `סיכום: ${detail.finished}/${detail.total} בוצעו, חריגים פתוחים: ${detail.openExceptions}`;
 
   await clearContext(user.phone);
   await sendChunked(user.phone,
-    `${workerName} — היום (${fmtDDMM(localDate)}):\n${lines.join('\n')}\n\n${summary}`,
+    `${workerName} — היום (${fmtDDMM(localDate)}):\n\n${lines.join('\n\n')}\n\n${summary}`,
   );
 }
 
@@ -3991,20 +4028,19 @@ async function handleMgrSearchAwaitQueryReply(
   }
 
   const lines = results.map((r, i) => {
-    const worker = r.workerName ?? '—';
-    const customer = r.customerName ?? '—';
-    const time = r.timeHm ?? '--:--';
-    const city = r.siteCity ?? '—';
-    const status = mgrFieldStatusHe(r.fieldStatus);
-    // When searching by worker, customer is the informative identifier; skip redundant worker column.
-    // When searching by customer, worker + time + city + status is the useful view; skip customer.
-    // When searching by product, both worker and customer are informative identifiers.
-    if (kind === 'worker') {
-      return `${i + 1}. ${customer} | ${time} | ${city} | ${status}`;
-    } else if (kind === 'customer') {
-      return `${i + 1}. ${worker} | ${time} | ${city} | ${status}`;
-    }
-    return `${i + 1}. ${worker} | ${customer} | ${time} | ${city} | ${status}`;
+    const rowData: InspectionListRowData = {
+      taskTitle: r.taskTitle,
+      typeLabelHe: r.typeLabelHe,
+      timeHm: r.timeHm,
+      siteCity: r.siteCity,
+      fieldStatus: r.fieldStatus,
+      workerName: r.workerName,
+    };
+    // For product search, show worker name above the row.
+    // For worker search, omit worker (already the search context).
+    const showWorker = kind === 'product';
+    const workerPrefix = showWorker && r.workerName ? `${r.workerName}\n   ` : '';
+    return `${i + 1}. ${workerPrefix}${formatInspectionListRow(rowData)}`;
   });
 
   await setContext(user.phone, {
@@ -4014,7 +4050,7 @@ async function handleMgrSearchAwaitQueryReply(
     mgrSearchKind: kind,
   });
   await sendChunked(user.phone,
-    `תוצאות חיפוש "${trimmed}" (${results.length}):\n${lines.join('\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
+    `תוצאות חיפוש '${trimmed}' — ${results.length} בדיקות:\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`,
   );
 }
 
@@ -4064,26 +4100,30 @@ async function showMgrTaskFieldDetail(
     return;
   }
 
-  const lines = [
-    `בדיקה: ${detail.typeLabelHe}`,
-    `לקוח: ${detail.customerName ?? '—'}`,
-    `עובד: ${detail.workerName ?? '—'}`,
-    `כתובת: ${detail.siteAddress ?? '—'}${detail.siteCity ? `, ${detail.siteCity}` : ''}`,
-    `איש קשר: ${detail.fieldContactName ?? '—'} ${detail.fieldContactPhone ?? ''}`,
-    `סטטוס: ${mgrFieldStatusHe(detail.fieldStatus)}`,
-    ...(detail.specialInstructions ? [`הערות: ${detail.specialInstructions}`] : []),
-    ...(detail.problemNote ? [`בעיה: ${detail.problemNote}`] : []),
-    ...(detail.missingReportInfoNote ? [`חסר: ${detail.missingReportInfoNote}`] : []),
-    '',
-    MGR_TASK_INLINE_ACTIONS,
-  ];
+  const detailData: InspectionDetailData = {
+    taskTitle: detail.taskTitle,
+    typeLabelHe: detail.typeLabelHe,
+    workerName: detail.workerName,
+    customerName: detail.customerName,
+    siteAddress: detail.siteAddress,
+    siteCity: detail.siteCity,
+    fieldContactName: detail.fieldContactName,
+    fieldContactPhone: detail.fieldContactPhone,
+    fieldStatus: detail.fieldStatus,
+    scheduledStartAt: detail.scheduledStartAt,
+    specialInstructions: detail.specialInstructions,
+    fieldNotes: detail.fieldNotes ?? null,
+    problemNote: detail.problemNote ?? (detail.missingReportInfoNote ? `חסר: ${detail.missingReportInfoNote}` : null),
+  };
+
+  const text = formatInspectionDetail(detailData, `מה תרצה לעשות?\n${MGR_TASK_INLINE_ACTIONS}`);
 
   await setContext(user.phone, {
     awaiting: returnState,
     mgrSelectedTaskFieldId: taskFieldId,
     mgrSelectedTaskId: taskId,
   });
-  await sendTextMessage({ to: user.phone, text: lines.join('\n') });
+  await sendTextMessage({ to: user.phone, text });
 }
 
 /** Handles inline action picks from detail views (items 2, 3, 6). */

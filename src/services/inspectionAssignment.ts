@@ -20,6 +20,7 @@
 import { pool } from '../db/connection';
 import { sendButtonMessage } from '../whatsapp/sender';
 import { moduleLogger } from '../utils/logger';
+import { LABELS, PLACEHOLDERS } from '../ai/inspectionFormatters';
 
 const log = moduleLogger('inspectionAssignment');
 
@@ -42,6 +43,7 @@ export interface UnnotifiedTaskFieldRow {
   workerPhone: string | null;
   workerName: string | null;
   customerName: string | null;
+  taskTitle?: string | null;  // optional: present when a display label hint is needed
   siteAddress: string | null;
   siteCity: string | null;
   fieldContactName: string | null;
@@ -67,17 +69,16 @@ export async function findUnnotifiedTaskFields(limit = 50): Promise<UnnotifiedTa
        u.id                        AS "workerId",
        u.phone                     AS "workerPhone",
        u.name                      AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                           AS "customerName",
+       t.title                     AS "taskTitle",
        tf."siteAddress"            AS "siteAddress",
        tf."siteCity"               AS "siteCity",
        tf."fieldContactName"       AS "fieldContactName",
@@ -124,11 +125,22 @@ export async function getEquipmentLabels(family: string): Promise<string[]> {
 
 // ── §6 card body ─────────────────────────────────────────────────────────────
 
+// Alignment helper — right-pad "label:" to 14 chars
+const pad = (lbl: string) => `${lbl}:`.padEnd(14);
+
+// Null-safe fallback helper for the assignment card
+const orPlaceholder = (v: string | null | undefined, p: string): string =>
+  (v != null && v.trim().length > 0) ? v : p;
+
 /**
- * Format the SPEC_FIELD_V2 §6 inspection card body. Missing optional fields
- * are simply omitted (no placeholder lines), keeping the message clean for
- * variable-data field visits. `scheduledStartAt` is rendered in Asia/Jerusalem
- * using two lines like the spec ("תאריך: DD.MM.YYYY  שעה: HH:mm").
+ * Format the SPEC_FIELD_V2 §6 inspection card body.
+ *
+ * Customer and address always show with descriptive labels (if null, show
+ * explicit Hebrew placeholder so the worker isn't confused by a missing line).
+ * Contact and navigation are optional — omitted when null (worker has no
+ * expectation that those lines exist on every card).
+ *
+ * `scheduledStartAt` is rendered as two separate labeled lines per §6 spec.
  */
 export function formatInspectionCard(
   row: UnnotifiedTaskFieldRow,
@@ -137,31 +149,32 @@ export function formatInspectionCard(
   const lines: string[] = [
     'שובצה לך בדיקה חדשה.',
     '',
-    `סוג: ${row.typeLabelHe}`,
+    `${pad(LABELS.TYPE)}${row.typeLabelHe}`,
+    `${pad(LABELS.CUSTOMER)}${orPlaceholder(row.customerName, PLACEHOLDERS.CUSTOMER)}`,
   ];
-  if (row.customerName) lines.push(`לקוח: ${row.customerName}`);
 
   const address =
     row.siteAddress && row.siteCity ? `${row.siteAddress}, ${row.siteCity}`
     : row.siteAddress ? row.siteAddress
     : row.siteCity ? row.siteCity
     : null;
-  if (address) lines.push(`כתובת: ${address}`);
+  lines.push(`${pad(LABELS.ADDRESS)}${address ?? PLACEHOLDERS.ADDRESS}`);
 
   const { dateHe, timeHe } = formatJerusalemDateTime(row.scheduledStartAt);
-  lines.push(`תאריך: ${dateHe}  שעה: ${timeHe}`);
+  lines.push(`${pad(LABELS.DATE)}${dateHe}`);
+  lines.push(`${pad(LABELS.TIME)}${timeHe}`);
 
   if (row.fieldContactName || row.fieldContactPhone) {
     const contact = [row.fieldContactName, row.fieldContactPhone].filter(Boolean).join(', ');
-    lines.push(`איש קשר: ${contact}`);
+    lines.push(`${pad(LABELS.CONTACT)}${contact}`);
   }
 
   if (equipmentLabels.length > 0) {
-    lines.push('', 'ציוד נדרש:');
+    lines.push('', `${LABELS.EQUIPMENT}:`);
     for (const l of equipmentLabels) lines.push(`- ${l}`);
   }
 
-  if (row.navigationUrl) lines.push('', `ניווט: ${row.navigationUrl}`);
+  if (row.navigationUrl) lines.push('', `${LABELS.NAV}: ${row.navigationUrl}`);
   if (row.specialInstructions) lines.push('', row.specialInstructions);
 
   lines.push(

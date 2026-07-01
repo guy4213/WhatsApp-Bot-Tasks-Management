@@ -127,6 +127,7 @@ export interface TodayFieldInspectionRow {
   taskId: string;
   workerName: string | null;
   customerName: string | null;
+  taskTitle: string | null;      // verbatim Task.title — use for display hint, not customer identity
   timeHm: string | null;        // HH:MM in Jerusalem time
   siteCity: string | null;
   fieldStatus: string;
@@ -146,6 +147,7 @@ export async function getTodayFieldInspections(
     taskId: string;
     workerName: string | null;
     customerName: string | null;
+    taskTitle: string | null;
     timeHm: string | null;
     siteCity: string | null;
     fieldStatus: string;
@@ -156,17 +158,16 @@ export async function getTodayFieldInspections(
        tf.id                                                           AS "taskFieldId",
        tf."taskId"                                                     AS "taskId",
        u.name                                                          AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                                                               AS "customerName",
+       t.title                                                         AS "taskTitle",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                       AS "timeHm",
        tf."siteCity"                                                   AS "siteCity",
@@ -205,6 +206,7 @@ export interface FieldExceptionRow {
   taskId: string;
   workerName: string | null;
   customerName: string | null;
+  taskTitle: string | null;
   siteCity: string | null;
   fieldStatus: string;
   description: string | null; // short one-line description for the list
@@ -253,6 +255,7 @@ export async function getFieldExceptionRows(
     taskId: string;
     workerName: string | null;
     customerName: string | null;
+    taskTitle: string | null;
     siteCity: string | null;
     fieldStatus: string;
     description: string | null;
@@ -261,17 +264,16 @@ export async function getFieldExceptionRows(
        tf.id              AS "taskFieldId",
        tf."taskId"        AS "taskId",
        u.name             AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                  AS "customerName",
+       t.title            AS "taskTitle",
        tf."siteCity"      AS "siteCity",
        tf."fieldStatus"   AS "fieldStatus",
        CASE
@@ -369,6 +371,7 @@ export async function getWorkerDayDetail(
     taskId: string;
     workerName: string | null;
     customerName: string | null;
+    taskTitle: string | null;
     timeHm: string | null;
     siteCity: string | null;
     fieldStatus: string;
@@ -381,17 +384,16 @@ export async function getWorkerDayDetail(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                                                                 AS "customerName",
+       t.title                                                           AS "taskTitle",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
        tf."siteCity"                                                     AS "siteCity",
@@ -420,6 +422,7 @@ export async function getWorkerDayDetail(
     taskId: r.taskId,
     workerName: r.workerName,
     customerName: r.customerName,
+    taskTitle: r.taskTitle,
     timeHm: r.timeHm,
     siteCity: r.siteCity,
     fieldStatus: r.fieldStatus,
@@ -450,6 +453,7 @@ export async function searchTasksByWorkerName(
     taskId: string;
     workerName: string | null;
     customerName: string | null;
+    taskTitle: string | null;
     timeHm: string | null;
     siteCity: string | null;
     fieldStatus: string;
@@ -460,17 +464,16 @@ export async function searchTasksByWorkerName(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                                                                 AS "customerName",
+       t.title                                                           AS "taskTitle",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
        tf."siteCity"                                                     AS "siteCity",
@@ -507,6 +510,7 @@ export async function searchTasksByProductCode(
     taskId: string;
     workerName: string | null;
     customerName: string | null;
+    taskTitle: string | null;
     timeHm: string | null;
     siteCity: string | null;
     fieldStatus: string;
@@ -517,17 +521,16 @@ export async function searchTasksByProductCode(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                                                                 AS "customerName",
+       t.title                                                           AS "taskTitle",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
        tf."siteCity"                                                     AS "siteCity",
@@ -559,6 +562,7 @@ export interface TaskFieldDetail {
   taskId: string;
   workerName: string | null;
   customerName: string | null;
+  taskTitle: string | null;      // verbatim Task.title — use for display hint, not customer identity
   siteAddress: string | null;
   siteCity: string | null;
   fieldContactName: string | null;
@@ -568,6 +572,7 @@ export interface TaskFieldDetail {
   family: string;
   typeLabelHe: string;
   specialInstructions: string | null;
+  fieldNotes: string | null;
   problemNote: string | null;
   problemType: string | null;
   missingReportInfoNote: string | null;
@@ -590,17 +595,16 @@ export async function getTaskFieldDetail(
        tf.id                     AS "taskFieldId",
        tf."taskId"               AS "taskId",
        u.name                    AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName",
-         NULLIF(TRIM(t.title), ''),
-         NULLIF(TRIM(t.description), '')
+         il."fromName"
        )                         AS "customerName",
+       t.title                   AS "taskTitle",
        tf."siteAddress"          AS "siteAddress",
        tf."siteCity"             AS "siteCity",
        tf."fieldContactName"     AS "fieldContactName",
@@ -610,6 +614,7 @@ export async function getTaskFieldDetail(
        tf.family                 AS family,
        it."labelHe"              AS "typeLabelHe",
        tf."specialInstructions"  AS "specialInstructions",
+       tf."fieldNotes"           AS "fieldNotes",
        tf."problemNote"          AS "problemNote",
        tf."problemType"          AS "problemType",
        tf."missingReportInfoNote" AS "missingReportInfoNote",

@@ -30,9 +30,9 @@ describe('formatSashaLeadsMorning', () => {
 
     expect(text).toContain('בוקר טוב שי');
     expect(text).toContain('סיכום לידים');
-    expect(text).toContain('1. דוד לוי (david@example.com)');
+    expect(text).toContain('שולח: דוד לוי (david@example.com)');
     expect(text).toContain('נושא: בדיקת קרינה בנתניה');
-    expect(text).toContain('הודעה: שלום, אנחנו גרים...');
+    expect(text).toContain('תוכן: שלום, אנחנו גרים...');
     expect(text).toContain('הצעת שיבוץ: דני — מתמחה בקרינה');
     expect(text).toContain('לשיבוץ ב-CRM');
     expect(params).toEqual(['שי', '1']);
@@ -62,9 +62,9 @@ describe('formatSashaLeadsMorning', () => {
   it('omits null optional fields (email, subject, body)', () => {
     const leads = [makeLead({ fromEmail: null, subject: null, body: null })];
     const { text } = formatSashaLeadsMorning(leads, [], { name: 'שי' });
-    expect(text).toContain('1. דוד לוי');
+    expect(text).toContain('שולח: דוד לוי');
     expect(text).not.toMatch(/נושא:/);
-    expect(text).not.toMatch(/הודעה:/);
+    expect(text).not.toMatch(/תוכן:/);
     expect(text).not.toMatch(/undefined/);
   });
 
@@ -76,14 +76,14 @@ describe('formatSashaLeadsMorning', () => {
     expect(text.indexOf('...')).toBeLessThan(text.length);
   });
 
-  it('handles multiple leads with separate numbering', () => {
+  it('handles multiple leads with separate numbering and "שולח:" label', () => {
     const leads = [
       makeLead({ id: 'l1', fromName: 'ראשון' }),
       makeLead({ id: 'l2', fromName: 'שני' }),
     ];
     const { text } = formatSashaLeadsMorning(leads, [], { name: 'שי' });
-    expect(text).toContain('1. ראשון');
-    expect(text).toContain('2. שני');
+    expect(text).toContain('1. שולח: ראשון');
+    expect(text).toContain('2. שולח: שני');
   });
 
   it('returns empty buttons array (no CTA)', () => {
