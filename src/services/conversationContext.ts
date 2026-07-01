@@ -62,7 +62,22 @@ export type AwaitingKind =
   | 'schedule_pick_from_search'    // waiting for customer pick after search results
   | 'schedule_await_time'          // waiting for date/time (Hebrew → ISO 8601)
   | 'schedule_await_duration'      // waiting for duration in minutes or "אישור" (default 60)
-  | 'schedule_confirm';            // waiting for 1 (confirm) / 2 (cancel)
+  | 'schedule_confirm'             // waiting for 1 (confirm) / 2 (cancel)
+  // Manager menu: unified 6-item manager menu states.
+  | 'mgr_menu_root'                // waiting for 1-6 pick from top-level manager menu
+  | 'mgr_exceptions_sub'           // waiting for 1-6 pick from exceptions sub-menu
+  | 'mgr_leads_sub'                // waiting for 1-4 pick from leads sub-menu
+  | 'mgr_workers_sub'              // waiting for 1-3 pick from workers sub-menu
+  | 'mgr_search_sub'               // waiting for 1-4 pick from search sub-menu
+  | 'mgr_today_pick_task'          // waiting for user to pick from today's inspections list
+  | 'mgr_today_action'             // waiting for inline action (correct site / type / reassign / back)
+  | 'mgr_exceptions_pick_row'      // waiting for user to pick from exceptions list
+  | 'mgr_exceptions_action'        // waiting for inline action after picking an exception row
+  | 'mgr_leads_pick_row'           // waiting for user to pick from unassigned/escalated leads list
+  | 'mgr_workers_pick_worker'      // waiting for user to pick a worker from the list
+  | 'mgr_search_await_query'       // waiting for free-text search query
+  | 'mgr_search_pick_task'         // waiting for user to pick from search results
+  | 'mgr_search_action';           // waiting for inline action after picking a search result
 
 export interface ConversationState {
   awaiting: AwaitingKind;
@@ -129,6 +144,16 @@ export interface ConversationState {
   scheduleStartAt?: string;           // ISO 8601 date+time (user-supplied)
   scheduleDurationMinutes?: number;   // default 60
   scheduleSpecialInstructions?: string | null;
+  // Manager menu: payload fields for multi-step flows.
+  mgrTaskFieldIds?: string[];         // numbered list of TaskField IDs shown to the manager
+  mgrTaskIds?: string[];              // corresponding Task IDs (parallel array)
+  mgrSelectedTaskFieldId?: string;    // the TaskField the manager picked from the list
+  mgrSelectedTaskId?: string;         // the corresponding Task ID
+  mgrWorkerIds?: string[];            // numbered list of worker IDs for picker
+  mgrWorkerNames?: string[];          // worker names (parallel array)
+  mgrLeadIds?: string[];              // numbered list of lead IDs for picker
+  mgrLeadNames?: string[];            // lead display names (parallel array)
+  mgrSearchKind?: 'customer' | 'worker' | 'product'; // which search type is active
 }
 
 export async function getContext(phone: string): Promise<ConversationState | null> {

@@ -496,6 +496,25 @@ These tasks remove or rewrite Part 2 capabilities marked "dropped" or "to-rewrit
 
 ---
 
+## 4.6 Manager unified menu (2026-07-01)
+
+### D5-T7 — Unified 6-item manager menu
+- **Status:** DONE (local, uncommitted). Replaced the retired legacy `managerMenu()` with a 6-item top-level menu ("תמונת מצב ניהולית / בדיקות שטח להיום / חריגים ודיווחים / לידים ממתינים לטיפול / עובדים וסיכומי יום / חיפוש משימה / בדיקה"). Menu opens for `role IN ('ADMIN','MANAGER')` OR `isExceptionsViewer(name)` OR `isLeadsViewer(name)` — regular field workers keep the §5 spec 7-item menu unchanged.
+- **Sub-menus + flows wired:**
+  - Item 1 → one-shot management snapshot (today counts + open exceptions + leads counts)
+  - Item 2 → org-wide today's TaskField list → pick a row → inline actions (correct site D2-T12 / correct type D2-T14 / reassign D2-T13, all prefilled with taskFieldId — skip pick-task step)
+  - Item 3 → 5 filters (open / not confirmed / has problem / waiting for info / didn't close day) → row list → detail
+  - Item 4 → 3 sub-options (unassigned list / escalated list / assign lead — triggers D3-T6 with leads-viewer auth gate)
+  - Item 5 → 2 sub-options (all-workers overview / pick a worker for detail)
+  - Item 6 → 3 search axes (customer / worker / product code) → free-text query → results → detail + inline actions
+- **New service file:** `src/services/managerViews.ts` — 8 read-only query helpers. All parameterized. Timezone-aware via `AT TIME ZONE 'Asia/Jerusalem'`.
+- **13 new AwaitingKind values** for the multi-step navigation (mgr_menu_root, mgr_exceptions_sub, etc.). See `conversationContext.ts`.
+- **Tests:** `managerViews.test.ts` (30 cases), `managerMenu.test.ts` (20 cases), `routerManagerMenu.test.ts` (33 cases). +83 tests total, all pass. tsc clean. Full suite: 525/532 (7 pre-existing skips).
+- **Free-text triggers preserved:** power users can still type "לשייך ליד", "לתזמן ביקור", "הכתובת שגויה", "סוג בדיקה שגוי", "לשייך משימה מחדש" and skip the menu entirely.
+- **Deviations:** (1) customer search in item 6 uses inline pool.query rather than a separate helper (identical pattern to existing `findCustomersByName`); (2) leads pick-row shows minimal detail (name+id) rather than full body — full detail would require a new `getIncomingLeadById` helper.
+
+---
+
 ## 4.5 New scope (2026-07-01 product update — SPEC Addendum)
 
 Two capabilities were promoted from OUT-OF-SCOPE to IN-SCOPE via the SPEC
@@ -592,3 +611,4 @@ Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — 
 - **M11: WhatsApp-based `TaskField` scheduling for existing `Task`s.** `D2-T11`. Added via 2026-07-01 SPEC Addendum. Bot now writes `TaskField` (not just reads); existing D5-T6 poller fires the §6 card automatically. See `HANDOFF.md` for the full design.
 - **M12: Sasha lead-assignment from WhatsApp.** `D3-T6`. Added via 2026-07-01 SPEC Addendum. Bot writes `IncomingLead.ownerId` (first CRM-table write from the bot); existing D3-T3 poller fires the worker alert automatically. Lead CLOSURE stays in the CRM.
 - **M13: WhatsApp-based corrections.** `D2-T12` (site metadata override on TaskField — no CRM write), `D2-T13` (reassign worker — writes `Task.ownerId` + resets `TaskField.workerNotifiedAt`), `D2-T14` (inspection type — writes BOTH `TaskField.inspectionTypeId/family` AND `Task.productName`, with worker confirmation + office notification + audit). Added via 2026-07-01 SPEC Addendum. Editing scheduling / duration / instructions and all other CRM Task fields still stay in the CRM.
+- **M14: Unified 6-item manager menu.** `D5-T7`. Added 2026-07-01. Everyone matching `role IN ('ADMIN','MANAGER')` OR name-based special sets sees a top-level 6-item navigation that wires into all existing flows (snapshot, today's inspections, exceptions, leads, workers, search). Regular field workers keep the §5 spec menu.

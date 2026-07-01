@@ -10,6 +10,7 @@
  * behavior and owns all messaging / context.
  */
 import type { FieldProblemType, ResolvedUser, TaskFilter } from '../types';
+import { isExceptionsViewer, isLeadsViewer } from '../services/specialUsers';
 
 /**
  * Opens the menu when the WHOLE message is one of: menu / תפריט / עזרה / היי / שלום
@@ -32,7 +33,14 @@ export type MenuAction =
   | { kind: 'report_problem' }
   | { kind: 'missing_equipment' }
   | { kind: 'missing_report_info' }
-  | { kind: 'day_summary' };
+  | { kind: 'day_summary' }
+  // Unified 6-item manager menu actions.
+  | { kind: 'mgr_snapshot' }
+  | { kind: 'mgr_today_inspections' }
+  | { kind: 'mgr_exceptions_sub' }
+  | { kind: 'mgr_leads_sub' }
+  | { kind: 'mgr_workers_sub' }
+  | { kind: 'mgr_search_sub' };
 
 export interface MenuRoute {
   n: number;       // displayed number (1-based)
@@ -66,32 +74,55 @@ function employeeMenu(): MenuRoute[] {
   ];
 }
 
+/**
+ * Unified 6-item manager menu (new implementation).
+ * Shown to: ADMIN, MANAGER, exceptions viewers (יורם etc.), leads viewers (סשה etc.).
+ */
 function managerMenu(): MenuRoute[] {
   return [
-    { n: 1, label: 'משימות לפי עובד',                     action: { kind: 'guide', guide: GUIDE_TASKS_BY_EMPLOYEE } },
-    { n: 2, label: 'משימות באיחור',                       action: { kind: 'list_tasks', filter: 'overdue',       scope: 'all', dateField: 'dueDate' } },
-    { n: 3, label: 'משימות להיום',                        action: { kind: 'list_tasks', filter: 'today_overdue', scope: 'all', dateField: 'dueDate' } },
-    { n: 4, label: 'יצירת משימה לעובד',                   action: { kind: 'guide', guide: GUIDE_CREATE_FOR_EMPLOYEE } },
-    { n: 5, label: DIGEST_SETTINGS_LABEL,                 action: { kind: 'digest_settings' } },
-    { n: 6, label: FREE_TEXT_LABEL,                       action: { kind: 'free_text' } },
+    { n: 1, label: 'תמונת מצב ניהולית',           action: { kind: 'mgr_snapshot' } },
+    { n: 2, label: 'בדיקות שטח להיום',             action: { kind: 'mgr_today_inspections' } },
+    { n: 3, label: 'חריגים ודיווחים',              action: { kind: 'mgr_exceptions_sub' } },
+    { n: 4, label: 'לידים ממתינים לטיפול',          action: { kind: 'mgr_leads_sub' } },
+    { n: 5, label: 'עובדים וסיכומי יום',            action: { kind: 'mgr_workers_sub' } },
+    { n: 6, label: 'חיפוש משימה / בדיקה',          action: { kind: 'mgr_search_sub' } },
   ];
 }
 
 /**
- * The numbered routes for a user, by role. Per K1: only `ADMIN` sees the (legacy
- * CRM) manager menu; everyone else — including MANAGER — sees the v2 inspector
- * menu. This is the deliberate v2 change from V1's isElevated split.
+ * Returns true when the user should see the unified manager menu.
+ * Criteria (OR):
+ *  - role === 'ADMIN' OR role === 'MANAGER'
+ *  - isExceptionsViewer(user.name)
+ *  - isLeadsViewer(user.name)
+ */
+export function isManagerMenuUser(user: ResolvedUser): boolean {
+  return (
+    user.role === 'ADMIN' ||
+    user.role === 'MANAGER' ||
+    isExceptionsViewer(user.name) ||
+    isLeadsViewer(user.name)
+  );
+}
+
+/**
+ * The numbered routes for a user, by role + special-user sets.
+ * Manager-menu users (ADMIN, MANAGER, exceptions viewers, leads viewers) get
+ * the 6-item unified manager menu. All others get the v2 inspector menu (§5).
  */
 export function menuItemsFor(user: ResolvedUser): MenuRoute[] {
-  return user.role === 'ADMIN' ? managerMenu() : employeeMenu();
+  return isManagerMenuUser(user) ? managerMenu() : employeeMenu();
 }
 
 /** Render the role-based menu as numbered Hebrew text. */
 export function renderMenu(user: ResolvedUser): string {
   const items = menuItemsFor(user);
-  const header = user.role === 'ADMIN' ? '📋 תפריט ניהול — בחר מספר:' : '📋 תפריט — בחר מספר:';
+  const isManager = isManagerMenuUser(user);
+  const header = isManager
+    ? 'שלום, מה תרצה לעשות?'
+    : '📋 תפריט — בחר מספר:';
   const lines = items.map((r) => `${r.n}. ${r.label}`);
-  return `${header}\n${lines.join('\n')}\n\nאפשר גם פשוט לכתוב בקשה חופשית בכל עת.`;
+  return `${header}\n\n${lines.join('\n')}`;
 }
 
 // ── D2-T8 problem-type sub-menu ────────────────────────────────────────────────

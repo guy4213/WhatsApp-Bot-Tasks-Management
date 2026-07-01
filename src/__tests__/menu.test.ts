@@ -71,25 +71,29 @@ describe('menuItemsFor', () => {
     expect(items.some((i) => i.action.kind === 'guide')).toBe(false);
   });
 
-  it('K1: MANAGER users now see the inspector menu (only ADMIN gets the legacy manager menu)', () => {
-    // Deliberate v2 behavior — see TASKS.md §0 K1 and the D2-T1 build brief.
-    expect(menuItemsFor(manager)).toEqual(menuItemsFor(employee));
+  it('MANAGER users now see the unified 6-item manager menu (updated from K1 v1 behavior)', () => {
+    // Updated: MANAGER now gets the same unified manager menu as ADMIN.
+    // This replaced the K1 v2 behavior where only ADMIN got the (legacy) manager menu.
+    const managerItems = menuItemsFor(manager);
+    const adminItems   = menuItemsFor(admin);
+    expect(managerItems.map((i) => i.action.kind)).toEqual(adminItems.map((i) => i.action.kind));
   });
 
-  it('ADMIN gets the 6-item manager menu (X-T2/X-T4 removed team_workload and pending_approvals)', () => {
+  it('ADMIN gets the new unified 6-item manager menu (mgr_ action kinds)', () => {
     const items = menuItemsFor(admin);
     expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(items[0].action.kind).toBe('guide');
-    expect(items[4].action.kind).toBe('digest_settings');
-    expect(items[5].action.kind).toBe('free_text');
-    // No team_workload or pending_approvals items.
-    expect(items.some((i) => i.action.kind === 'list_tasks' && (i.action as { kind: 'list_tasks'; scope: string }).scope === 'own')).toBe(false);
-    // Legacy manager lists are company-wide (scope 'all').
-    const listScopes = items
-      .filter((i) => i.action.kind === 'list_tasks')
-      .map((i) => (i.action.kind === 'list_tasks' ? i.action.scope : null));
-    expect(listScopes.length).toBeGreaterThan(0);
-    expect(listScopes.every((s) => s === 'all')).toBe(true);
+    expect(items[0].action.kind).toBe('mgr_snapshot');
+    expect(items[1].action.kind).toBe('mgr_today_inspections');
+    expect(items[2].action.kind).toBe('mgr_exceptions_sub');
+    expect(items[3].action.kind).toBe('mgr_leads_sub');
+    expect(items[4].action.kind).toBe('mgr_workers_sub');
+    expect(items[5].action.kind).toBe('mgr_search_sub');
+    // No legacy list_tasks / guide / free_text / digest_settings in the new manager menu.
+    const kinds = items.map((i) => i.action.kind);
+    expect(kinds).not.toContain('guide');
+    expect(kinds).not.toContain('list_tasks');
+    expect(kinds).not.toContain('free_text');
+    expect(kinds).not.toContain('digest_settings');
   });
 });
 
