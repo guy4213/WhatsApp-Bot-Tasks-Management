@@ -6,7 +6,15 @@
       "WebSearch",
       "WebFetch(domain:developers.facebook.com)",
       "Bash(findstr /i \".md\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(npx vitest *)",
+      "Bash(git checkout *)",
+      "Bash(git branch *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(Select-String -Pattern '\\\\.env')",
+      "Bash(git stash *)"
     ]
   }
 }
