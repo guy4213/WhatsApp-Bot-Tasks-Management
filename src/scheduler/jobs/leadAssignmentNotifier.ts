@@ -25,7 +25,7 @@ import {
 import { claimLeadNotification } from '../../services/leadNotificationLog';
 import { suggestWorkerForLead, type InspectorCandidate } from '../../ai/leadSuggester';
 import { normalizeIsraeliPhone } from '../../auth/phoneNormalizer';
-import { getSashaPhone } from '../../services/specialUsers';
+import { getLeadsViewerPhones } from '../../services/specialUsers';
 
 const log = moduleLogger('leadAssignmentNotifier');
 
@@ -111,15 +111,15 @@ function formatEscalationAlert(
 }
 
 async function processEscalations(): Promise<void> {
-  // Sasha is identified by User.name (see specialUsers.ts) — her phone comes
-  // from the DB, not env. When no active Sasha row exists, escalations are
-  // silently skipped (defensive: the alert has no recipient).
-  const sashaPhoneRaw = await getSashaPhone();
-  if (!sashaPhoneRaw) {
-    log.debug('No active Sasha user with phone in DB — escalation job skipped');
+  // Leads viewers (Sasha + dev observers) receive the escalation. Phones are
+  // looked up from the DB by name — no env vars. When nobody is configured,
+  // the escalation job silently no-ops.
+  const rawPhones = await getLeadsViewerPhones();
+  const viewerPhones = rawPhones.map((p) => normalizeIsraeliPhone(p) ?? p);
+  if (viewerPhones.length === 0) {
+    log.debug('No active leads viewers with phones in DB — escalation job skipped');
     return;
   }
-  const sashaPhone = normalizeIsraeliPhone(sashaPhoneRaw) ?? sashaPhoneRaw;
 
   const rows = await findEscalationCandidates();
   if (rows.length === 0) return;
@@ -153,15 +153,25 @@ async function processEscalations(): Promise<void> {
       ? (candidates.find((c) => c.id === suggestion.userId)?.name ?? null)
       : null;
 
-    try {
-      await sendTextMessage({
-        to: sashaPhone,
-        text: formatEscalationAlert(lead, workerName, suggestion.reason),
-      });
-      log.info({ leadId: lead.id }, 'Escalation alert sent to Sasha');
-    } catch (err) {
-      log.error({ err, leadId: lead.id }, 'Escalation alert send failed');
+    const text = formatEscalationAlert(lead, workerName, suggestion.reason);
+    // Fan out to every leads viewer (Sasha + dev observers). Failures are
+    // isolated per recipient — one bad phone doesn't block the others.
+    const results = await Promise.allSettled(
+      viewerPhones.map((phone) => sendTextMessage({ to: phone, text })),
+    );
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.status === 'rejected') {
+        log.error(
+          { err: r.reason, leadId: lead.id, to: viewerPhones[i] },
+          'Escalation alert send failed for recipient',
+        );
+      }
     }
+    log.info(
+      { leadId: lead.id, recipients: viewerPhones.length },
+      'Escalation alert fanned out to leads viewers',
+    );
   }
 }
 

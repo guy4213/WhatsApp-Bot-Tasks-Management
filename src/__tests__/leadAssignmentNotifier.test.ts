@@ -19,9 +19,9 @@ vi.mock('../ai/leadSuggester', () => ({
   suggestWorkerForLead: (...args: unknown[]) => suggestWorkerForLead(...args),
 }));
 
-const getSashaPhone = vi.fn();
+const getLeadsViewerPhones = vi.fn();
 vi.mock('../services/specialUsers', () => ({
-  getSashaPhone: (...args: unknown[]) => getSashaPhone(...args),
+  getLeadsViewerPhones: (...args: unknown[]) => getLeadsViewerPhones(...args),
 }));
 
 beforeEach(() => {
@@ -30,8 +30,8 @@ beforeEach(() => {
   sendTextMessage.mockResolvedValue(undefined);
   suggestWorkerForLead.mockReset();
   suggestWorkerForLead.mockResolvedValue({ userId: null, reason: 'לא נמצאה התאמה' });
-  getSashaPhone.mockReset();
-  getSashaPhone.mockResolvedValue(null); // default: no Sasha in DB
+  getLeadsViewerPhones.mockReset();
+  getLeadsViewerPhones.mockResolvedValue([]); // default: no viewers configured
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -157,7 +157,7 @@ describe('D3-T3 worker assignment alert', () => {
 
 describe('D3-T4 Sasha escalation', () => {
   beforeEach(() => {
-    getSashaPhone.mockResolvedValue('972509999999');
+    getLeadsViewerPhones.mockResolvedValue(['972509999999']);
   });
 
   it('claims ESCALATED_1H then sends to Sasha with AI suggestion', async () => {
@@ -199,8 +199,8 @@ describe('D3-T4 Sasha escalation', () => {
     expect(msg.text).toContain('הצעת שיבוץ: לא נמצאה התאמה');
   });
 
-  it('skips escalation entirely when no active Sasha user in DB', async () => {
-    getSashaPhone.mockResolvedValue(null);
+  it('skips escalation entirely when no active leads viewers in DB', async () => {
+    getLeadsViewerPhones.mockResolvedValue([]);
     poolQuery.mockResolvedValueOnce(EMPTY); // findNewlyAssignedLeads
 
     await runLeadAssignmentNotifier();
@@ -208,6 +208,26 @@ describe('D3-T4 Sasha escalation', () => {
     expect(sendTextMessage).not.toHaveBeenCalled();
     // findEscalationCandidates should NOT have been called
     expect(poolQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('fans out escalation to multiple viewers (Sasha + Guy F + Yair)', async () => {
+    getLeadsViewerPhones.mockResolvedValue(['972500000001', '972500000002', '972500000003']);
+    const row = makeEscalationRow();
+
+    poolQuery
+      .mockResolvedValueOnce(EMPTY) // findNewlyAssignedLeads
+      .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findEscalationCandidates
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })    // findActiveInspectors
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: row.id }] }); // claim
+
+    await runLeadAssignmentNotifier();
+
+    // One send per viewer.
+    expect(sendTextMessage).toHaveBeenCalledTimes(3);
+    const recipients = sendTextMessage.mock.calls.map((c) => c[0].to);
+    expect(recipients).toContain('972500000001');
+    expect(recipients).toContain('972500000002');
+    expect(recipients).toContain('972500000003');
   });
 
   it('skips escalation loop when claim returns false', async () => {

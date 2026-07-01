@@ -202,11 +202,12 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
     expect(sendButtonMessageMock).not.toHaveBeenCalled();
   });
 
-  it('ADMIN row (not Yoram) → equipment reminder fires (treated as worker)', async () => {
+  it('regular ADMIN (not in exceptions viewer set) → equipment reminder fires', async () => {
     getInspectionsMock.mockResolvedValue([oneInspection]);
     getEquipmentChecklistMock.mockResolvedValue(checklistRows);
 
-    await fireMorning(rowFor('ADMIN', 'גיא פרנסס'));
+    // "רון" is not in EXCEPTIONS_VIEWER_NAMES → treated as worker
+    await fireMorning(rowFor('ADMIN', 'רון'));
 
     expect(claimDigestSendMock).toHaveBeenCalledWith('u-1', 'MORNING', '2026-06-30');
     expect(claimDigestSendMock).toHaveBeenCalledWith('u-1', 'EQUIPMENT_MORNING', '2026-06-30');
@@ -224,6 +225,16 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
     expect(claimDigestSendMock).not.toHaveBeenCalledWith('u-1', 'EQUIPMENT_MORNING', '2026-06-30');
     expect(formatEquipmentReminderMock).not.toHaveBeenCalled();
     expect(sendButtonMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('dev admin (User.name = "גיא פרנסס") → equipment reminder skipped (exceptions viewer)', async () => {
+    getInspectionsMock.mockResolvedValue([oneInspection]);
+    getEquipmentChecklistMock.mockResolvedValue(checklistRows);
+
+    await fireMorning(rowFor('ADMIN', 'גיא פרנסס'));
+
+    expect(claimDigestSendMock).not.toHaveBeenCalledWith('u-1', 'EQUIPMENT_MORNING', '2026-06-30');
+    expect(formatEquipmentReminderMock).not.toHaveBeenCalled();
   });
 
   it('EQUIPMENT_MORNING claim returns false → no send (already sent this local day)', async () => {

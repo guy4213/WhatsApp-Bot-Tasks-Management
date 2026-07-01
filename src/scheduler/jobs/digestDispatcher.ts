@@ -28,7 +28,9 @@ import {
   getYoramLeadCounts,
 } from '../../services/incomingLeads';
 import { suggestWorkerForLead } from '../../ai/leadSuggester';
-import { isYoram, isSasha } from '../../services/specialUsers';
+import {
+  isSasha, isExceptionsViewer, isLeadsViewer,
+} from '../../services/specialUsers';
 
 const log = moduleLogger('digestDispatcher');
 
@@ -116,13 +118,15 @@ export async function runDigestDispatcher(): Promise<void> {
   const rows = await selectDigestCandidates();
 
   for (const row of rows) {
-    // Sasha (identified by User.name) — leads-only digest at 09:30. Normal
-    // MORNING/EVENING are suppressed so she doesn't also receive an inspector
-    // or manager digest on top of leads.
+    // Leads viewers (Sasha + dev observers) receive LEADS_MORNING at 09:30.
+    // Per-user dedup — each viewer has an independent claim row so they all
+    // fire independently.
+    if (isLeadsViewer(row.user_name) && isDigestDue('09:30', row.local_hm)) {
+      await dispatchSashaLeadsMorning(row);
+    }
+
+    // Sasha receives ONLY the leads digest — no MORNING/EVENING for her.
     if (isSasha(row.user_name)) {
-      if (isDigestDue('09:30', row.local_hm)) {
-        await dispatchSashaLeadsMorning(row);
-      }
       continue;
     }
 
@@ -130,12 +134,10 @@ export async function runDigestDispatcher(): Promise<void> {
     const eveningDue = row.evening_enabled && isDigestDue(row.evening_time, row.local_hm);
     if (morningDue) {
       await dispatchOne(row, 'MORNING');
-      // Yoram receives the exceptions digest (in buildContent) — not an
-      // equipment reminder. Everyone else (all roles) is treated as a field
-      // worker per K1 and gets the equipment reminder as a piggy-back on the
-      // morning slot. The reminder is a no-op for users with no inspections
-      // today (checked inside maybeDispatchEquipmentReminder).
-      if (!isYoram(row.user_name)) {
+      // Equipment reminder piggy-backs on the morning slot for FIELD workers
+      // only. Exceptions viewers (Yoram + dev admins) receive the §13 digest
+      // instead — an equipment checklist doesn't make sense for them.
+      if (!isExceptionsViewer(row.user_name)) {
         await maybeDispatchEquipmentReminder(row);
       }
     }
@@ -225,11 +227,11 @@ async function dispatchOne(
 
   try {
     const content = await buildContent(row, type);
-    // Everyone-except-Yoram is treated as a field worker for template routing
-    // (K1). Yoram gets the "elevated" template (manager end-of-day slot), but
-    // his content comes from `formatGalitManagerMorning/EndOfDay` — not the
-    // retired formatManagerMorning/EndOfDay.
-    const isElevated = isYoram(row.user_name);
+    // Exceptions viewers (Yoram + dev admins) use the "elevated" template
+    // (manager digest slot); everyone else uses the employee digest template.
+    // The template content itself is currently rendered from `fallbackText`
+    // (free-form) until D5-T5 templates land.
+    const isElevated = isExceptionsViewer(row.user_name);
     const key = digestTemplateKey({ isElevated }, type);
     await notify({
       to: row.user_phone,
@@ -255,9 +257,10 @@ async function buildContent(
   row: DueUserRow,
   type: PrimaryDigestType,
 ): Promise<DigestContent> {
-  // Yoram (by User.name) — SPEC §13 exceptions digest (field counts + open
-  // exceptions + leads counts). Fires for both MORNING and EVENING.
-  if (isYoram(row.user_name)) {
+  // Exceptions viewers (Yoram + dev admins) — SPEC §13 exceptions digest
+  // (field counts + open exceptions + leads counts). Fires for both MORNING
+  // and EVENING.
+  if (isExceptionsViewer(row.user_name)) {
     const [counts, exceptions, leadCounts] = await Promise.all([
       getFieldExceptionCounts(row.local_date),
       getOpenFieldExceptions(row.local_date),
@@ -269,11 +272,8 @@ async function buildContent(
       : formatGalitManagerEndOfDay({ counts, exceptions, user, leadCounts });
   }
 
-  // Everyone else (all roles: ADMIN / MANAGER / WORKER / TECHNICIAN) is
-  // treated as a field worker per K1. MORNING → inspector list §7,
-  // EVENING → employee end-of-day summary. The retired legacy manager
-  // digest formatters (formatManagerMorning / formatManagerEndOfDay) are no
-  // longer imported or referenced.
+  // Everyone else — treated as a field worker regardless of role. MORNING →
+  // inspector list §7, EVENING → employee end-of-day summary.
   if (type === 'MORNING') {
     const items = await getInspectionsForWorkerOnDate(row.user_id, row.local_date);
     return formatInspectorMorning(items, { name: row.user_name });

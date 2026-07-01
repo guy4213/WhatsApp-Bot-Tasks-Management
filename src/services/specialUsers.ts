@@ -1,44 +1,77 @@
 /**
- * Special-user routing (Yoram + Sasha) — identified by User.name, not env vars.
+ * Special-user routing — identified by User.name (not env vars).
  *
- * V2 spec: exactly two users get non-standard digests:
- *   - יורם  → SPEC §13 exceptions digest (field counts + open exceptions + leads counts)
- *   - סשה  → SPEC §12 leads morning digest at 09:30 + 1h escalation alerts
+ * V2 spec + operational overrides (2026-07-01):
  *
- * Every other user (regardless of role: ADMIN / MANAGER / WORKER / TECHNICIAN)
- * is treated as a field worker per the K1 rule and receives the standard
- * inspector morning + employee evening digests.
+ *   סשה                                  → SPEC §12 leads morning digest at 09:30
+ *                                          + 1-hour escalation alerts. No other digests.
  *
- * Names are literal DB matches on `User.name`. If the CRM ever renames one of
- * these users, update the constant here — this is intentional (one line change,
- * no env-var drift, DB is the source of truth for the phone).
+ *   יורם / גיא פרנסס / גיא גבאי / יאיר  → SPEC §13 exceptions digest (morning + evening).
+ *                                          "אדמינים" — Yoram is the operational owner;
+ *                                          the other three are internal dev observers
+ *                                          so we can see the same picture in prod.
+ *
+ *   גיא פרנסס / יאיר (+ סשה)            → ALSO receive the Sasha leads morning digest
+ *                                          and the 1-hour escalation alerts (dev
+ *                                          visibility into the leads pipeline).
+ *
+ *   everyone else                        → inspector morning §7 + employee evening.
+ *
+ * Names are literal DB matches on `User.name`. If the CRM renames one of these
+ * users, edit the set here (one line). This intentional coupling replaces env
+ * vars — the DB name is the routing key, the DB phone is the delivery target,
+ * no drift possible.
  */
 import { pool } from '../db/connection';
 
-export const YORAM_NAME = 'יורם';
 export const SASHA_NAME = 'סשה';
 
-export function isYoram(userName: string | null | undefined): boolean {
-  return userName === YORAM_NAME;
-}
+/** Users who receive the §13 exceptions digest (morning + evening). */
+export const EXCEPTIONS_VIEWER_NAMES: ReadonlySet<string> = new Set([
+  'יורם',
+  'גיא פרנסס',
+  'גיא גבאי',
+  'יאיר',
+]);
+
+/**
+ * Users who receive the §12 leads morning digest at 09:30 AND the D3-T4
+ * 1-hour escalation alerts. Sasha is the operational owner; the other two are
+ * dev observers.
+ */
+export const LEADS_VIEWER_NAMES: ReadonlySet<string> = new Set([
+  SASHA_NAME,
+  'גיא פרנסס',
+  'יאיר',
+]);
 
 export function isSasha(userName: string | null | undefined): boolean {
   return userName === SASHA_NAME;
 }
 
+export function isExceptionsViewer(userName: string | null | undefined): boolean {
+  return typeof userName === 'string' && EXCEPTIONS_VIEWER_NAMES.has(userName);
+}
+
+export function isLeadsViewer(userName: string | null | undefined): boolean {
+  return typeof userName === 'string' && LEADS_VIEWER_NAMES.has(userName);
+}
+
 /**
- * Look up Sasha's WhatsApp phone from the `User` table (by name).
- * Returns null if no active Sasha row exists. Never throws.
- * Used by the D3-T4 escalation alert (leadAssignmentNotifier).
+ * All active phones of users configured as leads viewers (Sasha + dev
+ * observers). Used by the D3-T4 1-hour escalation alert — each phone gets
+ * one alert per lead. Users with no phone or not-active are silently skipped.
+ * Returns [] when no one is configured — the escalation job then no-ops.
  */
-export async function getSashaPhone(): Promise<string | null> {
-  const { rows } = await pool.query<{ phone: string | null }>(
+export async function getLeadsViewerPhones(): Promise<string[]> {
+  const names = Array.from(LEADS_VIEWER_NAMES);
+  const { rows } = await pool.query<{ phone: string }>(
     `SELECT phone FROM "User"
-     WHERE name = $1
+     WHERE name = ANY($1::text[])
        AND upper(status::text) = 'ACTIVE'
        AND phone IS NOT NULL
-     LIMIT 1`,
-    [SASHA_NAME],
+       AND phone <> ''`,
+    [names],
   );
-  return rows[0]?.phone ?? null;
+  return rows.map((r) => r.phone);
 }

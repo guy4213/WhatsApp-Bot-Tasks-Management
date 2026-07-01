@@ -182,34 +182,31 @@ describe('dispatcher — Yoram branch routing (D4-T1, name-based)', () => {
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
-  // ── Non-Yoram (any role) → inspector treatment ──
+  // ── Other exceptions viewers (dev admins) ──
 
-  it('MORNING — non-Yoram ADMIN → inspector morning fires (no more legacy manager path)', async () => {
+  it('MORNING — "גיא פרנסס" (dev admin) → §13 exceptions digest fires', async () => {
     await fire(rowFor({ name: 'גיא פרנסס', role: 'ADMIN', hm: '08:00', evening: false }));
 
-    expect(formatGalitManagerMorningMock).not.toHaveBeenCalled();
-    expect(getFieldExceptionCountsMock).not.toHaveBeenCalled();
-    expect(formatInspectorMorningMock).toHaveBeenCalledTimes(1);
-    // getInspections is called twice: once for the inspector morning digest,
-    // once for the equipment reminder piggy-back on the morning slot.
-    expect(getInspectionsMock).toHaveBeenCalledTimes(2);
-    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(formatGalitManagerMorningMock).toHaveBeenCalledTimes(1);
+    expect(formatInspectorMorningMock).not.toHaveBeenCalled();
   });
 
-  it('EVENING — non-Yoram ADMIN → formatEmployeeEndOfDay fires (no more legacy manager path)', async () => {
+  it('EVENING — "יאיר" (dev admin) → §13 exceptions eod fires', async () => {
     await fire(rowFor({ name: 'יאיר', role: 'ADMIN', hm: '17:00', morning: false }));
 
-    expect(formatGalitManagerEndOfDayMock).not.toHaveBeenCalled();
-    expect(formatEmployeeEndOfDayMock).toHaveBeenCalledTimes(1);
-    expect(getEmployeeEndOfDayMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(formatGalitManagerEndOfDayMock).toHaveBeenCalledTimes(1);
+    expect(formatEmployeeEndOfDayMock).not.toHaveBeenCalled();
   });
 
-  it('MORNING — non-Yoram MANAGER → inspector morning fires', async () => {
+  // ── Regular users (not in any special set) → inspector treatment ──
+
+  it('MORNING — regular MANAGER → inspector morning fires', async () => {
     await fire(rowFor({ name: 'דני', role: 'MANAGER', hm: '08:00', evening: false }));
 
     expect(formatInspectorMorningMock).toHaveBeenCalledTimes(1);
     expect(formatGalitManagerMorningMock).not.toHaveBeenCalled();
+    // Two calls to getInspections: inspector digest + equipment reminder.
+    expect(getInspectionsMock).toHaveBeenCalledTimes(2);
   });
 
   it('MORNING — regular WORKER → inspector morning fires (baseline unchanged)', async () => {

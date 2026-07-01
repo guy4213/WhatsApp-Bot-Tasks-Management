@@ -9,6 +9,31 @@ Conventions:
 
 ---
 
+## 0.2 Dev-observer routing (2026-07-01)
+
+Extended the special-user routing to include internal dev admins. Now:
+
+**Exceptions viewers (§13 morning + evening):**
+- `יורם` — operational owner
+- `גיא פרנסס`, `גיא גבאי`, `יאיר` — dev observers
+
+**Leads viewers (§12 leads morning 09:30 + D3-T4 escalation alerts):**
+- `סשה` — operational owner
+- `גיא פרנסס`, `יאיר` — dev observers (NOT `גיא גבאי`)
+
+Escalation alerts fan out to all leads viewers via `Promise.allSettled` —
+per-recipient failures are isolated. Sasha still receives only the leads
+digest + escalations (no MORNING/EVENING); the other special users receive
+BOTH the §13 exceptions digest AND (for leads viewers) the LEADS_MORNING.
+
+**Sets are defined in `src/services/specialUsers.ts`** — `EXCEPTIONS_VIEWER_NAMES`
+and `LEADS_VIEWER_NAMES`. To add / remove a name, edit the set (one line).
+
+Users with no `User.phone` or `status != 'ACTIVE'` are silently blocked at
+`selectDigestCandidates` (the SQL filter) and `getLeadsViewerPhones`.
+
+---
+
 ## 0.1 Post-M9 routing refactor (2026-07-01)
 
 **Change:** Yoram + Sasha are now identified by `User.name` (constants in
