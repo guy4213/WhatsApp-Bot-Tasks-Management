@@ -5,7 +5,8 @@
       "Bash(Select-Object FullName)",
       "WebSearch",
       "WebFetch(domain:developers.facebook.com)",
-      "Bash(findstr /i \".md\")"
+      "Bash(findstr /i \".md\")",
+      "Bash(npx tsc *)"
     ]
   }
 }
