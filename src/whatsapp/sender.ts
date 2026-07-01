@@ -58,6 +58,12 @@ export interface ButtonMessage {
  * Interactive reply-button message (in-session only). The tapped button's `id`
  * is returned by Meta as interactive.button_reply.id — we set it to a text
  * command (e.g. "כן <uuid>") so the same handler path as a typed reply runs.
+ *
+ * D5-T4 policy: v2 uses this ONLY for the §6 inspection card (D2-T2) and the
+ * §10 equipment reminder (D2-T9). Every other menu (7-item main menu, 7-item
+ * problem sub-menu, 4-item finished follow-up, 4-item day summary) stays as
+ * numbered text via `renderMenu` / `renderProblemTypeMenu`. Meta caps a reply-
+ * button message at 3 buttons — most v2 menus exceed that.
  */
 export async function sendButtonMessage({ to, body, buttons }: ButtonMessage): Promise<void> {
   const recipient = normalizeRecipient(to);

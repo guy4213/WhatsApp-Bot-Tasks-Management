@@ -9,8 +9,10 @@ import {
 import {
   formatEmployeeMorning, formatManagerMorning,
   formatEmployeeEndOfDay, formatManagerEndOfDay,
+  formatInspectorMorning,
   digestTemplateKey, type DigestContent,
 } from '../../whatsapp/digestContent';
+import { getInspectionsForWorkerOnDate } from '../../services/inspectionsQueries';
 
 const log = moduleLogger('digestDispatcher');
 
@@ -143,8 +145,15 @@ async function dispatchOne(row: DueUserRow, type: DigestType): Promise<void> {
 
 async function buildContent(row: DueUserRow, type: DigestType, isElevated: boolean): Promise<DigestContent> {
   if (type === 'MORNING') {
-    if (isElevated) return formatManagerMorning(row.user_name, await getCompanyMorning());
-    return formatEmployeeMorning(row.user_name, await getEmployeeMorningCounts(row.user_id));
+    // D2-T4 (K1): non-ADMIN users are inspectors and get the v2 numbered
+    // inspections list. ADMIN keeps the legacy manager path. `formatEmployee
+    // Morning` is preserved for any residual non-inspector path — X-T3 retires
+    // it once every non-ADMIN is routed through this branch.
+    if (row.role !== 'ADMIN') {
+      const items = await getInspectionsForWorkerOnDate(row.user_id, row.local_date);
+      return formatInspectorMorning(items, { name: row.user_name });
+    }
+    return formatManagerMorning(row.user_name, await getCompanyMorning());
   }
   if (isElevated) return formatManagerEndOfDay(row.user_name, await getCompanyEndOfDay());
   return formatEmployeeEndOfDay(row.user_name, await getEmployeeEndOfDay(row.user_id));

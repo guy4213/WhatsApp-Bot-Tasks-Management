@@ -22,6 +22,7 @@ import type {
   CompanyMorning,
   CompanyEndOfDay,
 } from '../services/tasks';
+import type { InspectionListItem } from '../services/inspectionsQueries';
 import { DIGEST_PAYLOAD_IDS } from '../ai/digestCommands';
 
 /** One WhatsApp quick-reply button. `id` is a stable digest payload id. */
@@ -78,6 +79,70 @@ export function formatEmployeeMorning(name: string, c: EmployeeMorningCounts): D
     `🔄 ${c.open} פתוחות\n\n` +
     cta('משימות להיום');
   return { text, params, buttons: [BTN_EMP_TODAY, BTN_FREE_TEXT] };
+}
+
+// ── Inspector morning (D2-T4) ────────────────────────────────────────────────
+//
+// Galit v2 §7 "morning reminder" — inspectors get a numbered list of today's
+// field inspections with a status-update CTA. Non-ADMIN users are routed here
+// by the dispatcher (per K1: `user.role !== 'ADMIN'` == inspector). No
+// per-role emoji noise — the v2 spec calls for clean output.
+
+/** Hebrew labels for `TaskField.fieldStatus` — spec §4 / migration 009 values. */
+const FIELD_STATUS_HE: Record<string, string> = {
+  ASSIGNED: 'משובצת',
+  CONFIRMED: 'אושרה',
+  EN_ROUTE: 'בדרך',
+  ARRIVED: 'באתר',
+  WAITING_FOR_INFO: 'ממתין למידע',
+  HAS_PROBLEM: 'עם בעיה',
+  NEEDS_MORE_INFO: 'צריך פרטים',
+  FINISHED_FIELD: 'הסתיים בשטח',
+};
+
+/** Localize a `fieldStatus` code — falls back to the raw code if unknown. */
+function fieldStatusLabelHe(status: string): string {
+  return FIELD_STATUS_HE[status] ?? status;
+}
+
+/**
+ * Inspector morning — numbered list of today's field inspections + a CTA to
+ * update status by number or free text/voice. Empty list → a one-line "no
+ * inspections today" note (spec §7). Template vars: name + count (compact
+ * template render uses just the count; the rich in-window text carries the
+ * full list). Missing `customerName` / `siteAddress` degrade to Hebrew
+ * placeholders — DO NOT invent data.
+ */
+export function formatInspectorMorning(
+  items: InspectionListItem[],
+  user: { name: string | null },
+): DigestContent {
+  const name = user.name ?? '';
+  const params = [name, String(items.length)];
+
+  if (items.length === 0) {
+    const text =
+      `בוקר טוב ${name},\n` +
+      `אין בדיקות משובצות להיום.`;
+    return { text, params, buttons: [] };
+  }
+
+  const lines = items.map((item, i) => {
+    const customer = item.customerName ?? 'לקוח לא ידוע';
+    const address = item.siteAddress ?? 'כתובת לא ידועה';
+    const city = item.siteCity ? `, ${item.siteCity}` : '';
+    const statusHe = fieldStatusLabelHe(item.fieldStatus);
+    return `${i + 1}. ${customer} — ${address}${city} (${item.typeLabelHe})\n` +
+           `   סטטוס: ${statusHe}`;
+  });
+
+  const text =
+    `בוקר טוב ${name},\n` +
+    `הבדיקות שלך להיום:\n\n` +
+    `${lines.join('\n')}\n\n` +
+    `בחר מספר לעדכון סטטוס, או כתוב חופשי (למשל: יצאתי / הגעתי / סיימתי).`;
+
+  return { text, params, buttons: [] };
 }
 
 /** Manager/Admin morning — company totals + per-employee breakdown. Template vars: name + 4 counts. */

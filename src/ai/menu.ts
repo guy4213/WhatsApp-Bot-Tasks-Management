@@ -9,7 +9,7 @@
  * testable. The router (ai/router.ts) maps each route's `action` to existing
  * behavior and owns all messaging / context.
  */
-import type { ResolvedUser, TaskFilter } from '../types';
+import type { FieldProblemType, ResolvedUser, TaskFilter } from '../types';
 
 /**
  * Opens the menu when the WHOLE message is one of: menu / תפריט / עזרה / היי / שלום
@@ -103,4 +103,50 @@ export function renderMenu(user: ResolvedUser): string {
   const header = user.role === 'ADMIN' ? '📋 תפריט ניהול — בחר מספר:' : '📋 תפריט — בחר מספר:';
   const lines = items.map((r) => `${r.n}. ${r.label}`);
   return `${header}\n${lines.join('\n')}\n\nאפשר גם פשוט לכתוב בקשה חופשית בכל עת.`;
+}
+
+// ── D2-T8 problem-type sub-menu ────────────────────────────────────────────────
+// The 7 problem types from SPEC_FIELD_V2 §9. Labels are Hebrew; the
+// `problemType` machine value MUST match the CHECK constraint on
+// `TaskField.problemType` from migration 009 verbatim — otherwise the write
+// would be rejected. Options 6 ("בעיה מקצועית") and 7 ("אחר") ask the router
+// for a free-text elaboration before writing.
+
+export interface ProblemTypeMenuItem {
+  n: number;
+  label: string;
+  problemType: FieldProblemType;
+}
+
+/**
+ * D5-T4 — Button-vs-numbered-text policy (v2).
+ *
+ * Numbered-text menus (this file, rendered via `renderMenu` / `renderProblemTypeMenu`)
+ * are the DEFAULT. Reserve interactive `sendButtonMessage` (Meta's 3-button
+ * reply-button messages) for exactly TWO surfaces:
+ *
+ *   1. The §6 inspection card (worker confirmation on assignment) — D2-T2.
+ *   2. The §10 equipment reminder morning roll-up — D2-T9.
+ *
+ * Everything else — main worker menu (7 items), this problem sub-menu (7 items),
+ * the §7 finished follow-up (4 items), the §11 day summary (4 items) — stays as
+ * numbered text so we never hit Meta's 3-button ceiling and the same code path
+ * handles typed numbers, taps, and free text uniformly. Cross-ref: the caveat
+ * comment in `src/ai/router.ts:773-776` predates this policy and stays valid.
+ */
+export function problemTypeMenu(): ProblemTypeMenuItem[] {
+  return [
+    { n: 1, label: 'הלקוח לא ענה',   problemType: 'CUSTOMER_NOT_ANSWERING' },
+    { n: 2, label: 'אין גישה',       problemType: 'NO_ACCESS' },
+    { n: 3, label: 'הלקוח לא נמצא',  problemType: 'CUSTOMER_NOT_PRESENT' },
+    { n: 4, label: 'חסר ציוד',       problemType: 'MISSING_EQUIPMENT' },
+    { n: 5, label: 'לא ניתן לבצע',   problemType: 'CANNOT_PERFORM' },
+    { n: 6, label: 'בעיה מקצועית',   problemType: 'PROFESSIONAL_ISSUE' },
+    { n: 7, label: 'אחר',            problemType: 'OTHER' },
+  ];
+}
+
+export function renderProblemTypeMenu(): string {
+  const items = problemTypeMenu();
+  return 'בחר סוג בעיה:\n' + items.map((i) => `${i.n}. ${i.label}`).join('\n');
 }

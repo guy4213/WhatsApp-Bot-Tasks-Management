@@ -6,7 +6,7 @@
  * routes via dispatchInternal so validation, pending-action creation, the
  * confirm prompt, and audit logging all run exactly as in Phase 2/3.
  */
-import type { AIIntentResult, ResolvedUser, TaskFilter, TaskListItem } from '../types';
+import type { AIIntentResult, FieldProblemType, ResolvedUser, TaskFilter, TaskListItem } from '../types';
 import { TASK_TYPE_LABELS } from '../types';
 import { getProvider } from './provider';
 import { parseIntent } from './intentParser';
@@ -28,7 +28,15 @@ import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
 import {
   MENU_TRIGGER_RE, menuItemsFor, renderMenu, type MenuRoute,
+  problemTypeMenu, renderProblemTypeMenu,
 } from './menu';
+import {
+  findOpenTaskFieldForWorker,
+  writeMissingInfo,
+  writeProblem,
+  notifyOfficeMissingInfo,
+  notifyOfficeProblem,
+} from '../services/inspections';
 import {
   matchDigestCommand, planDigestCommand, type DigestCommand,
 } from './digestCommands';
@@ -224,6 +232,31 @@ async function continueConversation(
   }
   if (ctx.awaiting === 'digest_set_time') {
     await handleDigestTimeReply(user, trimmed, ctx);
+    return;
+  }
+
+  // ── v2 inspector flows (D2-T7 + D2-T8) — carry no AI intent ──────────────────
+  if (ctx.awaiting === 'missing_info_note') {
+    await handleMissingInfoNoteReply(user, text, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'problem_type_choice') {
+    await handleProblemTypeChoiceReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'problem_type_note') {
+    await handleProblemTypeNoteReply(user, text, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'missing_info_disambig' || ctx.awaiting === 'problem_disambig') {
+    // TODO(D2-T5): resolve which of the N open TaskFields the worker means,
+    // by matching the reply against customer name / site address. For now we
+    // clear the state and tell the user we can't proceed yet.
+    await clearContext(user.phone);
+    await sendTextMessage({
+      to: user.phone,
+      text: 'זיהוי בדיקה ספציפית מתוך כמה בדיקות פתוחות עדיין לא זמין. פנה למשרד לעדכון.',
+    });
     return;
   }
 
@@ -477,6 +510,30 @@ async function executeIntent(
       if (!(await resolveLinkReference(user, intent))) return;
       await dispatchInternal(user.phone, `/tasks/${id}/field`, { field: linkField, value: intent.params[linkField] }, 'PATCH');
       await noteWorkingTask(user.phone);
+      return;
+    }
+
+    case 'report_missing_info': {
+      // D5-T3 free-text intent — if a note was extracted, skip the sub-prompt.
+      const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+      if (note) {
+        await runMissingInfoDirect(user, note);
+      } else {
+        await startMissingInfoFlow(user);
+      }
+      return;
+    }
+
+    case 'report_problem': {
+      // D5-T3 free-text intent — if a problem_type was extracted, write directly;
+      // otherwise fall through to the same 7-item sub-menu the menu path uses.
+      const problemType = intent.problem_type ?? null;
+      const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+      if (problemType) {
+        await runProblemDirect(user, problemType, note || null);
+      } else {
+        await startReportProblemFlow(user);
+      }
       return;
     }
 
@@ -835,22 +892,215 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
       await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T3/T5/T6/T7/T8).' });
       return;
     case 'report_problem':
-      await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T8).' });
+      await startReportProblemFlow(user);
       return;
     case 'missing_equipment':
       await clearContext(user.phone);
       await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T9).' });
       return;
     case 'missing_report_info':
-      await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T7).' });
+      await startMissingInfoFlow(user);
       return;
     case 'day_summary':
       await clearContext(user.phone);
       await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T10).' });
       return;
   }
+}
+
+// ── D2-T7: "Missing info for report" flow ────────────────────────────────────
+// Menu item 6 or D5-T3 intent `report_missing_info` → prompt for the missing
+// detail, capture it, write into TaskField, notify the office. Voice arrives
+// as text via D5-T2 so no special path is needed for voice.
+
+async function startMissingInfoFlow(user: ResolvedUser): Promise<void> {
+  const found = await findOpenTaskFieldForWorker(user.id);
+  if (found === null) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין לך כרגע בדיקות פתוחות.' });
+    return;
+  }
+  if ('ambiguous' in found) {
+    // D2-T5 will implement disambiguation by customer name / site address.
+    await setContext(user.phone, { awaiting: 'missing_info_disambig' });
+    await sendTextMessage({
+      to: user.phone,
+      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+    });
+    return;
+  }
+  await setContext(user.phone, {
+    awaiting: 'missing_info_note',
+    taskFieldId: found.taskFieldId,
+  });
+  await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+}
+
+async function handleMissingInfoNoteReply(
+  user: ResolvedUser,
+  raw: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const note = raw.trim();
+  if (!ctx.taskFieldId) {
+    // Corrupt state — reset and bail politely.
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  if (!note) {
+    await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+    return;
+  }
+  await writeMissingInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
+  await notifyOfficeMissingInfo(ctx.taskFieldId);
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+}
+
+/** Direct dispatch used by the D5-T3 free-text intent — no menu step. */
+async function runMissingInfoDirect(user: ResolvedUser, note: string): Promise<void> {
+  const found = await findOpenTaskFieldForWorker(user.id);
+  if (found === null) {
+    await sendTextMessage({ to: user.phone, text: 'אין לך כרגע בדיקות פתוחות.' });
+    return;
+  }
+  if ('ambiguous' in found) {
+    await setContext(user.phone, { awaiting: 'missing_info_disambig' });
+    await sendTextMessage({
+      to: user.phone,
+      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+    });
+    return;
+  }
+  await writeMissingInfo({ taskFieldId: found.taskFieldId, note, updatedBy: user.id });
+  await notifyOfficeMissingInfo(found.taskFieldId);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+}
+
+// ── D2-T8: "Report a problem" flow (7-item numbered sub-menu) ────────────────
+// Menu item 4 or D5-T3 intent `report_problem` → 7-item sub-menu (or direct
+// write if the AI already picked a problem type). Types 6 (PROFESSIONAL_ISSUE)
+// and 7 (OTHER) prompt for an elaboration note before writing.
+
+async function startReportProblemFlow(user: ResolvedUser): Promise<void> {
+  const found = await findOpenTaskFieldForWorker(user.id);
+  if (found === null) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין לך כרגע בדיקות פתוחות.' });
+    return;
+  }
+  if ('ambiguous' in found) {
+    await setContext(user.phone, { awaiting: 'problem_disambig' });
+    await sendTextMessage({
+      to: user.phone,
+      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+    });
+    return;
+  }
+  await setContext(user.phone, {
+    awaiting: 'problem_type_choice',
+    taskFieldId: found.taskFieldId,
+  });
+  await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
+}
+
+async function handleProblemTypeChoiceReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const items = problemTypeMenu();
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
+    // Invalid — resend the menu, keep the awaiting state.
+    await sendTextMessage({
+      to: user.phone,
+      text: `בחר מספר תקין:\n${renderProblemTypeMenu()}`,
+    });
+    return;
+  }
+  const chosen = items[idx - 1];
+  // Types 6 (PROFESSIONAL_ISSUE) and 7 (OTHER) require an elaboration note.
+  if (chosen.problemType === 'PROFESSIONAL_ISSUE' || chosen.problemType === 'OTHER') {
+    await setContext(user.phone, {
+      awaiting: 'problem_type_note',
+      taskFieldId: ctx.taskFieldId,
+      problemType: chosen.problemType,
+    });
+    await sendTextMessage({ to: user.phone, text: 'פרט בבקשה:' });
+    return;
+  }
+  // Types 1-5 write directly with no note.
+  await writeProblem({
+    taskFieldId: ctx.taskFieldId,
+    problemType: chosen.problemType,
+    note: null,
+    updatedBy: user.id,
+  });
+  await notifyOfficeProblem(ctx.taskFieldId);
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+}
+
+async function handleProblemTypeNoteReply(
+  user: ResolvedUser,
+  raw: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const note = raw.trim();
+  if (!ctx.taskFieldId || !ctx.problemType) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  if (!note) {
+    await sendTextMessage({ to: user.phone, text: 'פרט בבקשה:' });
+    return;
+  }
+  await writeProblem({
+    taskFieldId: ctx.taskFieldId,
+    problemType: ctx.problemType,
+    note,
+    updatedBy: user.id,
+  });
+  await notifyOfficeProblem(ctx.taskFieldId);
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+}
+
+/** Direct dispatch used by the D5-T3 free-text intent — no menu step. */
+async function runProblemDirect(
+  user: ResolvedUser,
+  problemType: FieldProblemType,
+  note: string | null,
+): Promise<void> {
+  const found = await findOpenTaskFieldForWorker(user.id);
+  if (found === null) {
+    await sendTextMessage({ to: user.phone, text: 'אין לך כרגע בדיקות פתוחות.' });
+    return;
+  }
+  if ('ambiguous' in found) {
+    await setContext(user.phone, { awaiting: 'problem_disambig' });
+    await sendTextMessage({
+      to: user.phone,
+      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+    });
+    return;
+  }
+  await writeProblem({
+    taskFieldId: found.taskFieldId,
+    problemType,
+    note,
+    updatedBy: user.id,
+  });
+  await notifyOfficeProblem(found.taskFieldId);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
 }
 
 /** Pending dueDate-change approvals (manager/admin) — confirm via "אשר <id>" / "דחה <id>". */
