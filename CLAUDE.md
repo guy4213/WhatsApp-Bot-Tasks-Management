@@ -1,260 +1,228 @@
 # Project instructions
 
-## 1. TASKS.md is the source of truth
+## 1. Source of truth
 
-`TASKS.md` in the repo root is the source of truth for the current build plan.
+`TASKS.md` is the source of truth for the build plan.
 
-It tracks:
+Before starting work:
+- read the relevant task in `TASKS.md`
+- check `SPEC_FIELD_V2.md` / `GAP_ANALYSIS.md` when product/spec reasoning is needed
+- run `git status`
 
-* blockers
-* decisions
-* D1–D5 domain tasks
-* X dismantle / cleanup tasks
-* what is done
-* what is in progress
-* what is blocked
-* what should be done next
+After finishing any task, update its entry in `TASKS.md` in the same turn.
 
-Before starting any task, read the relevant entry in `TASKS.md`.
+Add a `**Status:** ...` line directly under the task heading.
 
-After finishing any task in `TASKS.md`, update that task entry in the same turn.
-Do not postpone this update.
+Use:
+- `DONE (commit <sha>)`
+- `DONE (local, uncommitted)`
+- `PARTIAL`
+- `OBSOLETE`
+- `REWRITTEN`
+- `NEEDS FOLLOW-UP`
+- `BLOCKED`
 
-Add a `**Status:** DONE ...` line immediately under the task heading:
+Include briefly:
+- files changed
+- tests run
+- commit/local status
+- deviations from the task spec
+- what remains, if anything
 
-`#### <ID> — <title>`
+Do not delete or rewrite the original `What to do` / `Definition of Done` lines.
 
-Use the same shape as the existing DONE entries.
-
-The status line must include:
-
-* `DONE (commit <sha>)` if the work is already committed.
-* `DONE (local, uncommitted)` if the work is staged or unstaged.
-* File paths changed.
-* Tests run and results.
-* Migration verification, if relevant.
-* Any deviation from the task spec and the reason for it.
-
-Do not remove or rewrite the original:
-
-* `- **What to do:** ...`
-* `- **Definition of Done:** ...`
-
-Leave those intact so reviewers can compare the original plan against what actually shipped.
+If repo reality and `TASKS.md` disagree, update `TASKS.md` immediately.
 
 ---
 
-## 2. TASKS.md must be corrected when reality differs from the document
+## 2. Parallel work safety
 
-While working, if you discover that `TASKS.md` does not match the actual repository state, update `TASKS.md` immediately in the same turn.
+Multiple agents may work in parallel.
 
-This applies even if you did not directly implement the original task.
+Before editing:
+- run `git status`
+- avoid files already being edited by another agent
+- prefer new helper files when possible
 
-Examples:
+High-conflict files:
+- `TASKS.md`
+- `SPEC_FIELD_V2.md`
+- `GAP_ANALYSIS.md`
+- `src/ai/router.ts`
+- `src/ai/menu.ts`
+- `src/scheduler/jobs/digestDispatcher.ts`
+- `src/whatsapp/digestContent.ts`
+- migration files
 
-* A task is marked blocked, but the blocker has been resolved.
-* A task is marked open, but the code already implements it.
-* A task is marked DONE, but the code no longer satisfies the Definition of Done.
-* A task description still references an old design decision.
-* A task depends on fields, tables, or flows that were renamed or removed.
-* A subtask was completed as part of another task.
-* Runtime code changed in a way that affects a task’s status.
-* A migration changed the meaning of an existing task.
-* A task should be marked `PARTIAL`, `OBSOLETE`, `REWRITTEN`, or `NEEDS FOLLOW-UP`.
-
-When correcting a mismatch, add a clear `**Status:** ...` note under the relevant task entry.
-
-Use these status forms when appropriate:
-
-* `**Status:** DONE ...`
-* `**Status:** PARTIAL ...`
-* `**Status:** OBSOLETE ...`
-* `**Status:** REWRITTEN ...`
-* `**Status:** NEEDS FOLLOW-UP ...`
-* `**Status:** BLOCKED ...`
-
-The note must explain:
-
-* what was found
-* what the actual repo state is
-* what changed in the task status
-* what still remains, if anything
-
-Do not silently rely on memory, git log, or chat history.
-If the repo state and `TASKS.md` disagree, `TASKS.md` must be reconciled.
-
-## 3. Parallel work and conflict safety
-
-Multiple agents or sessions may run in parallel.
-
-Before editing any file:
-
-1. Run `git status`.
-2. Check whether another agent appears to be working in the same file.
-3. Prefer creating new files or working in files that are not currently being edited.
-4. Avoid unnecessary edits to shared high-conflict files.
-
-High-conflict files include:
-
-* `TASKS.md`
-* `SPEC_FIELD_V2.md`
-* `GAP_ANALYSIS.md`
-* `src/ai/router.ts`
-* `src/whatsapp/digestContent.ts`
-* migration files
-
-If `TASKS.md` has unrelated in-flight edits, still update it when required.
-Status updates are additive and should be placed directly under the relevant task heading.
-
-If a conflict risk exists, state it clearly before proceeding.
+If conflict risk exists, state it before editing.
 
 ---
 
-## 4. Model selection: Sonnet vs Opus
+## 3. Model recommendation
 
-Choose the model based on task complexity.
-
-Use **Sonnet** for normal implementation work, small fixes, straightforward tests, documentation updates, refactors, and isolated features.
-
-Use **Opus** for complex reasoning or high-risk changes, including:
-
-* architecture decisions
-* database schema design
-* migrations with production impact
-* multi-file refactors
-* changes touching `router.ts` and scheduler logic together
-* ambiguous product behavior
-* security, permissions, or RLS questions
-* debugging failures that require deep reasoning
-* tasks where the spec, code, and `TASKS.md` disagree
-* any work that may affect multiple agents or parallel branches
-
-If unsure, choose **Opus** for planning and reasoning, then use **Sonnet** for straightforward implementation.
-
-### Model recommendation before execution
-
-BEFORE starting any implementation work — before the first Edit / Write / Bash — recommend a model in ONE line and STOP for the user to switch if needed.
-
-The assistant cannot change models mid-session. The `/model` command is user-controlled. So the recommendation must arrive early enough that the user can act on it.
+Before meaningful implementation work, recommend a model once and stop for user approval/switch.
 
 Format:
 
-`Model recommendation: <Sonnet|Opus> — <one-line reason>. Switch with /model <name> before I proceed, or say "go" to continue on the current model.`
+`Model recommendation: <Sonnet|Opus> — <one-line reason>. Switch with /model <name>, or say "go".`
 
-Rules:
+Use **Sonnet** for:
+- normal implementation
+- isolated services
+- tests
+- formatters
+- small refactors
+- documentation updates
 
-* Emit the recommendation once per task or wave, right after reading the task and before any code edits.
-* Do NOT emit a recommendation for read-only investigation, questions, or tiny one-liners where switching cost > work cost.
-* If the user says "go" / "continue" / "proceed" without switching, run on the current model without further prompting.
-* If the current model already matches the recommendation, still state it once (so the user sees the reasoning) but proceed without waiting.
-* Never claim you "executed with Sonnet" or "switched to Opus" — you did not. State the model the session is actually on if it matters.
+Use **Opus** for:
+- architecture
+- migrations
+- workflow decisions
+- router + scheduler changes together
+- polling/dedup logic
+- webhook/status flows
+- unclear spec/code/TASKS conflicts
+- multi-agent orchestration
 
-Example:
+For read-only investigation or tiny fixes, no model recommendation is needed.
 
-`Model recommendation: Sonnet — isolated formatter + tests, no cross-file reasoning. Switch with /model sonnet before I proceed, or say "go".`
-
-or:
-
-`Model choice: Opus — migration and workflow semantics affect multiple domains.`
-
----
-
-## 5. Before starting a task
-
-Before implementing:
-
-1. Read the relevant task in `TASKS.md`.
-2. Check `SPEC_FIELD_V2.md` if product behavior is involved.
-3. Check `GAP_ANALYSIS.md` if the reasoning or original tradeoff matters.
-4. Run `git status`.
-5. Identify whether the task is already done, partially done, blocked, or stale.
-6. If the task status is stale, update `TASKS.md` before or during the same turn.
-
-Do not start coding from memory alone.
+Never claim you switched models yourself. The user controls `/model`.
 
 ---
 
-## 6. During implementation
+## 4. Opus orchestrator + sub-agents
 
-Keep changes focused.
+Use the full orchestrator workflow whenever the user explicitly or implicitly asks to use agents, sub-agents, parallel agents, multiple agents, or to split work between agents.
 
-Prefer:
+This includes exact phrases like:
+- “create subagents”
+- “run subagents”
+- “split this between agents”
+- “use agents”
+- “parallel agents”
+- “תיצור סאבאייגנטס”
+- “תפעיל סוכנים”
+- “תחלק את זה בין סוכנים”
+- “תן לכמה אייג׳נטים לעבוד על זה”
+- “תפצל את העבודה”
+- “תריץ כמה במקביל”
 
-* small commits
-* clear file boundaries
-* new helper files when they reduce collisions
-* tests close to the changed logic
-* no unnecessary rewrites
-* no broad formatting changes
+Also use this workflow when the user says something approximate with the same meaning, even if the exact phrase is different.
 
-Do not change old behavior unless the task explicitly requires it.
+If the user’s intent is clearly to delegate parts of the work to multiple agents, treat it as an explicit command to use the full orchestrator workflow, not merely a suggestion.
+
+### Opus orchestrator
+
+Opus acts as the project lead.
+
+It must:
+- read `TASKS.md`
+- understand dependencies/blockers
+- split the work into focused sub-tasks
+- assign sub-agents with narrow scopes
+- avoid file conflicts
+- review all sub-agent outputs
+- run QA
+- send fixes back when needed
+- update `TASKS.md`
+- produce the final summary
+
+The orchestrator owns final quality.
+
+### Sub-agent roles
+
+Use **Sonnet** for implementation sub-tasks:
+- services
+- routes
+- tests
+- scheduler jobs
+- formatters
+- TypeScript fixes
+
+Use **Haiku** only for lightweight support:
+- grep/search
+- file inventory
+- stale wording checks
+- simple summaries
+- narrow review
+
+Do not use Haiku for architecture, migrations, webhook logic, polling/dedup, or status-changing flows.
+
+### Sub-agent prompts must include
+
+- task ID
+- exact goal
+- allowed files
+- files to avoid
+- tests to run
+- project constraints
+- expected output
+- reminder to report any `TASKS.md` impact
+
+Sub-agents are helpers, not final decision-makers.
+
+---
+
+## 5. QA after sub-agents
+
+After sub-agents finish, the Opus orchestrator must verify:
+
+- scope was completed
+- no wrong files were edited
+- no conflicts were created
+- implementation matches `TASKS.md`
+- implementation matches the spec
+- old flows were not reintroduced
+- tests were added/updated
+- relevant tests pass
+- `npx tsc --noEmit` passes when TypeScript changed
+- migrations are idempotent when migrations changed
+- `TASKS.md` was updated
+
+Do not blindly trust sub-agent summaries.
+
+If QA finds a problem:
+- send normal code fixes to Sonnet
+- send search/check tasks to Haiku
+- keep architecture/migration corrections in Opus
+- QA again after the fix
+
+---
+
+## 6. Core project constraints
 
 Do not write to `Task.status`.
 The CRM owns `Task.status`.
 
----
+Do not recreate:
+- `Task.isFieldTask`
+- strict 1:1 `Task` ↔ `TaskField`
+- `TaskField.taskId UNIQUE`
+- old CRM worker menu as the active worker flow
+- `HANDOFF.md`
 
-## 7. After finishing a task
-
-After finishing:
-
-1. Run relevant tests.
-2. Run type-checking if TypeScript changed.
-3. Run migration verification if migrations changed.
-4. Update `TASKS.md` in the same turn.
-5. Record deviations from the task spec.
-6. Commit the work if instructed or if this session’s workflow expects commits.
-7. Report clearly what was done, what was tested, and what remains.
-
-The final response should include:
-
-* task IDs completed
-* commit SHA, if committed
-* files changed
-* tests run
-* known follow-ups
-* whether anything remains uncommitted
+Current model:
+- `Task` = office / CRM customer task
+- `TaskField` = scheduled field visit / inspection appointment
+- CRM scheduling form creates `TaskField` using an existing `Task ID`
+- one `Task` may have multiple `TaskField` rows
+- `Task.ownerId` is the assigned field worker
+- the bot works against `TaskField`
 
 ---
 
-## 8. Do not recreate retired or obsolete flows
+## 7. Finish checklist
 
-Do not recreate old CRM-task functionality unless explicitly requested.
+Before final response:
 
-Do not reintroduce:
-
-* `Task.isFieldTask`
-* strict 1:1 `Task` ↔ `TaskField`
-* `TaskField.taskId UNIQUE`
-* bot-written `Task.status`
-* `HANDOFF.md`
-* old CRM worker menu as the active worker flow
-
-The current model is:
-
-* `Task` = office / CRM customer task
-* `TaskField` = scheduled field visit / inspection appointment
-* CRM scheduling form creates `TaskField` using an existing `Task ID`
-* one `Task` may have multiple `TaskField` rows
-* `Task.ownerId` is the assigned field worker
-* the bot works against `TaskField`
-
----
-
-## 9. When uncertain
-
-If there is uncertainty, do not guess silently.
-
-First check:
-
-1. `TASKS.md`
-2. `SPEC_FIELD_V2.md`
-3. `GAP_ANALYSIS.md`
-4. existing code
-5. git log
-
-If the answer is still unclear, write the uncertainty clearly and propose the safest next step.
-
-Never mark a task DONE unless the Definition of Done is actually satisfied or the deviation is explicitly documented in the task’s `Status:` note.
-
-
+- run relevant tests
+- run `npx tsc --noEmit` if TypeScript changed
+- verify migrations if migrations changed
+- update `TASKS.md`
+- commit if instructed / expected
+- report clearly:
+  - task IDs completed
+  - files changed
+  - tests run
+  - commit SHA or local/uncommitted status
+  - remaining follow-ups

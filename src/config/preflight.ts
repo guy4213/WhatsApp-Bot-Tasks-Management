@@ -69,6 +69,13 @@ export function runPreflight(): void {
   if (isProd && !(process.env.YORAM_PHONE ?? '').trim()) {
     warnings.push('YORAM_PHONE not set — Yoram exceptions digest (D4-T1) will not route; legacy ADMIN digest continues');
   }
+
+  // D3-T2/D3-T4 (K3) — Sasha leads digest + escalation alerts are silently
+  // disabled when SASHA_PHONE is unset. This is intentional for environments
+  // that have not yet configured the Sasha lead-stream. Warn only in prod.
+  if (isProd && !(process.env.SASHA_PHONE ?? '').trim()) {
+    warnings.push('SASHA_PHONE not set — Sasha leads morning digest (D3-T2) and 1h escalation alerts (D3-T4) are disabled');
+  }
   if (isProd && !process.env.DATABASE_CA_CERT && process.env.DATABASE_SSL !== 'disable') {
     warnings.push('DATABASE_CA_CERT not set — DB TLS is encrypted but the server cert is not verified');
   }

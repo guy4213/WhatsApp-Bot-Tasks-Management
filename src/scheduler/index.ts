@@ -9,6 +9,7 @@ import { runDeadlineExceededAlert,
 import { runCompletionNotifier }        from './jobs/completionNotifier';
 import { runDigestDispatcher }          from './jobs/digestDispatcher';
 import { runAssignmentCardNotifier }    from './jobs/assignmentCardNotifier';
+import { runLeadAssignmentNotifier }    from './jobs/leadAssignmentNotifier';
 import { recoverInboundQueue }          from '../routes/webhook';
 
 const log = moduleLogger('scheduler');
@@ -28,6 +29,7 @@ const JOB_LOCK_IDS = {
   queueRecovery:          1007,
   digestDispatcher:       1008,
   assignmentCardNotifier: 1009,
+  leadAssignmentNotifier: 1010,
 } as const;
 
 async function withJobLock(lockId: number, name: string, fn: () => Promise<void>): Promise<void> {
@@ -88,6 +90,12 @@ export function startScheduler(): void {
   // card (D2-T2), and stamp `workerNotifiedAt`. Advisory lock guards against
   // duplicate sends across instances.
   cron.schedule('*/2 * * * *', safe('assignmentCardNotifier', JOB_LOCK_IDS.assignmentCardNotifier, runAssignmentCardNotifier), { timezone: TZ });
+
+  // D3-T3 + D3-T4: every 2 minutes, poll IncomingLead for newly assigned rows
+  // (alert the inspector) and daytime-unassigned >1h rows (escalate to Sasha).
+  // Dedup via WhatsappLeadNotification (migration 010). Advisory lock prevents
+  // concurrent double-sends across instances.
+  cron.schedule('*/2 * * * *', safe('leadAssignmentNotifier', JOB_LOCK_IDS.leadAssignmentNotifier, runLeadAssignmentNotifier), { timezone: TZ });
 
   // Legacy fixed 17:00 daily summary — OFF by default. Its replacement is the
   // evening digest above. Re-enable only via LEGACY_DAILY_SUMMARY_ENABLED=true.

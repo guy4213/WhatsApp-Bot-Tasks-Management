@@ -476,3 +476,79 @@ export function formatDayFieldSummary(
 
   return `${greet}\n${finishedLine}${waitingLine}`;
 }
+
+// ── D3-T2: Sasha 09:30 leads morning digest ─────────────────────────────────
+//
+// SPEC_FIELD_V2 §12 — Sasha receives overnight unassigned leads (17:00 prev
+// day → 09:30 today) with an AI suggestion per lead. No emojis; no CTA button
+// (Sasha manages assignments in the CRM, not the bot).
+
+export interface LeadDigestRow {
+  id: string;
+  fromName: string | null;
+  fromEmail: string | null;
+  subject: string | null;
+  body: string | null;
+  receivedAt: Date;
+}
+
+export interface LeadDigestSuggestion {
+  leadId: string;
+  workerName: string | null;
+  reason: string;
+}
+
+const LEAD_BODY_MAX = 200;
+
+function truncate(text: string, max: number): string {
+  const t = text.trim();
+  return t.length > max ? t.slice(0, max) + '...' : t;
+}
+
+/**
+ * Sasha overnight leads digest — numbered list of unassigned leads with AI
+ * worker suggestions. Empty leads list → one-liner "no overnight leads" note.
+ * Body is truncated to LEAD_BODY_MAX chars to keep the message readable.
+ * Template vars: [name, lead count].
+ */
+export function formatSashaLeadsMorning(
+  leads: LeadDigestRow[],
+  suggestions: LeadDigestSuggestion[],
+  user: { name: string | null },
+): DigestContent {
+  const name = user.name ?? '';
+  const header = `בוקר טוב ${name}\nסיכום לידים — הלילה (ממתינים לשיבוץ):`;
+  const params = [name, String(leads.length)];
+
+  if (leads.length === 0) {
+    return {
+      text: `${header}\n\nלא התקבלו לידים ממתינים מהלילה.`,
+      params,
+      buttons: [],
+    };
+  }
+
+  const sugMap = new Map(suggestions.map((s) => [s.leadId, s]));
+
+  const rows = leads.map((lead, i) => {
+    const parts: string[] = [];
+    const sender = [
+      lead.fromName,
+      lead.fromEmail ? `(${lead.fromEmail})` : null,
+    ].filter(Boolean).join(' ');
+    parts.push(`${i + 1}. ${sender || 'לא ידוע'}`);
+    if (lead.subject) parts.push(`   נושא: ${lead.subject}`);
+    if (lead.body?.trim()) parts.push(`   הודעה: ${truncate(lead.body, LEAD_BODY_MAX)}`);
+    const sug = sugMap.get(lead.id);
+    if (sug) {
+      const sugLine = sug.workerName
+        ? `הצעת שיבוץ: ${sug.workerName} — ${sug.reason}`
+        : 'הצעת שיבוץ: לא נמצאה התאמה';
+      parts.push(`   ${sugLine}`);
+    }
+    return parts.join('\n');
+  });
+
+  const text = `${header}\n\n${rows.join('\n\n')}\n\nלשיבוץ ב-CRM`;
+  return { text, params, buttons: [] };
+}

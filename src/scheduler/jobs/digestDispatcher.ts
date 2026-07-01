@@ -1,6 +1,6 @@
 import { pool } from '../../db/connection';
 import { notify } from '../../whatsapp/templates';
-import { sendButtonMessage } from '../../whatsapp/sender';
+import { sendButtonMessage, sendTextMessage } from '../../whatsapp/sender';
 import { writeAuditLog } from '../../utils/auditLog';
 import { moduleLogger } from '../../utils/logger';
 import { claimDigestSend, markDigestFailed, type DigestType } from '../../services/digestSendLog';
@@ -13,7 +13,9 @@ import {
   formatInspectorMorning,
   formatEquipmentReminder,
   formatGalitManagerMorning, formatGalitManagerEndOfDay,
+  formatSashaLeadsMorning,
   digestTemplateKey, type DigestContent,
+  type LeadDigestRow, type LeadDigestSuggestion,
 } from '../../whatsapp/digestContent';
 import {
   getInspectionsForWorkerOnDate,
@@ -24,6 +26,8 @@ import {
   getFieldExceptionCounts, getOpenFieldExceptions,
 } from '../../services/exceptionsQueries';
 import { normalizeIsraeliPhone } from '../../auth/phoneNormalizer';
+import { findOvernightUnassignedLeads, findActiveInspectors } from '../../services/incomingLeads';
+import { suggestWorkerForLead } from '../../ai/leadSuggester';
 
 const log = moduleLogger('digestDispatcher');
 
@@ -118,7 +122,27 @@ export async function runDigestDispatcher(): Promise<void> {
     ? normalizeIsraeliPhone(yoramPhoneRaw)
     : null;
 
+  // D3-T2 (K3) — Sasha's phone cached identically. When set, Sasha's row
+  // receives LEADS_MORNING at 09:30 and NO normal MORNING/EVENING.
+  const sashaPhoneRaw = (process.env.SASHA_PHONE ?? '').trim();
+  const sashaPhoneNormalized = sashaPhoneRaw
+    ? normalizeIsraeliPhone(sashaPhoneRaw)
+    : null;
+
   for (const row of rows) {
+    // D3-T2 (K3) — Sasha digest: leads-only at 09:30 regardless of configured
+    // morning time. Normal MORNING/EVENING are suppressed for Sasha so she does
+    // not receive the inspector or manager digest in addition to leads.
+    if (sashaPhoneNormalized) {
+      const rowPhone = normalizeIsraeliPhone(row.user_phone);
+      if (rowPhone && rowPhone === sashaPhoneNormalized) {
+        if (isDigestDue('09:30', row.local_hm)) {
+          await dispatchSashaLeadsMorning(row);
+        }
+        continue; // Sasha: no normal MORNING / EVENING
+      }
+    }
+
     const morningDue = row.morning_enabled && isDigestDue(row.morning_time, row.local_hm);
     const eveningDue = row.evening_enabled && isDigestDue(row.evening_time, row.local_hm);
     if (morningDue) {
@@ -140,12 +164,71 @@ export async function runDigestDispatcher(): Promise<void> {
   }
 }
 
+// ── D3-T2: Sasha 09:30 leads morning digest ──────────────────────────────────
+//
+// Fetches overnight unassigned leads, gets one AI suggestion per lead, formats
+// via formatSashaLeadsMorning, and sends. Dedup via LEADS_MORNING in the
+// WhatsappDigestSendLog (same INSERT-first pattern as the inspector morning).
+// Uses sendTextMessage directly — no approved template yet (D5-T5 scope).
+
+async function dispatchSashaLeadsMorning(row: DueUserRow): Promise<void> {
+  let claimed = false;
+  try {
+    claimed = await claimDigestSend(row.user_id, 'LEADS_MORNING', row.local_date);
+  } catch (err) {
+    log.error({ err, userId: row.user_id }, 'claimDigestSend LEADS_MORNING failed');
+    return;
+  }
+  if (!claimed) return;
+
+  try {
+    const leads = await findOvernightUnassignedLeads(row.local_date);
+
+    const suggestions: LeadDigestSuggestion[] = [];
+    if (leads.length > 0) {
+      const candidates = await findActiveInspectors();
+      const rawSuggestions = await Promise.all(
+        leads.map((lead) =>
+          suggestWorkerForLead(
+            { service: lead.subject, messageText: lead.body, customerName: lead.fromName },
+            candidates,
+          ).then((s) => ({
+            leadId: lead.id,
+            workerName: s.userId
+              ? (candidates.find((c) => c.id === s.userId)?.name ?? null)
+              : null,
+            reason: s.reason,
+          })),
+        ),
+      );
+      suggestions.push(...rawSuggestions);
+    }
+
+    const content = formatSashaLeadsMorning(
+      leads as LeadDigestRow[],
+      suggestions,
+      { name: row.user_name },
+    );
+
+    await sendTextMessage({ to: row.user_phone, text: content.text });
+    await auditDigest(row, 'LEADS_MORNING', 'SUCCESS');
+    log.info({ userId: row.user_id, leadCount: leads.length }, 'Sasha leads morning digest sent');
+  } catch (err) {
+    log.error({ err, userId: row.user_id }, 'Sasha leads morning digest send failed');
+    try {
+      await markDigestFailed(row.user_id, 'LEADS_MORNING', row.local_date);
+    } catch (markErr) {
+      log.error({ err: markErr, userId: row.user_id }, 'markDigestFailed LEADS_MORNING failed');
+    }
+    await auditDigest(row, 'LEADS_MORNING', 'FAILED', (err as Error).message ?? 'unknown');
+  }
+}
+
 // `dispatchOne` handles the two "primary" digest slots — MORNING and EVENING.
-// The D2-T9 equipment reminder is a separate send with its own dedup row
-// (`EQUIPMENT_MORNING` — see `maybeDispatchEquipmentReminder` below), so the
-// digestType here is narrowed to the two-value union that `digestTemplateKey`
-// accepts.
-type PrimaryDigestType = Exclude<DigestType, 'EQUIPMENT_MORNING'>;
+// EQUIPMENT_MORNING and LEADS_MORNING are handled by dedicated helpers with
+// their own dedup rows, so the digestType here is narrowed to the two-value
+// union that `digestTemplateKey` accepts.
+type PrimaryDigestType = Exclude<DigestType, 'EQUIPMENT_MORNING' | 'LEADS_MORNING'>;
 
 async function dispatchOne(
   row: DueUserRow,

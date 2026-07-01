@@ -14,7 +14,7 @@ import { pool } from '../db/connection';
  * `WhatsappDigestSendLog.digestType` column is bare `text` (no CHECK) — see
  * `src/db/migrations/008_digests.sql:41` — so no migration is required.
  */
-export type DigestType = 'MORNING' | 'EVENING' | 'EQUIPMENT_MORNING';
+export type DigestType = 'MORNING' | 'EVENING' | 'EQUIPMENT_MORNING' | 'LEADS_MORNING';
 
 /**
  * Atomically claim the right to send a digest. Inserts the ledger row first; the
