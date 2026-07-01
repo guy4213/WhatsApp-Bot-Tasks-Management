@@ -18,7 +18,9 @@
       "Skill(update-config)",
       "Edit",
       "Write",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(cp .env.example .env)",
+      "Bash(node -e \"console.log\\('INTERNAL_API_SECRET candidate:', require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")"
     ]
   }
 }

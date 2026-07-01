@@ -15,6 +15,66 @@ First the locked decision log — this is the contract everything was written ag
 - A `TaskField` is created from the CRM field scheduling form using an existing `Task` ID. The `Task` remains the office / CRM customer task; each `TaskField` row is one scheduled field visit / inspection appointment.
 - Leads: source = the `IncomingLead` table (not the CRM's `Lead`). Assignment field: `ownerId` (UUID FK). No phone column — display `fromName`/`fromEmail`/`subject`/`body`. The worker **does not touch the lead from the bot** — receives an alert only; all handling is done in the CRM. Sasha (MANAGER permission) performs the assignments. Yoram sees leads in the morning and evening summary.
 
+---
+
+## Addendum — 2026-07-01 (product update)
+
+Two extensions to the locked contract. Both are additive and shrink the amount
+of context-switching Sasha and the workers need to do between WhatsApp and the
+CRM. Everything else in the spec below stays as-is.
+
+**1. Sasha can assign a lead to a worker from WhatsApp.**
+Previously (§2, §12) said Sasha performs assignments only in the CRM and the
+bot is a read-only window. Update: the bot now supports an `assign_lead`
+flow — Sasha picks a lead → picks a worker (AI suggestion or override) → bot
+writes `IncomingLead.ownerId`. The existing D3-T3 poller then sends the
+assignment alert to the picked worker automatically. **Lead CLOSURE remains
+in the CRM** — the bot only sets `ownerId`. This is the first place the bot
+writes to a CRM-owned table; the additive-only rule is now interpreted as
+"additive to the CRM schema, but the bot may write specific documented
+fields on CRM tables."
+
+**2. Any user can schedule a new `TaskField` for an existing `Task` from WhatsApp.**
+Previously (§1, K2) said `TaskField` is created only from the CRM scheduling
+form. Update: users can also schedule from WhatsApp against an already-existing
+`Task`. The bot writes `TaskField` (as documented in the migration below) but
+never writes `Task` or `Customer` — those remain the CRM's responsibility.
+Authorization: a worker can only schedule for a `Task` where they are
+`Task.ownerId`; MANAGER/ADMIN can schedule for any `Task`. See HANDOFF.md
+for the design.
+
+**3. Correcting site metadata on a `TaskField` from WhatsApp.**
+Previously (§1) the bot didn't edit any `TaskField` "scheduling / static" fields.
+Update: a worker (or MANAGER/ADMIN) can correct `siteAddress`, `siteCity`,
+`fieldContactName`, `fieldContactPhone` on a specific `TaskField` row when they
+discover the CRM data is wrong. This is a per-visit override — it does NOT
+write back to `Customer` or `Task`. If the same customer has a follow-up
+`TaskField` scheduled later, the follow-up still inherits the (still-wrong)
+`Customer` data — fixing the CRM record is the office's job. Authorization:
+a worker can correct only their own assigned `TaskField`; MANAGER/ADMIN any.
+
+**4. Reassigning a `TaskField` to another worker (MANAGER/ADMIN only).**
+Previously (§1, §2) assignment lived only in the CRM. Update: MANAGER or ADMIN
+can reassign a `TaskField` from WhatsApp — the bot writes `Task.ownerId`
+(second CRM-table write from the bot after D3-T6) and resets
+`TaskField.workerNotifiedAt` to `NULL` so the existing D5-T6 poller sends the
+§6 card to the new worker. Reassignment is per-Task (since `Task.ownerId` is
+the worker for the whole Task); if a Task has multiple `TaskField` rows, all
+future scheduling inherits the new owner. Worker roles cannot reassign.
+
+**5. Correcting the inspection type on a `TaskField`.**
+Previously the type was a locked snapshot from `Task.productName`. Update: a
+worker (on their own row) or ADMIN (any row) can update
+`TaskField.inspectionTypeId` and `TaskField.family` when the CRM's
+`Task.productName` was misclassified. Bot never writes `Task.productName` —
+that's still the office's job. Only the TaskField snapshot is corrected.
+
+Extensions 1-5 are additive; nothing in §5-§13 changes. The out-of-scope list
+in §14 is unchanged (photos, Outlook, and the other deferred items stay
+deferred). Editing scheduling time / duration on an existing `TaskField`,
+editing special instructions, and creating a new `Task` / `Customer` all stay
+in the CRM for now — see TASKS.md §5.
+
 ═══════════════════════════════════════
 
 # Spec — Galit bot (tightened version, no photos)
