@@ -42,39 +42,56 @@ describe('MENU_TRIGGER_RE', () => {
 });
 
 describe('menuItemsFor', () => {
-  it('employee menu: 7 items in the expected order, ending with free text', () => {
+  it('inspector (non-ADMIN) menu: exactly the 7 v2 items from SPEC §5, in order, mapped to the new MenuAction kinds', () => {
     const items = menuItemsFor(employee);
     expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    // Employees see their OWN tasks only (never company-wide).
-    const listScopes = items
-      .filter((i) => i.action.kind === 'list_tasks')
-      .map((i) => (i.action.kind === 'list_tasks' ? i.action.scope : null));
-    expect(listScopes.every((s) => s === 'own')).toBe(true);
-    // Item 6 is digest settings, item 7 is free text.
-    expect(items[5].action.kind).toBe('digest_settings');
-    expect(items[6].action.kind).toBe('free_text');
-    // No team_workload / pending_approvals for a regular employee.
+    expect(items.map((i) => i.label)).toEqual([
+      'הבדיקות שלי להיום',
+      'הבדיקות שלי למחר',
+      'עדכון סטטוס בדיקה',
+      'דיווח על בעיה',
+      'חסר ציוד',
+      'חסר מידע לדוח',
+      'סיכום יום',
+    ]);
+    expect(items.map((i) => i.action.kind)).toEqual([
+      'list_inspections_today',
+      'list_inspections_tomorrow',
+      'update_inspection_status',
+      'report_problem',
+      'missing_equipment',
+      'missing_report_info',
+      'day_summary',
+    ]);
+    // K5: no digest-settings entry in the v2 inspector menu.
+    expect(items.some((i) => i.action.kind === 'digest_settings')).toBe(false);
+    // The old CRM employee kinds are not emitted here (they remain in the type
+    // for other emitters until the X-series dismantle tasks remove them).
+    expect(items.some((i) => i.action.kind === 'list_tasks')).toBe(false);
+    expect(items.some((i) => i.action.kind === 'free_text')).toBe(false);
+    expect(items.some((i) => i.action.kind === 'guide')).toBe(false);
     expect(items.some((i) => i.action.kind === 'team_workload')).toBe(false);
     expect(items.some((i) => i.action.kind === 'pending_approvals')).toBe(false);
   });
 
-  it('manager menu: 8 items including team workload + pending approvals, company-wide lists', () => {
-    const items = menuItemsFor(manager);
+  it('K1: MANAGER users now see the inspector menu (only ADMIN gets the legacy manager menu)', () => {
+    // Deliberate v2 behavior — see TASKS.md §0 K1 and the D2-T1 build brief.
+    expect(menuItemsFor(manager)).toEqual(menuItemsFor(employee));
+  });
+
+  it('ADMIN gets the (unchanged) 8-item legacy manager menu until D4-T1 rewrites it', () => {
+    const items = menuItemsFor(admin);
     expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(items[0].action.kind).toBe('team_workload');
     expect(items.some((i) => i.action.kind === 'pending_approvals')).toBe(true);
     expect(items[6].action.kind).toBe('digest_settings');
     expect(items[7].action.kind).toBe('free_text');
-    // Manager lists are company-wide (scope 'all').
+    // Legacy manager lists are company-wide (scope 'all').
     const listScopes = items
       .filter((i) => i.action.kind === 'list_tasks')
       .map((i) => (i.action.kind === 'list_tasks' ? i.action.scope : null));
     expect(listScopes.length).toBeGreaterThan(0);
     expect(listScopes.every((s) => s === 'all')).toBe(true);
-  });
-
-  it('admin gets the same company-wide menu as manager (V1 scope)', () => {
-    expect(menuItemsFor(admin)).toEqual(menuItemsFor(manager));
   });
 });
 

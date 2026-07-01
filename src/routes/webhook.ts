@@ -278,13 +278,34 @@ async function handleIncomingMessage(from: string, text: string): Promise<void> 
 
   // First message of the day → greet the user by name (formal). Non-fatal:
   // a greeting failure must never block the actual request.
+  //
+  // K6: after the greeting, auto-open the v2 inspections menu so the user
+  // immediately sees what they can do (matches SPEC_FIELD_V2 §5 example
+  // "שלום דני, מה תרצה לעשות?"). When the user's message is itself a menu
+  // trigger word (e.g. "שלום"), skip the extra menu send here — handleAIMessage
+  // will open the menu with proper context via the MENU_TRIGGER_RE path.
+  // Otherwise, send the menu text as an informational display (no awaiting
+  // state change) so the user's real request still flows into handleAIMessage.
+  let greetedToday = false;
   try {
     const { claimDailyGreeting, buildGreeting } = await import('../services/greetings');
     if (await claimDailyGreeting(from)) {
+      greetedToday = true;
       await sendTextMessage({ to: from, text: buildGreeting(auth.user.name) });
     }
   } catch (err) {
     log.error({ err, from }, 'Daily greeting failed (continuing)');
+  }
+
+  if (greetedToday) {
+    try {
+      const { MENU_TRIGGER_RE, renderMenu } = await import('../ai/menu');
+      if (!MENU_TRIGGER_RE.test(text.trim())) {
+        await sendTextMessage({ to: from, text: renderMenu(auth.user) });
+      }
+    } catch (err) {
+      log.error({ err, from }, 'Auto-open menu after greeting failed (continuing)');
+    }
   }
 
   const { handleAIMessage } = await import('../ai/router');

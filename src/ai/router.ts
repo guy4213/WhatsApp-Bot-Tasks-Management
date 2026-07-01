@@ -818,6 +818,38 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
       await clearContext(user.phone);
       await sendTextMessage({ to: user.phone, text: action.guide });
       return;
+
+    // ── v2 inspector menu (SPEC_FIELD_V2 §5) — STUB handlers ─────────────────
+    // Real behavior lands in D2-T2 through D2-T10. Each stub sends a Hebrew
+    // placeholder plus the internal task IDs where the flow will be implemented.
+    case 'list_inspections_today':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T4/T5).' });
+      return;
+    case 'list_inspections_tomorrow':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T4/T5).' });
+      return;
+    case 'update_inspection_status':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T3/T5/T6/T7/T8).' });
+      return;
+    case 'report_problem':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T8).' });
+      return;
+    case 'missing_equipment':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T9).' });
+      return;
+    case 'missing_report_info':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T7).' });
+      return;
+    case 'day_summary':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T10).' });
+      return;
   }
 }
 
