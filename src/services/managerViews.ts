@@ -156,14 +156,16 @@ export async function getTodayFieldInspections(
        tf.id                                                           AS "taskFieldId",
        tf."taskId"                                                     AS "taskId",
        u.name                                                          AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName"
+         il."fromName",
+         NULLIF(TRIM(t.title), ''),
+         NULLIF(TRIM(t.description), '')
        )                                                               AS "customerName",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                       AS "timeHm",
@@ -259,14 +261,16 @@ export async function getFieldExceptionRows(
        tf.id              AS "taskFieldId",
        tf."taskId"        AS "taskId",
        u.name             AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName"
+         il."fromName",
+         NULLIF(TRIM(t.title), ''),
+         NULLIF(TRIM(t.description), '')
        )                  AS "customerName",
        tf."siteCity"      AS "siteCity",
        tf."fieldStatus"   AS "fieldStatus",
@@ -377,14 +381,16 @@ export async function getWorkerDayDetail(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName"
+         il."fromName",
+         NULLIF(TRIM(t.title), ''),
+         NULLIF(TRIM(t.description), '')
        )                                                                 AS "customerName",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
@@ -454,14 +460,16 @@ export async function searchTasksByWorkerName(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName"
+         il."fromName",
+         NULLIF(TRIM(t.title), ''),
+         NULLIF(TRIM(t.description), '')
        )                                                                 AS "customerName",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
@@ -509,14 +517,16 @@ export async function searchTasksByProductCode(
        tf.id                                                             AS "taskFieldId",
        tf."taskId"                                                       AS "taskId",
        u.name                                                            AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName"
+         il."fromName",
+         NULLIF(TRIM(t.title), ''),
+         NULLIF(TRIM(t.description), '')
        )                                                                 AS "customerName",
        to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
                                                                         AS "timeHm",
@@ -580,14 +590,16 @@ export async function getTaskFieldDetail(
        tf.id                     AS "taskFieldId",
        tf."taskId"               AS "taskId",
        u.name                    AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName"
+         il."fromName",
+         NULLIF(TRIM(t.title), ''),
+         NULLIF(TRIM(t.description), '')
        )                         AS "customerName",
        tf."siteAddress"          AS "siteAddress",
        tf."siteCity"             AS "siteCity",

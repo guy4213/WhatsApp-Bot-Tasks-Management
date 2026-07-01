@@ -85,6 +85,7 @@ import {
   assignLead,
 } from '../services/incomingLeads';
 import { suggestWorkerForLead } from './leadSuggester';
+import { extractFromContext, extractNote, type ExtractionRequest } from './contextExtractor';
 // D2-T12/T13/T14: site metadata correction, task reassign, inspection type correction.
 import {
   updateSiteMetadata,
@@ -483,6 +484,10 @@ async function continueConversation(
   }
   if (ctx.awaiting === 'correct_site_await_value') {
     await handleCorrectSiteAwaitValueReply(user, text, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'correct_site_confirm_extracted') {
+    await handleCorrectSiteConfirmExtractedReply(user, trimmed, ctx);
     return;
   }
 
@@ -945,14 +950,16 @@ async function executeIntent(
               `SELECT
                  tf.id AS "taskFieldId", tf."taskId" AS "taskId",
                  u.name AS "workerName",
-                 -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+                 -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
                  COALESCE(
                    c.name,
                    l."fullName",
                    NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
                    l.company,
                    p.client,
-                   il."fromName"
+                   il."fromName",
+                   NULLIF(TRIM(t.title), ''),
+                   NULLIF(TRIM(t.description), '')
                  ) AS "customerName",
                  to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI') AS "timeHm",
                  tf."siteCity" AS "siteCity", tf."fieldStatus" AS "fieldStatus",
@@ -988,6 +995,14 @@ async function executeIntent(
           const time = r.timeHm ?? '--:--';
           const city = r.siteCity ?? '—';
           const status = mgrFieldStatusHe(r.fieldStatus);
+          // When searching by worker, customer is the informative identifier; skip redundant worker column.
+          // When searching by customer, worker + time + city + status is the useful view; skip customer.
+          // When searching by product, both worker and customer are informative identifiers.
+          if (searchBy === 'worker') {
+            return `${i + 1}. ${customer} | ${time} | ${city} | ${status}`;
+          } else if (searchBy === 'customer') {
+            return `${i + 1}. ${worker} | ${time} | ${city} | ${status}`;
+          }
           return `${i + 1}. ${worker} | ${customer} | ${time} | ${city} | ${status}`;
         });
 
@@ -1311,17 +1326,20 @@ async function handleMissingInfoNoteReply(
   raw: string,
   ctx: ConversationState,
 ): Promise<void> {
-  const note = raw.trim();
   if (!ctx.taskFieldId) {
     // Corrupt state — reset and bail politely.
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
-  if (!note) {
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
     await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
     return;
   }
+  // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
+  const extracted = await extractNote(rawTrimmed, 'missing_info_note');
+  const note = extracted ?? rawTrimmed;
   await writeMissingInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
   await notifyOfficeMissingInfo(ctx.taskFieldId);
   await clearContext(user.phone);
@@ -1423,16 +1441,19 @@ async function handleProblemTypeNoteReply(
   raw: string,
   ctx: ConversationState,
 ): Promise<void> {
-  const note = raw.trim();
   if (!ctx.taskFieldId || !ctx.problemType) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
-  if (!note) {
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
     await sendTextMessage({ to: user.phone, text: 'פרט בבקשה:' });
     return;
   }
+  // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
+  const extracted = await extractNote(rawTrimmed, 'problem_note');
+  const note = extracted ?? rawTrimmed;
   await writeProblem({
     taskFieldId: ctx.taskFieldId,
     problemType: ctx.problemType,
@@ -1598,16 +1619,19 @@ async function handleFinishedNotesReply(
   raw: string,
   ctx: ConversationState,
 ): Promise<void> {
-  const notes = raw.trim();
   if (!ctx.taskFieldId) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
-  if (!notes) {
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
     await sendTextMessage({ to: user.phone, text: 'מה ההערות מהשטח?' });
     return;
   }
+  // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
+  const extracted = await extractNote(rawTrimmed, 'field_notes');
+  const notes = extracted ?? rawTrimmed;
   await writeFieldNotes({ taskFieldId: ctx.taskFieldId, notes, updatedBy: user.id });
   await clearContext(user.phone);
   await sendTextMessage({ to: user.phone, text: 'נשמר. תודה.' });
@@ -1771,11 +1795,14 @@ async function handleEquipmentMissingNoteReply(
   raw: string,
   ctx: ConversationState,
 ): Promise<void> {
-  const note = raw.trim();
-  if (!note) {
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
     await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
     return;
   }
+  // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
+  const extracted = await extractNote(rawTrimmed, 'equipment_missing_note');
+  const note = extracted ?? rawTrimmed;
   const localDate = ctx.equipmentLocalDate ?? localJerusalemDate();
   await notifyOfficeMissingEquipment({
     userId: user.id,
@@ -1850,16 +1877,19 @@ async function handleInspectionDeclineReasonReply(
   raw: string,
   ctx: ConversationState,
 ): Promise<void> {
-  const reason = raw.trim();
   if (!ctx.taskFieldId) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
-  if (!reason) {
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
     await sendTextMessage({ to: user.phone, text: 'מדוע אינך יכול להגיע? כתוב סיבה קצרה.' });
     return;
   }
+  // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
+  const extracted = await extractNote(rawTrimmed, 'decline_reason');
+  const reason = extracted ?? rawTrimmed;
   await declineInspection({ taskFieldId: ctx.taskFieldId, reason, updatedBy: user.id });
   await notifyOfficeDeclined(ctx.taskFieldId, reason);
   await clearContext(user.phone);
@@ -1871,16 +1901,19 @@ async function handleInspectionNeedInfoNoteReply(
   raw: string,
   ctx: ConversationState,
 ): Promise<void> {
-  const note = raw.trim();
   if (!ctx.taskFieldId) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
-  if (!note) {
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
     await sendTextMessage({ to: user.phone, text: 'אילו פרטים חסרים? כתוב מה צריך.' });
     return;
   }
+  // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
+  const extracted = await extractNote(rawTrimmed, 'missing_info_note');
+  const note = extracted ?? rawTrimmed;
   await requestMoreInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
   await notifyOfficeNeedsMoreInfo(ctx.taskFieldId, note);
   await clearContext(user.phone);
@@ -1978,11 +2011,14 @@ async function handleDaySummaryChoiceReply(user: ResolvedUser, trimmed: string):
 }
 
 async function handleCallbackCustomerNoteReply(user: ResolvedUser, raw: string): Promise<void> {
-  const note = raw.trim();
-  if (!note) {
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
     await sendTextMessage({ to: user.phone, text: 'לאיזה לקוח צריך לחזור? כתוב שם והערה קצרה.' });
     return;
   }
+  // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
+  const extracted = await extractNote(rawTrimmed, 'field_notes');
+  const note = extracted ?? rawTrimmed;
   const workerName = user.name ?? '—';
   const alert =
     `בקשת חזרה ללקוח\n` +
@@ -2578,34 +2614,137 @@ async function handleCorrectSiteAwaitValueReply(
     await showSiteFieldMenu(user, ctx.taskFieldId);
     return;
   }
+
+  // ── Fast path: rigid colon-split template (e.g. "כתובת אתר: רוטשילד 10") ──
   const colonIdx = text.indexOf(':');
-  if (colonIdx === -1) {
-    await sendTextMessage({ to: user.phone, text: 'לא הצלחתי לזהות. השתמש בתבנית: <שם שדה>: <ערך חדש>' });
-    return;
+  if (colonIdx !== -1) {
+    const rawField = text.slice(0, colonIdx).trim().toLowerCase();
+    const newValue = text.slice(colonIdx + 1).trim();
+    const siteFieldKey = SITE_FIELD_MAP[rawField];
+    if (siteFieldKey && newValue) {
+      return applySiteCorrection(user, ctx.taskFieldId, siteFieldKey, newValue);
+    }
+    // Has a colon but field is unrecognized — fall through to AI extractor.
+    if (!siteFieldKey) {
+      // Check if it looks like a genuine field:value attempt before trying AI.
+      // If rawField doesn't look like a key (e.g. it's a URL), still try AI.
+      await sendTextMessage({
+        to: user.phone,
+        text: `לא הכרתי את השדה "${rawField}". השתמש ב: כתובת אתר, עיר, שם איש קשר, טלפון איש קשר.`,
+      });
+      return;
+    }
   }
-  const rawField = text.slice(0, colonIdx).trim().toLowerCase();
-  const newValue = text.slice(colonIdx + 1).trim();
-  const siteFieldKey = SITE_FIELD_MAP[rawField];
-  if (!siteFieldKey) {
+
+  // ── AI extraction path (voice / free-text) ──────────────────────────────────
+  const SITE_FIELDS: ExtractionRequest['fields'] = [
+    { key: 'siteAddress',       labelHe: 'כתובת אתר',       kind: 'address' },
+    { key: 'siteCity',          labelHe: 'עיר',              kind: 'string' },
+    { key: 'fieldContactName',  labelHe: 'שם איש קשר',      kind: 'string' },
+    { key: 'fieldContactPhone', labelHe: 'טלפון איש קשר',   kind: 'phone' },
+  ];
+
+  const history = await getHistory(user.phone);
+  const result = await extractFromContext({
+    message: text,
+    intent: 'correct_site',
+    fields: SITE_FIELDS,
+    history: history.map((t) => ({ role: t.role === 'assistant' ? 'bot' : 'user', content: t.content })),
+    todayIsoDate: localJerusalemDate(),
+  });
+
+  // Find the single populated field.
+  const populatedEntries = SITE_FIELDS
+    .map((f) => ({ key: f.key as keyof import('../services/taskFieldCorrections').SiteMetadataFields, value: result.values[f.key] }))
+    .filter((e) => typeof e.value === 'string' && e.value.trim());
+
+  // High confidence (>= 0.85) + exactly one field → auto-apply.
+  if (result.confidence >= 0.85 && populatedEntries.length === 1) {
+    const { key, value } = populatedEntries[0];
+    return applySiteCorrection(user, ctx.taskFieldId, key, value as string);
+  }
+
+  // Medium confidence (0.60–0.85) + exactly one field → ask for confirmation.
+  if (result.confidence >= CONF_LOW && populatedEntries.length === 1) {
+    const { key, value } = populatedEntries[0];
+    const labelMap: Record<string, string> = {
+      siteAddress: 'כתובת אתר', siteCity: 'עיר',
+      fieldContactName: 'שם איש קשר', fieldContactPhone: 'טלפון איש קשר',
+    };
+    const label = labelMap[key] ?? key;
+    await setContext(user.phone, {
+      ...ctx,
+      awaiting: 'correct_site_confirm_extracted',
+      pendingExtractedField: key,
+      pendingExtractedValue: value as string,
+    });
     await sendTextMessage({
       to: user.phone,
-      text: `לא הכרתי את השדה "${rawField}". השתמש ב: כתובת אתר, עיר, שם איש קשר, טלפון איש קשר.`,
+      text: `הבנתי: ${label} = ${value as string}\nנכון? 1. כן  2. לא (שלח שוב בתבנית: <שדה>: <ערך>)`,
     });
     return;
   }
+
+  // Low confidence → fall back to the rigid rejection message.
+  await sendTextMessage({
+    to: user.phone,
+    text: result.clarification
+      ?? 'לא הצלחתי לזהות. השתמש בתבנית: <שם שדה>: <ערך חדש>',
+  });
+}
+
+/** Apply a validated site-metadata correction and clear the context. */
+async function applySiteCorrection(
+  user: ResolvedUser,
+  taskFieldId: string,
+  siteFieldKey: keyof import('../services/taskFieldCorrections').SiteMetadataFields,
+  newValue: string,
+): Promise<void> {
   // Auth check: WORKER can only correct their own TaskField.
   if (!user.isElevated) {
-    const taskFieldRow = await getTaskFieldForCorrection(ctx.taskFieldId);
+    const taskFieldRow = await getTaskFieldForCorrection(taskFieldId);
     if (!taskFieldRow || taskFieldRow.taskOwnerId !== user.id) {
       await clearContext(user.phone);
       await sendTextMessage({ to: user.phone, text: 'אין הרשאה לתקן בדיקה זו.' });
       return;
     }
   }
-  await updateSiteMetadata(ctx.taskFieldId, user.id, { [siteFieldKey]: newValue });
+  await updateSiteMetadata(taskFieldId, user.id, { [siteFieldKey]: newValue });
   await clearContext(user.phone);
   await sendTextMessage({ to: user.phone, text: 'עודכן בהצלחה.' });
   await auditEvent(user, 'correct_task_field_site', null, 'SUCCESS');
+}
+
+/** State: correct_site_confirm_extracted — user confirms or rejects AI-extracted value. */
+async function handleCorrectSiteConfirmExtractedReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const isYes = trimmed === '1' || YES_RE.test(trimmed);
+  const isNo  = trimmed === '2' || NO_RE.test(trimmed);
+
+  if (isNo || /^ביטול$|^cancel$/i.test(trimmed)) {
+    // Revert to the await_value state so they can try again.
+    await setContext(user.phone, { awaiting: 'correct_site_await_value', taskFieldId: ctx.taskFieldId });
+    await showSiteFieldMenu(user, ctx.taskFieldId!);
+    return;
+  }
+  if (!isYes) {
+    await sendTextMessage({ to: user.phone, text: 'השב 1 לאישור או 2 לתיקון.' });
+    return;
+  }
+  if (!ctx.taskFieldId || !ctx.pendingExtractedField || !ctx.pendingExtractedValue) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  return applySiteCorrection(
+    user,
+    ctx.taskFieldId,
+    ctx.pendingExtractedField as keyof import('../services/taskFieldCorrections').SiteMetadataFields,
+    ctx.pendingExtractedValue,
+  );
 }
 
 // ── D2-T13: reassign a Task to another worker ─────────────────────────────────
@@ -3083,7 +3222,7 @@ async function handleSchedulePickFromSearchReply(
   await sendTextMessage({ to: user.phone, text: `משימות פתוחות של ${chosen.name}:\n${list}\nבחר משימה (או "ביטול").` });
 }
 
-/** State: schedule_await_time — user types a date+time in ISO or DD/MM/YYYY HH:mm format. */
+/** State: schedule_await_time — user types a date+time (ISO, DD/MM/YYYY HH:mm, or Hebrew). */
 async function handleScheduleAwaitTimeReply(
   user: ResolvedUser,
   trimmed: string,
@@ -3098,10 +3237,7 @@ async function handleScheduleAwaitTimeReply(
     await sendTextMessage({ to: user.phone, text: 'מתי? (תאריך + שעה)' });
     return;
   }
-  // Try ISO then DD/MM/YYYY HH:mm.
-  // TODO(D2-T11-voice): for full Hebrew date parsing ("ראשון בעשר") call parseIntent
-  //   with a specialized date-extraction prompt (voice transcript arrives here as text
-  //   via D5-T2 and is already ISO from the AI param or a human-typed pattern).
+  // Fast path: Try ISO then DD/MM/YYYY HH:mm.
   let isoStart: string | null = null;
   if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(trimmed)) {
     isoStart = trimmed;
@@ -3109,6 +3245,19 @@ async function handleScheduleAwaitTimeReply(
     const m = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[T ](\d{1,2}):(\d{2})/);
     if (m) {
       isoStart = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}T${m[4].padStart(2, '0')}:${m[5]}:00+03:00`;
+    }
+  }
+  // AI extraction path for Hebrew / voice-style date input ("מחר ב-10", "יום ראשון בעשר").
+  if (!isoStart || isNaN(new Date(isoStart).getTime())) {
+    const result = await extractFromContext({
+      message: trimmed,
+      intent: 'schedule_time',
+      fields: [{ key: 'iso_datetime', labelHe: 'תאריך ושעה', kind: 'datetime', required: true }],
+      todayIsoDate: localJerusalemDate(),
+    });
+    const aiIso = result.values.iso_datetime;
+    if (result.confidence >= 0.6 && typeof aiIso === 'string' && aiIso.trim()) {
+      isoStart = aiIso.trim();
     }
   }
   if (!isoStart || isNaN(new Date(isoStart).getTime())) {
@@ -3126,6 +3275,29 @@ async function handleScheduleAwaitTimeReply(
   await sendTextMessage({ to: user.phone, text: 'משך? (ברירת מחדל: 60 דקות. שלח מספר בדקות או "אישור")' });
 }
 
+/** Parses a Hebrew duration string to minutes. Returns null if unparseable. */
+function parseHebrewDuration(input: string): number | null {
+  const t = input.trim();
+  // "אישור" / "ok" — accept default
+  if (/^אישור$|^ok$/i.test(t)) return null; // null = use default
+  // Pure integer minutes
+  const asInt = parseInt(t, 10);
+  if (Number.isInteger(asInt) && asInt > 0 && String(asInt) === t.trim()) return asInt;
+  // Hebrew patterns
+  if (/^שעתיים$/.test(t)) return 120;
+  if (/^שעה וחצי$|^שעה ו-?30$/.test(t)) return 90;
+  if (/^שעה ו-?45$/.test(t)) return 105;
+  if (/^שעה ו-?(\d+)/.test(t)) {
+    const m = t.match(/^שעה ו-?(\d+)/);
+    if (m) return 60 + parseInt(m[1], 10);
+  }
+  if (/^שעה$/.test(t)) return 60;
+  // "45 דקות" or "45דקות"
+  const minutesMatch = t.match(/^(\d+)\s*דקות?$/);
+  if (minutesMatch) return parseInt(minutesMatch[1], 10);
+  return undefined as unknown as null; // truly unparseable
+}
+
 /** State: schedule_await_duration — user types minutes or "אישור". */
 async function handleScheduleAwaitDurationReply(
   user: ResolvedUser,
@@ -3139,12 +3311,26 @@ async function handleScheduleAwaitDurationReply(
   }
   let duration = ctx.scheduleDurationMinutes ?? 60;
   if (trimmed && !/^אישור$|^ok$/i.test(trimmed)) {
-    const n = parseInt(trimmed, 10);
-    if (Number.isInteger(n) && n > 0) {
-      duration = n;
+    // Fast path: try Hebrew duration patterns before calling AI.
+    const parsed = parseHebrewDuration(trimmed);
+    if (typeof parsed === 'number' && parsed > 0) {
+      duration = parsed;
+    } else if (parsed === null) {
+      // "אישור" — keep default
     } else {
-      await sendTextMessage({ to: user.phone, text: 'שלח מספר דקות (למשל 90) או "אישור" לברירת המחדל (60 דקות).' });
-      return;
+      // AI extraction path for more complex phrasing.
+      const result = await extractFromContext({
+        message: trimmed,
+        intent: 'schedule_duration',
+        fields: [{ key: 'duration_minutes', labelHe: 'משך בדקות', kind: 'number', required: true }],
+      });
+      const aiDuration = result.values.duration_minutes;
+      if (result.confidence >= 0.6 && typeof aiDuration === 'number' && aiDuration > 0) {
+        duration = aiDuration;
+      } else {
+        await sendTextMessage({ to: user.phone, text: 'שלח מספר דקות (למשל 90), "שעה", "שעה וחצי", או "אישור" לברירת המחדל (60 דקות).' });
+        return;
+      }
     }
   }
   const task = ctx.scheduleSelectedTask;
@@ -3738,6 +3924,10 @@ async function handleMgrSearchAwaitQueryReply(
     return;
   }
 
+  // AI extraction: strip polite prefixes from the search query.
+  const extractedQuery = await extractNote(trimmed, 'field_notes');
+  const searchQuery = (extractedQuery && extractedQuery.trim()) ? extractedQuery.trim() : trimmed;
+
   let results: TodayFieldInspectionRow[] = [];
 
   if (kind === 'customer') {
@@ -3760,14 +3950,16 @@ async function handleMgrSearchAwaitQueryReply(
         `SELECT
            tf.id AS "taskFieldId", tf."taskId" AS "taskId",
            u.name AS "workerName",
-           -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+           -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
            COALESCE(
              c.name,
              l."fullName",
              NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
              l.company,
              p.client,
-             il."fromName"
+             il."fromName",
+             NULLIF(TRIM(t.title), ''),
+             NULLIF(TRIM(t.description), '')
            ) AS "customerName",
            to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI') AS "timeHm",
            tf."siteCity" AS "siteCity", tf."fieldStatus" AS "fieldStatus",
@@ -3782,19 +3974,19 @@ async function handleMgrSearchAwaitQueryReply(
          LEFT JOIN "User" u          ON u.id  = t."ownerId"
          WHERE c.name ILIKE '%' || $1 || '%'
          ORDER BY tf."scheduledStartAt" DESC LIMIT 20`,
-        [trimmed],
+        [searchQuery],
       );
     });
     results = rows;
   } else if (kind === 'worker') {
-    results = await searchTasksByWorkerName(trimmed);
+    results = await searchTasksByWorkerName(searchQuery);
   } else if (kind === 'product') {
-    results = await searchTasksByProductCode(trimmed);
+    results = await searchTasksByProductCode(searchQuery);
   }
 
   if (results.length === 0) {
     await setContext(user.phone, { awaiting: 'mgr_search_await_query', mgrSearchKind: kind });
-    await sendTextMessage({ to: user.phone, text: `לא נמצאו תוצאות עבור "${trimmed}". נסה שוב או "חזרה".` });
+    await sendTextMessage({ to: user.phone, text: `לא נמצאו תוצאות עבור "${searchQuery}". נסה שוב או "חזרה".` });
     return;
   }
 
@@ -3804,6 +3996,14 @@ async function handleMgrSearchAwaitQueryReply(
     const time = r.timeHm ?? '--:--';
     const city = r.siteCity ?? '—';
     const status = mgrFieldStatusHe(r.fieldStatus);
+    // When searching by worker, customer is the informative identifier; skip redundant worker column.
+    // When searching by customer, worker + time + city + status is the useful view; skip customer.
+    // When searching by product, both worker and customer are informative identifiers.
+    if (kind === 'worker') {
+      return `${i + 1}. ${customer} | ${time} | ${city} | ${status}`;
+    } else if (kind === 'customer') {
+      return `${i + 1}. ${worker} | ${time} | ${city} | ${status}`;
+    }
     return `${i + 1}. ${worker} | ${customer} | ${time} | ${city} | ${status}`;
   });
 

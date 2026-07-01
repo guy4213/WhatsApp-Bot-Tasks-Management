@@ -533,7 +533,8 @@ describe('intent: search_task', () => {
     mockParseIntent(makeIntent('search_task', { params: { searchBy: 'worker', query: 'דני' } }));
     await handleAIMessage(admin, 'בדיקות של דני');
     expect(searchTasksByWorkerName).toHaveBeenCalledWith('דני');
-    expect(lastMsg()).toContain('1. דני כהן');
+    // worker search: per-row format omits redundant worker column → shows customer | time | city | status
+    expect(lastMsg()).toContain('1. לקוח | 10:00 | ת"א');
     expect(ctxStore).toMatchObject({ awaiting: 'mgr_search_pick_task', mgrSearchKind: 'worker' });
   });
 

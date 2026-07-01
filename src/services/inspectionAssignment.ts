@@ -67,14 +67,16 @@ export async function findUnnotifiedTaskFields(limit = 50): Promise<UnnotifiedTa
        u.id                        AS "workerId",
        u.phone                     AS "workerPhone",
        u.name                      AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName"
+         il."fromName",
+         NULLIF(TRIM(t.title), ''),
+         NULLIF(TRIM(t.description), '')
        )                           AS "customerName",
        tf."siteAddress"            AS "siteAddress",
        tf."siteCity"               AS "siteCity",

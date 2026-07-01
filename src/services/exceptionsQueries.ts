@@ -164,14 +164,16 @@ export async function getOpenFieldExceptions(
     `SELECT
        tf.id                         AS "taskFieldId",
        u.name                        AS "workerName",
-       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+       -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
        COALESCE(
          c.name,
          l."fullName",
          NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
          l.company,
          p.client,
-         il."fromName"
+         il."fromName",
+         NULLIF(TRIM(t.title), ''),
+         NULLIF(TRIM(t.description), '')
        )                             AS "customerName",
        tf."siteAddress"              AS "siteAddress",
        CASE

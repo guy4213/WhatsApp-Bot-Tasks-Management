@@ -176,6 +176,14 @@ vi.mock('../services/taskFieldScheduling', () => ({
   createTaskField: vi.fn().mockResolvedValue('new-tf-id'),
 }));
 
+// contextExtractor — default: returns low confidence so rigid path still runs.
+const extractFromContext = vi.fn().mockResolvedValue({ values: {}, confidence: 0, clarification: null });
+const extractNote = vi.fn().mockResolvedValue(null);
+vi.mock('../ai/contextExtractor', () => ({
+  extractFromContext: (...a: unknown[]) => extractFromContext(...a),
+  extractNote: (...a: unknown[]) => extractNote(...a),
+}));
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 import type { ResolvedUser } from '../types';
@@ -207,6 +215,8 @@ beforeEach(() => {
   updateSiteMetadata.mockReset(); updateSiteMetadata.mockResolvedValue(undefined);
   reassignTask.mockReset(); reassignTask.mockResolvedValue({ resetCount: 1, hadInProgressRows: false });
   correctInspectionType.mockReset(); correctInspectionType.mockResolvedValue({ oldProductName: '73', newProductName: '62' });
+  extractFromContext.mockReset(); extractFromContext.mockResolvedValue({ values: {}, confidence: 0, clarification: null });
+  extractNote.mockReset(); extractNote.mockResolvedValue(null);
   listInspectionTypes.mockReset(); listInspectionTypes.mockResolvedValue([]);
   getTaskFieldForCorrection.mockReset(); getTaskFieldForCorrection.mockResolvedValue(null);
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
@@ -347,6 +357,140 @@ describe('D2-T12 — correct_task_field_site', () => {
     await sendMessage(makeWorker(), 'שדה_לא_קיים: ערך');
     expect(updateSiteMetadata).not.toHaveBeenCalled();
     expect(sendTextMessage.mock.calls[0][0].text).toContain('לא הכרתי את השדה');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D2-T12 — AI extraction path tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('D2-T12 — correct_site AI extraction path', () => {
+  it('auto-applies when AI returns high confidence (>= 0.85) and single field', async () => {
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-own', customerName: 'לוי' });
+    getTaskFieldForCorrection.mockResolvedValueOnce({
+      taskFieldId: 'tf-own', taskId: 'task-1', taskOwnerId: 'u-worker',
+      fieldStatus: 'ASSIGNED', currentInspectionTypeId: null, currentLabelHe: null,
+    });
+    // Mock AI extractor: high confidence, fieldContactPhone
+    extractFromContext.mockResolvedValueOnce({
+      values: { siteAddress: null, siteCity: null, fieldContactName: null, fieldContactPhone: '050-9999999' },
+      confidence: 0.92,
+      clarification: null,
+    });
+
+    await driveIntent(makeWorker(), {
+      intent: 'correct_task_field_site', confidence: 1, task_reference: 'לוי',
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    // Voice-style input (no colon) — should trigger AI extractor
+    await sendMessage(makeWorker(), 'אני רוצה לעדכן את הטלפון של איש הקשר ל-050-9999999');
+
+    expect(updateSiteMetadata).toHaveBeenCalledWith(
+      'tf-own', 'u-worker', { fieldContactPhone: '050-9999999' },
+    );
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('עודכן בהצלחה');
+  });
+
+  it('asks for confirmation at medium confidence (0.60-0.85)', async () => {
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-own', customerName: 'לוי' });
+    // Mock AI extractor: medium confidence
+    extractFromContext.mockResolvedValueOnce({
+      values: { siteAddress: null, siteCity: 'חיפה', fieldContactName: null, fieldContactPhone: null },
+      confidence: 0.72,
+      clarification: null,
+    });
+
+    await driveIntent(makeWorker(), {
+      intent: 'correct_task_field_site', confidence: 1, task_reference: 'לוי',
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    await sendMessage(makeWorker(), 'תעדכן את הערים לחיפה');
+
+    // Should show confirmation prompt, not apply immediately
+    expect(updateSiteMetadata).not.toHaveBeenCalled();
+    expect(ctxStore?.awaiting).toBe('correct_site_confirm_extracted');
+    const text = sendTextMessage.mock.calls[0][0].text;
+    expect(text).toContain('הבנתי');
+    expect(text).toContain('חיפה');
+  });
+
+  it('falls back to rigid rejection at low confidence (< 0.60)', async () => {
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-own', customerName: 'לוי' });
+    extractFromContext.mockResolvedValueOnce({
+      values: { siteAddress: null, siteCity: null, fieldContactName: null, fieldContactPhone: null },
+      confidence: 0.2,
+      clarification: 'לא הצלחתי לזהות',
+    });
+
+    await driveIntent(makeWorker(), {
+      intent: 'correct_task_field_site', confidence: 1, task_reference: 'לוי',
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    await sendMessage(makeWorker(), 'שלום מה נשמע');
+
+    expect(updateSiteMetadata).not.toHaveBeenCalled();
+    // Should show rejection
+    const text = sendTextMessage.mock.calls[0][0].text;
+    expect(text).toMatch(/לא הצלחתי|לא הצלחתי לזהות/);
+  });
+
+  it('rigid template path still works — does not call extractFromContext', async () => {
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-rigid', customerName: 'כהן' });
+    getTaskFieldForCorrection.mockResolvedValueOnce({
+      taskFieldId: 'tf-rigid', taskId: 'task-1', taskOwnerId: 'u-worker',
+      fieldStatus: 'ASSIGNED', currentInspectionTypeId: null, currentLabelHe: null,
+    });
+
+    await driveIntent(makeWorker(), {
+      intent: 'correct_task_field_site', confidence: 1, task_reference: 'כהן',
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    // Rigid template input
+    await sendMessage(makeWorker(), 'כתובת אתר: רוטשילד 10 תל אביב');
+
+    expect(updateSiteMetadata).toHaveBeenCalledWith(
+      'tf-rigid', 'u-worker', { siteAddress: 'רוטשילד 10 תל אביב' },
+    );
+    // extractFromContext should NOT have been called (fast path handled it)
+    expect(extractFromContext).not.toHaveBeenCalled();
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('עודכן בהצלחה');
+  });
+
+  it('confirms extracted value then applies it after user says "1"', async () => {
+    // Pre-seed the confirm_extracted state
+    const { handleAIMessage } = await import('../ai/router');
+    ctxStore = {
+      awaiting: 'correct_site_confirm_extracted',
+      taskFieldId: 'tf-own',
+      pendingExtractedField: 'siteCity',
+      pendingExtractedValue: 'חיפה',
+    };
+    getTaskFieldForCorrection.mockResolvedValueOnce({
+      taskFieldId: 'tf-own', taskId: 'task-1', taskOwnerId: 'u-worker',
+      fieldStatus: 'ASSIGNED', currentInspectionTypeId: null, currentLabelHe: null,
+    });
+    sendTextMessage.mockClear();
+
+    await handleAIMessage(makeWorker(), '1');
+
+    expect(updateSiteMetadata).toHaveBeenCalledWith('tf-own', 'u-worker', { siteCity: 'חיפה' });
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('עודכן בהצלחה');
   });
 });
 

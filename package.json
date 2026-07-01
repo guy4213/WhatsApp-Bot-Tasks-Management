@@ -12,7 +12,8 @@
     "check:recipients": "ts-node src/scripts/checkRecipients.ts",
     "templates:dry-run": "ts-node --transpile-only scripts/create-whatsapp-templates.ts --dry-run",
     "templates:create": "ts-node --transpile-only scripts/create-whatsapp-templates.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify:queries": "ts-node src/scripts/verifyManagerMenuQueries.ts"
   },
   "repository": {
     "type": "git",

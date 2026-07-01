@@ -41,6 +41,7 @@ export type AwaitingKind =
   | 'correct_site_pick_field'   // manager picks which TaskField (when >1 per Task)
   | 'correct_site_await_value'  // waiting for the corrected value
   | 'correct_site_confirm'      // waiting for worker confirmation before writing
+  | 'correct_site_confirm_extracted' // waiting for confirmation of AI-extracted value
   // D2-T13: reassign a Task to another worker (MANAGER/ADMIN only).
   | 'reassign_pick_task'        // manager types a task reference
   | 'reassign_pick_worker'      // manager picks new worker from a numbered list
@@ -144,6 +145,9 @@ export interface ConversationState {
   scheduleStartAt?: string;           // ISO 8601 date+time (user-supplied)
   scheduleDurationMinutes?: number;   // default 60
   scheduleSpecialInstructions?: string | null;
+  // D2-T12: pending AI-extracted site metadata correction (for confirm_extracted state).
+  pendingExtractedField?: string;  // the siteField key (e.g. 'siteAddress')
+  pendingExtractedValue?: string;  // the new value to apply after user confirms
   // Manager menu: payload fields for multi-step flows.
   mgrTaskFieldIds?: string[];         // numbered list of TaskField IDs shown to the manager
   mgrTaskIds?: string[];              // corresponding Task IDs (parallel array)

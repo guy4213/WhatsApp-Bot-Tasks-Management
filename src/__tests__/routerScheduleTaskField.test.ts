@@ -162,6 +162,12 @@ vi.mock('../services/taskFieldCorrections', () => ({
   ClosedInspectionError: class ClosedInspectionError extends Error {},
 }));
 
+// contextExtractor — default returns low confidence so AI path is a no-op.
+vi.mock('../ai/contextExtractor', () => ({
+  extractFromContext: vi.fn().mockResolvedValue({ values: {}, confidence: 0, clarification: null }),
+  extractNote: vi.fn().mockResolvedValue(null),
+}));
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 import type { ResolvedUser } from '../types';
@@ -560,14 +566,26 @@ describe('schedule_await_duration state', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'schedule_confirm', scheduleDurationMinutes: 90 });
   });
 
-  it('non-numeric non-confirmation re-prompts', async () => {
+  it('"שעה וחצי" is now recognized as 90 minutes and advances to confirm', async () => {
+    // The fast-path Hebrew duration parser recognises "שעה וחצי" → 90 minutes.
     const user = makeWorker();
     ctxStore = { ...BASE_CTX };
 
     const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, 'שעה וחצי');
 
-    expect(ctxStore).toMatchObject({ awaiting: 'schedule_await_duration' });
+    expect(ctxStore).toMatchObject({ awaiting: 'schedule_confirm', scheduleDurationMinutes: 90 });
+    expect(scheduleTaskField).not.toHaveBeenCalled(); // not yet — still needs confirmation
+  });
+
+  it('truly unrecognized text re-prompts for duration', async () => {
+    const user = makeWorker();
+    ctxStore = { ...BASE_CTX };
+
+    const { handleAIMessage } = await loadRouter();
+    // Something that neither the fast-path nor the AI extractor (mocked to return low confidence) can parse.
+    await handleAIMessage(user, 'לא יודע');
+
     const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
     expect(texts.some((t) => t.includes('דקות'))).toBe(true);
     expect(scheduleTaskField).not.toHaveBeenCalled();

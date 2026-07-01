@@ -126,14 +126,16 @@ export type OpenTaskFieldResult =
 export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTaskFieldResult> {
   const result = await pool.query<{ taskFieldId: string; customerName: string | null }>(
     `SELECT tf.id            AS "taskFieldId",
-            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
             COALESCE(
               c.name,
               l."fullName",
               NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
               l.company,
               p.client,
-              il."fromName"
+              il."fromName",
+              NULLIF(TRIM(t.title), ''),
+              NULLIF(TRIM(t.description), '')
             )                AS "customerName"
        FROM "TaskField" tf
        JOIN "Task"           t  ON t.id  = tf."taskId"
@@ -385,14 +387,16 @@ export async function resolveOpenTaskFieldByHint(
   if (!trimmed) return null;
   const result = await pool.query<{ taskFieldId: string; customerName: string | null }>(
     `SELECT tf.id            AS "taskFieldId",
-            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
             COALESCE(
               c.name,
               l."fullName",
               NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
               l.company,
               p.client,
-              il."fromName"
+              il."fromName",
+              NULLIF(TRIM(t.title), ''),
+              NULLIF(TRIM(t.description), '')
             )                AS "customerName"
        FROM "TaskField" tf
        JOIN "Task"           t  ON t.id  = tf."taskId"
@@ -444,14 +448,16 @@ async function loadAlertContext(taskFieldId: string): Promise<AlertContext | nul
   }>(
     `SELECT u.name              AS "workerName",
             it."labelHe"        AS "familyLabelHe",
-            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead (SCHEMA_CRM.md)
+            -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
             COALESCE(
               c.name,
               l."fullName",
               NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
               l.company,
               p.client,
-              il."fromName"
+              il."fromName",
+              NULLIF(TRIM(t.title), ''),
+              NULLIF(TRIM(t.description), '')
             )                   AS "customerName",
             tf."siteCity"       AS "siteCity",
             tf."missingReportInfoNote" AS "missingReportInfoNote",

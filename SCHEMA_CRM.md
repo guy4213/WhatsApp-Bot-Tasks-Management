@@ -144,7 +144,9 @@ COALESCE(
   NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
   l.company,
   p.client,
-  il."fromName"
+  il."fromName",
+  NULLIF(TRIM(t.title), ''),
+  NULLIF(TRIM(t.description), '')
 ) AS "customerName"
 ```
 
@@ -157,6 +159,9 @@ LEFT JOIN "Project"     p  ON p.id  = t."projectId"
 LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
 ```
 
+(`t` must be the `"Task"` alias in the query — `t.title` and `t.description`
+refer to the Task row itself, no extra JOIN needed.)
+
 Order of precedence:
 1. Direct `Customer.name` (if `Task.customerId` is set)
 2. `Lead.fullName` (imported legacy leads store the full name here)
@@ -164,8 +169,10 @@ Order of precedence:
 4. `Lead.company` (B2B leads with only company info)
 5. `Project.client` (project-based tasks; text field, not FK)
 6. `IncomingLead.fromName` (leads that came in via the mailbox)
+7. `Task.title` — last-resort fallback when ALL customer FKs are NULL
+8. `Task.description` — final fallback (often contains the address or job summary)
 
-If ALL six are NULL/empty, the bot may display "לקוח לא ידוע" but this
+If ALL eight are NULL/empty, the bot may display "לקוח לא ידוע" but this
 indicates a data-quality issue that should be flagged, not silenced.
 
 ---
