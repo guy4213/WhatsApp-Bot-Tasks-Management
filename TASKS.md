@@ -114,6 +114,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 ### Domain 1 — DB schema (additive only)
 
 #### D1-T1 — Migration 009 file scaffold (idempotent + conventions)
+- **Status:** DONE (commit f7aeaa0)
 - **What to do:** new file `src/db/migrations/009_field_inspections.sql`. Header + DO block envelope mirroring `008_digests.sql`. No DDL yet — this task is just the file shell + `BEGIN ... COMMIT` and the migration runner registration check. Confirm the file is detected by `src/db/migrate.ts` and `schema_migrations` tracks it.
 - **Definition of Done:** running `npm run migrate` on a fresh DB applies migration 009 (currently a no-op) and records it in `schema_migrations`; running again is idempotent.
 - **Reference:** GAP Domain 1 (all rows reference `009_*.sql`). Spec migration block lines 258-356.
@@ -121,6 +122,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** no.
 
 #### D1-T2 — `InspectionType` table DDL
+- **Status:** DONE (commit f7aeaa0). Note: `isFieldInspection` column was OMITTED — it is not in the authoritative spec migration block (lines 258–356), which is the source of truth for column names per the build brief. Only the deferred, B1-blocked `D1-T7` references it; add it via an additive `ALTER TABLE` in that PR.
 - **What to do:** extend `009_field_inspections.sql` with the `InspectionType` table. Columns per spec §3 + migration block lines 258-356: UUID PK `gen_random_uuid()`, `code` UNIQUE (= `Task.productName`), `labelHe`, `family` text + CHECK across the 13 declared values, `isActive` bool default true, `sortOrder` int, `isFieldInspection` bool, `createdAt`/`updatedAt` timestamps. Index on `family`. RLS enabled deny-all (pattern from `008_digests.sql`).
 - **Definition of Done:** migration creates the table; the CHECK constraint rejects an unknown `family`; the unique constraint on `code` rejects a duplicate insert; RLS deny-all is verified via a non-service-role connection.
 - **Reference:** GAP Domain 1 row 1. Spec §3, §14, lines 258-356, 408-413.
@@ -128,6 +130,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** no (DDL not blocked — the seed is).
 
 #### D1-T3 — `InspectionChecklist` table DDL
+- **Status:** DONE (commit f7aeaa0)
 - **What to do:** extend `009_field_inspections.sql` with `InspectionChecklist`. Columns per spec migration block lines 282-294: UUID PK, `family` text + CHECK (same 13 values), `code`, `labelHe`, `isRequired` bool, `sortOrder` int, `UNIQUE(family, code)`, index on `family`, RLS deny-all. NO `kind` column (dropped per spec).
 - **Definition of Done:** table created; unique constraint on `(family, code)` rejects duplicates; CHECK on `family` rejects unknown values; RLS deny-all verified.
 - **Reference:** GAP Domain 1 row 2. Spec §3, lines 282-294.
@@ -142,6 +145,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** YES (K2).
 
 #### D1-T5 — `TaskField` table DDL (operational spine)
+- **Status:** DONE (commit f7aeaa0). Note: a 13-value `CHECK` was added to `TaskField.family` (the snapshot column) to match `InspectionType`/`InspectionChecklist` — the raw spec block left it bare, but the build brief's hard constraints and this task spec both require it.
 - **What to do:** extend `009_field_inspections.sql` with `TaskField`. Columns per spec §3, §4, migration block lines 297-336: UUID PK, `taskId` UUID UNIQUE FK to `Task`, `inspectionTypeId` UUID FK to `InspectionType`, snapshot `family` text + CHECK (same 13 values), static metadata (`siteAddress`, `siteCity`, `fieldContactName`, `fieldContactPhone`, `navigationUrl`, `specialInstructions`), live `fieldStatus` text + CHECK over **exactly the 10 values** (`ASSIGNED, CONFIRMED, DECLINED, NEEDS_MORE_INFO, EN_ROUTE, ARRIVED, FINISHED_FIELD, WAITING_FOR_INFO, HAS_PROBLEM, CANCELED` — NO `STARTED`), per-status timestamps (`assignedAt, confirmedAt, declinedAt, departedAt, arrivedAt, finishedAt`), `declinedReason` text, inline problem (`problemType` text + CHECK over the 7 declared values, `problemNote` text, `hasOpenProblem` bool), missing-info (`missingReportInfo` bool, `missingReportInfoNote` text), `managerNotifiedAt` timestamp, `updatedByUserId` UUID FK to `User`, `createdAt/updatedAt` timestamps. Index on `fieldStatus`; partial index `WHERE hasOpenProblem = true`. RLS deny-all.
 - **Definition of Done:** table created; the 10-value CHECK rejects any other `fieldStatus`; the 7-value CHECK rejects any other `problemType`; the unique constraint on `taskId` enforces 1:1; both indexes present; RLS deny-all verified.
 - **Reference:** GAP Domain 1 row 3. Spec §3, §4, lines 297-336.
@@ -149,6 +153,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** no.
 
 #### D1-T6 — Seed `InspectionChecklist` for the 4 declared families
+- **Status:** DONE (commit f7aeaa0)
 - **What to do:** idempotent `INSERT ... ON CONFLICT (family, code) DO NOTHING` block for the 4 families (radiation / noise / asbestos / radon) — 17 rows total — fully specified in spec migration block lines 360-381.
 - **Definition of Done:** running migration 009 twice leaves exactly 17 rows in `InspectionChecklist`; rows match the spec's family/code/labelHe/isRequired/sortOrder.
 - **Reference:** GAP Domain 1 row 6. Spec lines 360-381, 580-598.
