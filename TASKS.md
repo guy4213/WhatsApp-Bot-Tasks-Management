@@ -23,6 +23,11 @@ The 7 K-tasks from §2 are closed. Resolutions:
 
 Downstream effect on task blockers: `D5-T1, D2-T1, D2-T4, D3-T5, D4-T1, D4-T2, D5-T2, D5-T6, X-T5, X-T6` are no longer blocked on K-decisions (only K2-gated tasks `D1-T4 / D2-T2` remain decision-blocked, plus the original external-input blockers `B1 / B2`).
 
+**2026-07-01 — B1 and B2 RESOLVED. Only K2 remains open.**
+- **B1 resolved:** proceed with the clear, field-relevant מק"טים from the spec draft (lines 416-571). Shielding and borderline rows are skipped for now — include only unambiguous field-inspection types. `D1-T7` is unblocked.
+- **B2 resolved:** table is `IncomingLead`. Columns: `id`, `subject`, `body`, `fromName`, `fromEmail`, `receivedAt`, `status`, `ownerId`, `taskId`, `notifiedAt`. Assignment field is `ownerId` (UUID FK to `User`). No phone column — messages display `fromName` / `fromEmail` / `subject` / `body`. `transferredToId` exists but is not used. All Domain 3 tasks unblocked; `D4-T1` leads portion unblocked.
+- **Only remaining open item: K2** — Task→inspection mechanism (DB trigger / CRM hook / polling). Still gates `D1-T4`, `D2-T2`, `D3-T3`, `D5-T6`.
+
 ---
 
 ## 1. Blockers / external dependencies
@@ -30,20 +35,20 @@ Downstream effect on task blockers: `D5-T1, D2-T1, D2-T4, D3-T5, D4-T1, D4-T2, D
 These are inputs the bot team cannot produce internally. Work that depends on them is marked `Blocked: YES (B<n>)` throughout this document.
 
 ### B1 — InspectionType catalog (~150 מק"טים) sign-off
-- **What's needed:** the full, signed-off list of inspection מק"טים used to seed `InspectionType` — code (מק"ט), Hebrew label, family (one of the 13 CHECK values), `isActive`, `sortOrder`, and the `isFieldInspection` boolean per row.
-- **Status:** a substantial draft is embedded in `SPEC_FIELD_V2.md` lines 416-571, but the spec author flagged borderline shielding rows as still needing human review. Until that pass is signed off, the seed cannot be declared final.
-- **Who likely owns it:** Galit + the spec author (office / domain expert). Bot team consumes; does not produce.
-- **What it unblocks downstream:**
-  - Seeding migration 009 with `InspectionType` rows (catalog seed only — the DDL itself is not blocked).
-  - Any end-to-end test that requires a real `productName -> InspectionType.code` lookup (matching a `Task` to a family).
-- **Tasks gated on B1:** `D1-T6` (catalog seed), and downstream verification of `D2-T2` (inspection card uses the family label).
+- **Status: RESOLVED (2026-07-01).** Proceed with the clear, field-relevant מק"טים from the draft at `SPEC_FIELD_V2.md` lines 416-571. Shielding rows and borderline non-inspection services are excluded from the initial seed — include only unambiguous field-inspection types. `D1-T7` is now unblocked.
+- **What was needed:** the full, signed-off list of inspection מק"טים used to seed `InspectionType` — code (מק"ט), Hebrew label, family (one of the 13 CHECK values), `isActive`, `sortOrder`, and the `isFieldInspection` boolean per row.
+- **Tasks previously gated on B1:** `D1-T7` (catalog seed) — now unblocked. Downstream verification of `D2-T2` (inspection card family label) also unblocked.
 
-### B2 — `lead incoming` table column names
-- **What's needed:** the exact column names of the existing `lead incoming` table — at minimum: lead name, phone, message text, created-at, and `assignedTo`. Also confirmation of whether `assignedTo` is a `User.id` FK or a free-text name.
-- **Status:** unspecified anywhere in the spec or the codebase. The spec is explicit that this is NOT the CRM's `Lead` table (which is used by `src/services/tasks.ts findLeadsByName` for relink purposes only).
-- **Who likely owns it:** whoever owns the CRM/back-office DB where `lead incoming` lives.
-- **What it unblocks downstream:** the entire Domain 3 leads stream — the 09:30 digest, the worker-assignment alert, the 1-hour escalation, and the leads portion of Yoram's exceptions digest (Domain 4).
-- **Tasks gated on B2:** `D3-T1`, `D3-T2`, `D3-T3`, `D3-T4`, `D3-T5`, and the leads-counts portion of `D4-T1`.
+### B2 — `IncomingLead` table schema
+- **Status: RESOLVED (2026-07-01).** All Domain 3 tasks unblocked; `D4-T1` leads portion unblocked.
+- **Resolved details:**
+  - **Table name:** `IncomingLead` (not `lead incoming` — old references in the spec/gap analysis are updated below).
+  - **Columns:** `id`, `subject`, `body`, `fromName`, `fromEmail`, `receivedAt`, `status`, `ownerId`, `taskId`, `notifiedAt`.
+  - **Assignment field:** `ownerId` (UUID FK to `User`) — transitions from null/empty to a user ID when Sasha assigns in the CRM.
+  - **No phone column** — lead messages display `fromName` / `fromEmail` / `subject` / `body`.
+  - `transferredToId` exists on the table but is **not used** in the bot for now.
+  - The spec's earlier question about whether `assignedTo` is a FK or free-text: it is a UUID FK (`ownerId`).
+- **Tasks previously gated on B2:** `D3-T1`, `D3-T2`, `D3-T3`, `D3-T4` — all now unblocked (note: `D3-T3` also requires K2; `D3-T5` was already unblocked). The leads-counts portion of `D4-T1` is also now unblocked.
 
 ---
 
@@ -161,11 +166,11 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** no.
 
 #### D1-T7 — Seed `InspectionType` catalog (~150 rows)
-- **What to do:** idempotent `INSERT ... ON CONFLICT (code) DO NOTHING` block for the full מק"ט catalog. Set `isFieldInspection = true` for the relevant subset.
-- **Definition of Done:** catalog seed runs idempotently; row count matches the signed-off list from B1; every row's `family` passes the CHECK.
+- **What to do:** idempotent `INSERT ... ON CONFLICT (code) DO NOTHING` block for the clear field-relevant מק"ט rows from `SPEC_FIELD_V2.md` lines 416-571. Shielding/borderline rows excluded for now. Set `isFieldInspection = true` for the relevant subset.
+- **Definition of Done:** catalog seed runs idempotently; every row's `family` passes the CHECK; shielding/borderline rows omitted; re-runnable without duplicates.
 - **Reference:** GAP Domain 1 row 1 (seed). Spec lines 416-571 (draft).
 - **Dependencies:** D1-T2, B1.
-- **Blocked:** YES (B1).
+- **Blocked:** NO (B1 resolved 2026-07-01 — proceed with unambiguous field-inspection rows).
 
 ### Cross-cutting infra prerequisites (interleaved here — needed before D2 menus and D3 reads)
 
@@ -224,6 +229,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** YES (cascading K1 via D5-T1).
 
 #### D2-T5 — Worker on-demand status transitions (departed / arrived / finished)
+- **Status:** DONE (local, uncommitted). `services/inspections.ts` gained `advanceFieldStatus({ taskFieldId, transition, updatedBy })` — 3-way switch on the `AdvanceTransition` union (`DEPARTED|ARRIVED|FINISHED`, narrowed at the type level so `WAITING_FOR_INFO`/`HAS_PROBLEM` are not accepted here; those still route through `writeMissingInfo`/`writeProblem`). FINISHED write is unconditional (only `WHERE id = $1` — no CHECK-current-status guard). Also added `resolveOpenTaskFieldByHint(userId, hint)` — parameterized ILIKE substring on `Customer.name` OR `TaskField.siteAddress` (`'%' || $2 || '%'`), same OPEN_FIELD_STATUSES filter as `findOpenTaskFieldForWorker`, empty-hint short-circuit. `ai/menu.ts` gained `statusUpdateMenu()` + `renderStatusUpdateMenu()` (3 items). `ai/router.ts`: menu route 3 replaced (`startStatusUpdateFlow` → `renderStatusUpdateMenu` → `status_choice` awaiting → `advanceFieldStatus` + "עדכנתי — סטטוס: …" reply; FINISHED opens the D2-T6 follow-up). D5-T3 `set_field_status` intent wired in `executeIntent`: DEPARTED/ARRIVED/FINISHED → `runAdvanceStatusDirect` (with hint via `resolveOpenTaskFieldByHint` when `intent.task_reference` set); WAITING_FOR_INFO → D2-T7 path (with `params.note` short-circuit); HAS_PROBLEM → D2-T8 path (with `problem_type` short-circuit). The previously-stubbed `missing_info_disambig`/`problem_disambig` are now wired via a shared `handleDisambigReply` that resolves the hint and transitions to the right follow-up state (`missing_info_note`/`problem_type_choice`); "ביטול" clears; no match keeps awaiting. New `AwaitingKind`s: `status_choice`, `status_disambig`. `pendingTransition?: FieldStatusTransition` added to `ConversationState` so a free-text disambig hint carries the requested transition across turns. Tests: `__tests__/inspections.test.ts` — 3 `advanceFieldStatus` cases (per transition, asserting sibling timestamps untouched, FINISHED assert no `AND "fieldStatus"` guard), 5 `resolveOpenTaskFieldByHint` cases (0/1/N + ILIKE parameterization + empty short-circuit). `__tests__/routerInspections.test.ts` — 7 D2-T5 menu-driven cases + 5 `set_field_status` intent cases + 6 disambig-resolution cases. Full suite: 233 pass / 7 skipped / 240 total (was 183/7/190). `npx tsc --noEmit` clean. No deviations.
 - **What to do:** in `src/services/inspections.ts`, implement `advanceFieldStatus(taskFieldId, transition)` for `EN_ROUTE` ("departed", + `departedAt`), `ARRIVED` ("arrived", + `arrivedAt`), `FINISHED_FIELD` ("finished", + `finishedAt`, **unconditional**). Wire to: (a) the menu item 3 numbered-reply path, (b) the free-text/voice routing via D5-T3 intents.
 - **Definition of Done:** each transition writes the correct `fieldStatus` and timestamp; "finished" never blocks; ambiguity when the worker has multiple inspections today routes through the existing `task_disambig` style flow.
 - **Reference:** GAP Domain 2 row 4. Spec §7.
@@ -231,6 +237,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 - **Blocked:** no (after deps).
 
 #### D2-T6 — Finished follow-up 4-option menu
+- **Status:** DONE (local, uncommitted). Landed in the same edits as D2-T5. `services/inspections.ts` gained `writeFieldNotes({ taskFieldId, notes, updatedBy })` — writes only `fieldNotes` + `updatedByUserId` + `updatedAt` (no `fieldStatus`/`finishedAt`/`managerNotifiedAt` touched; the FINISHED_FIELD write already happened). `fieldNotes` column already exists on `TaskField` from D1-T5, no migration change needed. `ai/menu.ts` gained `finishedFollowUpMenu()` + `renderFinishedFollowUpMenu()` (4 items, numbered text per D5-T4). `ai/router.ts`: after `performTransition(...,'FINISHED')` we set `awaiting: 'finished_followup'` (retaining `taskFieldId`) and send the 4-option menu. `handleFinishedFollowUpReply`: option 1 → "רשמנו. כל טוב!" + clear; option 2 → prompt "מה ההערות מהשטח?" + `awaiting: 'finished_notes'`; option 3 → hand off to D2-T8 (`awaiting: 'problem_type_choice'` + `renderProblemTypeMenu()` — reuses the already-known `taskFieldId`, no re-lookup); option 4 → hand off to D2-T7 (`awaiting: 'missing_info_note'` + "מה חסר לדוח?"). Invalid input → resend menu with "בחר מספר תקין:" prefix, keep awaiting. `handleFinishedNotesReply` captures the text (voice arrives as text via D5-T2) and calls `writeFieldNotes`, then "נשמר. תודה." + clear. New `AwaitingKind`s: `finished_followup`, `finished_notes`. Tests: `__tests__/inspections.test.ts` — `writeFieldNotes` asserts fieldNotes/updatedByUserId/updatedAt only, no other columns touched. `__tests__/routerInspections.test.ts` — 5 D2-T6 cases (option 1, option 2 flow with notes write, options 3/4 hand-offs asserting no re-lookup, invalid input). Full suite: 233 pass / 7 skipped / 240 total. No deviations.
 - **What to do:** after `FINISHED_FIELD` writes successfully, send the 4-option follow-up menu (`אין הערות` / `יש הערות מהשטח` / `יש בעיה` / `חסר מידע לדוח`). Option 2 → free text → save to `fieldNotes` (a column on `TaskField` — confirm it exists in D1-T5 schema; if not, add a `fieldNotes` text column to D1-T5). Option 3 → route to D2-T8 (problem flow). Option 4 → route to D2-T7 (missing-info flow).
 - **Definition of Done:** after a finished write, the worker receives the 4-option menu; option 1 ends the flow; option 2 captures notes; options 3/4 hand off cleanly to the right downstream flow.
 - **Reference:** GAP Domain 2 row 5. Spec §7.
@@ -269,26 +276,26 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 
 ### Domain 3 — Leads stream (Sasha)
 
-#### D3-T1 — `lead incoming` reader service
-- **What to do:** new file `src/services/leadsIncoming.ts`. Read-only queries against the existing `lead incoming` table. Provide: `findUnassignedInWindow(from, to)`, `findUnassignedOlderThan(minutes, createdBetween)`, `findRecentlyAssigned(sinceTimestamp)`. The bot WRITES NOTHING to this table — handling and assignment happen in the CRM.
-- **Definition of Done:** functions return typed rows; pool comes from `src/db/connection.ts`; no INSERTs/UPDATEs in this file; verified column mapping matches the B2 input.
+#### D3-T1 — `IncomingLead` reader service
+- **What to do:** new file `src/services/incomingLeads.ts`. Read-only queries against the `IncomingLead` table. Columns: `id`, `subject`, `body`, `fromName`, `fromEmail`, `receivedAt`, `status`, `ownerId`, `taskId`, `notifiedAt`. No phone — messages use `fromName`/`fromEmail`/`subject`/`body`. Provide: `findUnassignedInWindow(from, to)` (where `ownerId IS NULL`), `findUnassignedOlderThan(minutes, createdBetween)`, `findRecentlyAssigned(sinceTimestamp)` (where `ownerId` just flipped from null). The bot WRITES NOTHING to this table — handling and assignment happen in the CRM.
+- **Definition of Done:** functions return typed `IncomingLeadRow` rows; pool from `src/db/connection.ts`; no INSERTs/UPDATEs; column names match B2 resolution.
 - **Reference:** GAP Domain 3 row 1. Spec §12.
 - **Dependencies:** B2.
-- **Blocked:** YES (B2).
+- **Blocked:** NO (B2 resolved 2026-07-01).
 
 #### D3-T2 — Sasha 09:30 morning leads digest
-- **What to do:** new digest type `LEADS_MORNING` (or a Sasha-only flavor per K3). Content formatter in `src/whatsapp/digestContent.ts`: list all `lead incoming` rows from 17:00 yesterday → 09:30 today that are still unassigned, per spec §12 format. Include per-lead AI suggestion of the best-matching worker by ROLE (from D3-T5). New cron entry at 09:30 (override the 08:00 default in `src/db/migrations/008_digests.sql` — either a per-Sasha `UserDigestPreference` row, or a dedicated job).
-- **Definition of Done:** at 09:30 local (`Asia/Jerusalem`), Sasha receives one message listing the overnight unassigned leads with AI suggestions; per-day dedup via `digestSendLog`; advisory-lock protected.
+- **What to do:** new digest type `LEADS_MORNING` (or a Sasha-only flavor per K3). Content formatter in `src/whatsapp/digestContent.ts`: list all `IncomingLead` rows from 17:00 yesterday → 09:30 today where `ownerId IS NULL`, per spec §12 format. Display `fromName` / `fromEmail` / `subject` / `body` (no phone). Include per-lead AI suggestion of the best-matching worker by ROLE (from D3-T5). New cron entry at 09:30 (either a per-Sasha `UserDigestPreference` row, or a dedicated job).
+- **Definition of Done:** at 09:30 local (`Asia/Jerusalem`), Sasha receives one message listing overnight unassigned leads with AI suggestions; per-day dedup via `digestSendLog`; advisory-lock protected.
 - **Reference:** GAP Domain 3 row 2. Spec §12.
 - **Dependencies:** D3-T1, D3-T5, K3.
-- **Blocked:** YES (B2, K3).
+- **Blocked:** NO (B2 resolved; K3 closed to option (a)).
 
-#### D3-T3 — Worker-assignment alert (assignedTo transitions empty → user)
-- **What to do:** new polling job in `src/scheduler/jobs/leadAssignmentNotifier.ts` (mirroring `completionNotifier.ts` lines 16-37). On detection of an assigned lead, send the alert: customer name, phone, message text, "לטיפול ועדכון ב-CRM" (read-only — no actions on the bot side). New dedup mechanism: either a new bot-side mirror table tracking notified `lead incoming` rows, or a `notifiedAt`-style column — bot team's choice (note: NOT a column on `lead incoming` itself, per the additive-only rule on CRM tables).
-- **Definition of Done:** when `assignedTo` flips from empty to a `User` who is an inspector, that inspector receives one alert and only one; restarts don't re-alert.
+#### D3-T3 — Worker-assignment alert (`ownerId` transitions null → user)
+- **What to do:** new polling job in `src/scheduler/jobs/leadAssignmentNotifier.ts` (mirroring `completionNotifier.ts` lines 16-37). Polls `IncomingLead` for rows where `ownerId` just flipped from null to a `User.id`. Alert content: `fromName` / `fromEmail` / `subject` / `body` + "לטיפול ועדכון ב-CRM" (no phone; read-only). Dedup: use `IncomingLead.notifiedAt` — stamp it on the bot side after sending (NOT via a column on the CRM table — use a bot-side mirror table if `notifiedAt` is not writable, or confirm it is a bot-writable column).
+- **Definition of Done:** when `ownerId` flips from null to a `User` who is an inspector (`role !== 'ADMIN'`), that inspector receives one alert and only one; restarts don't re-alert.
 - **Reference:** GAP Domain 3 row 3. Spec §12.
 - **Dependencies:** D3-T1, K2 (the mechanism is the same shape as the `TaskField` creation mechanism).
-- **Blocked:** YES (B2, K2).
+- **Blocked:** YES (K2 only — B2 resolved).
 
 #### D3-T4 — 1-hour escalation to Sasha for unassigned daytime leads
 - **What to do:** add to the polling job from D3-T3: any `lead incoming` row created between 09:30-22:00 local that's still unassigned 1 hour after its creation → ONE alert to Sasha including the AI suggestion (D3-T5) or "לא נמצאה התאמה". Overnight leads (17:00-09:30) are skipped — they're covered by D3-T2. Dedup must guarantee exactly one event per lead.
@@ -308,6 +315,7 @@ Each of these resolves an ambiguity in the spec. They must close before any task
 ### Domain 4 — Manager digest / exceptions (Yoram + Sasha)
 
 #### D4-T1 — Yoram exceptions digest (morning + evening) content
+- **Status:** PARTIAL — FIELD portion DONE (local, uncommitted). LEADS portion outstanding + B2-blocked (columns of `lead incoming` unresolved). D4-T2 (dispatcher branching Yoram vs. Sasha vs. other-elevated) NOT wired — only Yoram's single-user branch fires per K3 phone allow-list (`YORAM_PHONE`). New file `src/services/exceptionsQueries.ts` — read-only, parameterized: `getFieldExceptionCounts(localDate)` (5 counts per §13: בוצעו / לא אושרו / עם בעיה / ממתינות למידע / לא סגרו יום, all in ONE round-trip via `COUNT(*) FILTER` + a `bounds` CTE for the Asia/Jerusalem half-open window) + `getOpenFieldExceptions(localDate)` (LEFT JOIN Task→Customer, LEFT JOIN Task→User via `Task.ownerId`, WHERE `hasOpenProblem = true` OR (`missingReportInfo = true` AND `fieldStatus = 'WAITING_FOR_INFO'`), ordered by `managerNotifiedAt ASC NULLS LAST`). New formatters in `src/whatsapp/digestContent.ts`: `formatGalitManagerMorning` + `formatGalitManagerEndOfDay` (no emojis per spec, no CTA button; header + `שטח: בוצעו X · …` counts row + `לידים: (מחכה ל-B2 — טרם משולב)` TODO placeholder + numbered `פתוחים:` list or `אין חריגים פתוחים.` one-liner; null-tolerant worker/customer → `עובד לא ידוע`/`לקוח לא ידוע`; note fallback: `problemNote` / `missingReportInfoNote` → `problemType` Hebrew label from `problemTypeMenu()` → `—`). `src/scheduler/jobs/digestDispatcher.ts`: new Yoram branch in `buildContent` fires BEFORE both the D2-T4 inspector branch AND the legacy ADMIN branch when `normalizeIsraeliPhone(row.user_phone) === normalizeIsraeliPhone(YORAM_PHONE)`; `YORAM_PHONE` is cached OUTSIDE the `for (const row of rows)` loop so non-Yoram rows pay only a string-compare — no N+1 env-parse fan-out. Dedup ledger (`claimDigestSend(userId, MORNING|EVENING, localDate)`) untouched — Yoram writes the same digestType so the existing PK covers him. Legacy paths preserved when `YORAM_PHONE` unset/empty/unparseable. Phone normalization reuses `normalizeIsraeliPhone` from `src/auth/phoneNormalizer.ts` — no new helper. `src/config/preflight.ts`: added a production-only warning when `YORAM_PHONE` is unset; app never crashes on absence. `.env.example`: added `YORAM_PHONE=` block with K3/B2 context. Tests: `src/__tests__/galitManagerDigest.test.ts` (12 formatter cases — empty/N exceptions, null worker+customer, note-null-with-problemType fallback, note+problemType both null → `—`, null user name, counts row content, leads TODO present for both formatters) + `src/__tests__/galitManagerDispatcher.test.ts` (9 routing cases — MORNING+EVENING match, MORNING+EVENING unset, whitespace-only YORAM_PHONE, different-ADMIN-phone falls through to legacy, MANAGER whose phone matches STILL wins the Yoram branch, `claimDigestSend`-false skips send). Split into two files because `vi.mock('../whatsapp/digestContent', ...)` is file-hoisted and would replace the real formatters in the pure suite. `npx tsc --noEmit` clean; `npx vitest run` — 233 passed / 7 skipped / 240 total (baseline before this task was 183/7/190 per brief; the delta is Wave-2 test files landing between the brief being written and this task starting). Deviations: (1) LEADS portion deliberately not implemented (out of scope per brief — B2-blocked). (2) `getOpenFieldExceptions` takes `localDate` in its signature for API symmetry but does NOT filter by date — an open problem from yesterday is still open today; commented in the module. (3) `hasProblemToday` count considers rows either finished-today OR assigned-today-still-open, so a same-day problem counts even if unfinished. (4) preflight warning is `productionOnly`, following the precedent of other optional-in-dev keys.
 - **What to do:** new formatters `formatGalitManagerMorning` / `formatGalitManagerEndOfDay` in `src/whatsapp/digestContent.ts` (or rename and replace the existing `formatManagerMorning` / `formatManagerEndOfDay` per K4). New aggregation queries against `TaskField` for the 5 field counts (`בוצעו / לא אושרו / עם בעיה / ממתינות למידע / לא סגרו יום`) and against `lead incoming` for the leads numbers (מהלילה / לא שויכו). Also the numbered list of OPEN exceptions = workers + customers + free-text issue (from `problemNote` / `missingReportInfoNote`).
 - **Definition of Done:** Yoram's morning and evening messages match the §13 format; counts come from `TaskField` queries; open-exceptions list is sorted (suggested: by `managerNotifiedAt`); dispatcher uses the existing 08:00/17:00 default times unchanged for Yoram.
 - **Reference:** GAP Domain 4 rows 1, 3. Spec §13.

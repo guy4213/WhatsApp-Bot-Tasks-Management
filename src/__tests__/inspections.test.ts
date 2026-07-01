@@ -50,6 +50,9 @@ import {
   findOpenTaskFieldForWorker,
   notifyOfficeMissingInfo,
   notifyOfficeProblem,
+  advanceFieldStatus,
+  writeFieldNotes,
+  resolveOpenTaskFieldByHint,
 } from '../services/inspections';
 import { problemTypeMenu, renderProblemTypeMenu } from '../ai/menu';
 import { FIELD_PROBLEM_TYPES } from '../ai/schema';
@@ -256,6 +259,131 @@ describe('notifyOfficeMissingInfo', () => {
     getManagersForBroadcast.mockResolvedValueOnce([]);
     await notifyOfficeMissingInfo('tf-abc');
     expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ── advanceFieldStatus (D2-T5) ──────────────────────────────────────────────
+
+describe('advanceFieldStatus', () => {
+  it('DEPARTED → UPDATE fieldStatus=EN_ROUTE + departedAt + updatedByUserId, parameterized', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await advanceFieldStatus({ taskFieldId: 'tf-a', transition: 'DEPARTED', updatedBy: 'u-1' });
+    expect(poolQuery).toHaveBeenCalledTimes(1);
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/UPDATE\s+"TaskField"/);
+    expect(sql).toMatch(/"fieldStatus"\s*=\s*'EN_ROUTE'/);
+    expect(sql).toMatch(/"departedAt"\s*=\s*now\(\)/);
+    expect(sql).toMatch(/"updatedByUserId"\s*=\s*\$2/);
+    expect(sql).toMatch(/"updatedAt"\s*=\s*now\(\)/);
+    expect(sql).toMatch(/WHERE\s+id\s*=\s*\$1/);
+    // Sibling timestamps must NOT be touched on DEPARTED.
+    expect(sql).not.toMatch(/"arrivedAt"\s*=/);
+    expect(sql).not.toMatch(/"finishedAt"\s*=/);
+    expect(params).toEqual(['tf-a', 'u-1']);
+  });
+
+  it('ARRIVED → UPDATE fieldStatus=ARRIVED + arrivedAt, parameterized', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await advanceFieldStatus({ taskFieldId: 'tf-b', transition: 'ARRIVED', updatedBy: 'u-2' });
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/"fieldStatus"\s*=\s*'ARRIVED'/);
+    expect(sql).toMatch(/"arrivedAt"\s*=\s*now\(\)/);
+    expect(sql).not.toMatch(/"departedAt"\s*=/);
+    expect(sql).not.toMatch(/"finishedAt"\s*=/);
+    expect(params).toEqual(['tf-b', 'u-2']);
+  });
+
+  it('FINISHED → UPDATE fieldStatus=FINISHED_FIELD + finishedAt, UNCONDITIONAL (no current-status guard)', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await advanceFieldStatus({ taskFieldId: 'tf-c', transition: 'FINISHED', updatedBy: 'u-3' });
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/"fieldStatus"\s*=\s*'FINISHED_FIELD'/);
+    expect(sql).toMatch(/"finishedAt"\s*=\s*now\(\)/);
+    expect(sql).not.toMatch(/"departedAt"\s*=/);
+    expect(sql).not.toMatch(/"arrivedAt"\s*=/);
+    // Only WHERE id = $1 — no extra AND on current fieldStatus.
+    expect(sql).toMatch(/WHERE\s+id\s*=\s*\$1\s*$/m);
+    expect(sql).not.toMatch(/AND\s+"fieldStatus"/);
+    expect(params).toEqual(['tf-c', 'u-3']);
+  });
+});
+
+// ── writeFieldNotes (D2-T6) ─────────────────────────────────────────────────
+
+describe('writeFieldNotes', () => {
+  it('writes fieldNotes + updatedByUserId + updatedAt only — does not touch fieldStatus', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await writeFieldNotes({ taskFieldId: 'tf-x', notes: 'הלקוח ביקש חזרה', updatedBy: 'u-1' });
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/UPDATE\s+"TaskField"/);
+    expect(sql).toMatch(/"fieldNotes"\s*=\s*\$2/);
+    expect(sql).toMatch(/"updatedByUserId"\s*=\s*\$3/);
+    expect(sql).toMatch(/"updatedAt"\s*=\s*now\(\)/);
+    expect(sql).toMatch(/WHERE\s+id\s*=\s*\$1/);
+    // These must NOT be modified — the inspection is already FINISHED_FIELD.
+    expect(sql).not.toMatch(/"fieldStatus"\s*=/);
+    expect(sql).not.toMatch(/"finishedAt"\s*=/);
+    expect(sql).not.toMatch(/"managerNotifiedAt"\s*=/);
+    expect(params).toEqual(['tf-x', 'הלקוח ביקש חזרה', 'u-1']);
+  });
+});
+
+// ── resolveOpenTaskFieldByHint (D2-T5) ──────────────────────────────────────
+
+describe('resolveOpenTaskFieldByHint', () => {
+  it('returns null when no TaskField matches the hint', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    const res = await resolveOpenTaskFieldByHint('u-9', 'כהן');
+    expect(res).toBeNull();
+  });
+
+  it('returns { taskFieldId, customerName } on a unique match', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{ taskFieldId: 'tf-1', customerName: 'משה כהן' }],
+    });
+    const res = await resolveOpenTaskFieldByHint('u-9', 'כהן');
+    expect(res).toEqual({ taskFieldId: 'tf-1', customerName: 'משה כהן' });
+  });
+
+  it('returns { ambiguous, count } when >1 TaskField matches', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rowCount: 2,
+      rows: [
+        { taskFieldId: 'tf-a', customerName: 'כהן א' },
+        { taskFieldId: 'tf-b', customerName: 'כהן ב' },
+      ],
+    });
+    const res = await resolveOpenTaskFieldByHint('u-9', 'כהן');
+    expect(res).toEqual({ ambiguous: true, count: 2 });
+  });
+
+  it('uses ILIKE (case-insensitive) on Customer.name OR siteAddress, parameterized', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    await resolveOpenTaskFieldByHint('u-w', 'raanana');
+    const [sql, params] = poolQuery.mock.calls[0];
+    // Both fields checked with ILIKE.
+    expect(sql).toMatch(/c\.name\s+ILIKE/i);
+    expect(sql).toMatch(/tf\."siteAddress"\s+ILIKE/i);
+    // Parameterized — user input never inlined into SQL.
+    expect(sql).not.toContain('raanana');
+    expect(sql).toMatch(/'%'\s*\|\|\s*\$2\s*\|\|\s*'%'/);
+    // Same open-status list as findOpenTaskFieldForWorker.
+    expect(sql).toMatch(/"fieldStatus"\s*=\s*ANY\(\$3::text\[\]\)/);
+    expect(params[0]).toBe('u-w');
+    expect(params[1]).toBe('raanana');
+    const statuses = params[2] as readonly string[];
+    for (const s of ['ASSIGNED', 'CONFIRMED', 'EN_ROUTE', 'ARRIVED', 'WAITING_FOR_INFO', 'NEEDS_MORE_INFO']) {
+      expect(statuses).toContain(s);
+    }
+  });
+
+  it('empty / whitespace-only hint short-circuits to null (no DB call)', async () => {
+    const res1 = await resolveOpenTaskFieldByHint('u-9', '');
+    const res2 = await resolveOpenTaskFieldByHint('u-9', '   ');
+    expect(res1).toBeNull();
+    expect(res2).toBeNull();
+    expect(poolQuery).not.toHaveBeenCalled();
   });
 });
 

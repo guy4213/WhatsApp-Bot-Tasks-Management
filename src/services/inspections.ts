@@ -1,12 +1,16 @@
 /**
- * Field inspection write + query helpers (D2-T7 + D2-T8).
+ * Field inspection write + query helpers (D2-T5 + D2-T6 + D2-T7 + D2-T8).
  *
- * Owns the write path for the two worker-side flows that update `TaskField`:
+ * Owns the write path for the worker-side flows that update `TaskField`:
  *  - `writeMissingInfo` — the "missing info for report" flow (spec §8).
  *  - `writeProblem`     — the "report a problem" flow (spec §9).
- * Plus a small resolver `findOpenTaskFieldForWorker` used by both flows to
- * decide whether the worker has exactly one open TaskField (single dispatch),
- * zero (nothing to update), or several (disambiguation — handed off to D2-T5).
+ *  - `advanceFieldStatus` — the on-demand DEPARTED / ARRIVED / FINISHED
+ *    transitions (spec §7). FINISHED is unconditional.
+ *  - `writeFieldNotes` — the D2-T6 "finished follow-up" option 2 (free-text
+ *    notes captured into `TaskField.fieldNotes`).
+ * Plus resolvers `findOpenTaskFieldForWorker` and `resolveOpenTaskFieldByHint`
+ * used by every worker flow to decide which of the (typically 0/1/N) open
+ * TaskFields the message is about.
  *
  * The manager-side alert is sent by `notifyOfficeMissingInfo` /
  * `notifyOfficeProblem` — these broadcast to every active MANAGER/ADMIN via the
@@ -126,6 +130,138 @@ export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTa
         AND tf."fieldStatus" = ANY($2::text[])
       ORDER BY tf."assignedAt"`,
     [userId, OPEN_FIELD_STATUSES],
+  );
+  if (result.rowCount === 0) return null;
+  if (result.rowCount === 1) {
+    return {
+      taskFieldId: result.rows[0].taskFieldId,
+      customerName: result.rows[0].customerName,
+    };
+  }
+  return { ambiguous: true, count: result.rowCount ?? result.rows.length };
+}
+
+// ── D2-T5: on-demand status transitions (DEPARTED / ARRIVED / FINISHED) ─────
+// SPEC §7. These are the three worker-triggered transitions from the "status
+// update" menu (item 3) and from the D5-T3 free-text/voice intent
+// `set_field_status`. WAITING_FOR_INFO and HAS_PROBLEM are NOT handled here —
+// they flow through `writeMissingInfo` (D2-T7) and `writeProblem` (D2-T8),
+// which stamp the additional context (note, problemType, etc.). The
+// `transition` type is narrowed at the type level so a caller can never pass
+// WAITING_FOR_INFO / HAS_PROBLEM here by accident.
+
+export type AdvanceTransition = 'DEPARTED' | 'ARRIVED' | 'FINISHED';
+
+export interface AdvanceFieldStatusParams {
+  taskFieldId: string;
+  transition: AdvanceTransition;
+  updatedBy: string;
+}
+
+/**
+ * §7 write: advance `TaskField.fieldStatus` and stamp the matching timestamp.
+ * FINISHED is UNCONDITIONAL — no guard on the current fieldStatus, per spec.
+ */
+export async function advanceFieldStatus(params: AdvanceFieldStatusParams): Promise<void> {
+  const { taskFieldId, transition, updatedBy } = params;
+  let sql: string;
+  switch (transition) {
+    case 'DEPARTED':
+      sql =
+        `UPDATE "TaskField"
+            SET "fieldStatus"     = 'EN_ROUTE',
+                "departedAt"      = now(),
+                "updatedByUserId" = $2,
+                "updatedAt"       = now()
+          WHERE id = $1`;
+      break;
+    case 'ARRIVED':
+      sql =
+        `UPDATE "TaskField"
+            SET "fieldStatus"     = 'ARRIVED',
+                "arrivedAt"       = now(),
+                "updatedByUserId" = $2,
+                "updatedAt"       = now()
+          WHERE id = $1`;
+      break;
+    case 'FINISHED':
+      // Unconditional — no CHECK-current-status guard leaks in (spec §7).
+      sql =
+        `UPDATE "TaskField"
+            SET "fieldStatus"     = 'FINISHED_FIELD',
+                "finishedAt"      = now(),
+                "updatedByUserId" = $2,
+                "updatedAt"       = now()
+          WHERE id = $1`;
+      break;
+  }
+  await pool.query(sql, [taskFieldId, updatedBy]);
+  log.info({ taskFieldId, transition, updatedBy }, 'advanceFieldStatus written');
+}
+
+// ── D2-T6: finished follow-up option 2 — free-text notes ────────────────────
+
+export interface WriteFieldNotesParams {
+  taskFieldId: string;
+  notes: string;
+  updatedBy: string;
+}
+
+/**
+ * §7 finished-follow-up option 2: capture the worker's free-text notes into
+ * `TaskField.fieldNotes`. Does NOT touch `fieldStatus` — the inspection is
+ * already FINISHED_FIELD from `advanceFieldStatus({ transition:'FINISHED' })`.
+ */
+export async function writeFieldNotes(params: WriteFieldNotesParams): Promise<void> {
+  const { taskFieldId, notes, updatedBy } = params;
+  await pool.query(
+    `UPDATE "TaskField"
+        SET "fieldNotes"      = $2,
+            "updatedByUserId" = $3,
+            "updatedAt"       = now()
+      WHERE id = $1`,
+    [taskFieldId, notes, updatedBy],
+  );
+  log.info({ taskFieldId, updatedBy }, 'writeFieldNotes written');
+}
+
+// ── D2-T5: disambiguation by free-text hint (customer name / site address) ──
+
+export type ResolveOpenTaskFieldResult =
+  | { taskFieldId: string; customerName: string | null }
+  | { ambiguous: true; count: number }
+  | null;
+
+/**
+ * Resolve the worker's open TaskField from a free-text hint (customer name OR
+ * site address). Used by the disambig awaiting states (`status_disambig`,
+ * `missing_info_disambig`, `problem_disambig`) — after the initial menu tap
+ * revealed >1 open TaskField, the worker types a hint and we pick one.
+ *
+ * Matching is ILIKE substring, case-insensitive, on `Customer.name` OR
+ * `TaskField.siteAddress`. The parameter is bound once (`$2`) and re-used in
+ * both branches of the OR — no string concatenation of user input.
+ */
+export async function resolveOpenTaskFieldByHint(
+  userId: string,
+  hint: string,
+): Promise<ResolveOpenTaskFieldResult> {
+  const trimmed = hint.trim();
+  if (!trimmed) return null;
+  const result = await pool.query<{ taskFieldId: string; customerName: string | null }>(
+    `SELECT tf.id            AS "taskFieldId",
+            c.name           AS "customerName"
+       FROM "TaskField" tf
+       JOIN "Task"      t  ON t.id = tf."taskId"
+       LEFT JOIN "Customer" c ON c.id = t."customerId"
+      WHERE t."ownerId"      = $1
+        AND tf."fieldStatus" = ANY($3::text[])
+        AND (
+              c.name           ILIKE '%' || $2 || '%'
+           OR tf."siteAddress" ILIKE '%' || $2 || '%'
+        )
+      ORDER BY tf."assignedAt"`,
+    [userId, trimmed, OPEN_FIELD_STATUSES],
   );
   if (result.rowCount === 0) return null;
   if (result.rowCount === 1) {

@@ -1,5 +1,5 @@
 import { pool } from '../db/connection';
-import type { AIIntentResult, FieldProblemType } from '../types';
+import type { AIIntentResult, FieldProblemType, FieldStatusTransition } from '../types';
 
 const TTL_MINUTES = parseInt(process.env.CONVERSATION_CONTEXT_TTL_MINUTES ?? '10', 10);
 
@@ -10,15 +10,21 @@ export type AwaitingKind =
   // Role-based numbered menu + digest settings flow (V1). These states carry NO
   // AI intent (hence `intent` is optional below).
   | 'menu' | 'digest_settings' | 'digest_set_time'
-  // v2 inspector flows (D2-T7 + D2-T8). All carry no AI intent — they capture
-  // a single free-text reply / menu number and dispatch the write.
-  // `missing_info_disambig` / `problem_disambig` are stubs until D2-T5 wires
-  // the "which inspection?" resolution.
+  // v2 inspector flows (D2-T5 + D2-T6 + D2-T7 + D2-T8). All carry no AI
+  // intent — they capture a single free-text reply / menu number and dispatch
+  // the write. Disambig states (`*_disambig`) resolve via
+  // `resolveOpenTaskFieldByHint` in `services/inspections.ts`.
   | 'missing_info_note'
   | 'missing_info_disambig'
   | 'problem_type_choice'
   | 'problem_type_note'
-  | 'problem_disambig';
+  | 'problem_disambig'
+  // D2-T5: on-demand DEPARTED / ARRIVED / FINISHED transitions.
+  | 'status_choice'
+  | 'status_disambig'
+  // D2-T6: 4-option follow-up after FINISHED, and its "field notes" branch.
+  | 'finished_followup'
+  | 'finished_notes';
 
 export interface ConversationState {
   awaiting: AwaitingKind;
@@ -29,9 +35,11 @@ export interface ConversationState {
   candidateLinkIds?: string[];       // options offered (link_disambig: customer/lead/project ids)
   linkField?: string;                // which link FK we're resolving (customerId/leadId/projectId)
   digestField?: 'morning' | 'evening'; // which digest a time change applies to (digest_set_time)
-  // v2 inspector flows (D2-T7 + D2-T8).
+  // v2 inspector flows (D2-T5 + D2-T6 + D2-T7 + D2-T8).
   taskFieldId?: string;              // the single open TaskField being updated
   problemType?: FieldProblemType;    // chosen problem type awaiting a free-text elaboration
+  pendingTransition?: FieldStatusTransition; // D2-T5: the transition the worker asked for via free
+                                             // text, held while we disambiguate which TaskField.
 }
 
 export async function getContext(phone: string): Promise<ConversationState | null> {

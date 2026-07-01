@@ -23,6 +23,11 @@ import type {
   CompanyEndOfDay,
 } from '../services/tasks';
 import type { InspectionListItem } from '../services/inspectionsQueries';
+import type {
+  FieldExceptionCounts,
+  OpenFieldException,
+} from '../services/exceptionsQueries';
+import { problemTypeMenu } from '../ai/menu';
 import { DIGEST_PAYLOAD_IDS } from '../ai/digestCommands';
 
 /** One WhatsApp quick-reply button. `id` is a stable digest payload id. */
@@ -234,4 +239,122 @@ export function formatManagerEndOfDay(name: string, co: CompanyEndOfDay): Digest
     `\n\n${cta('דוח סוף יום צוות')}`;
 
   return { text, params, buttons: [BTN_TEAM_EOD, BTN_FREE_TEXT] };
+}
+
+// ── Galit v2 manager (Yoram) — D4-T1 ─────────────────────────────────────────
+//
+// SPEC_FIELD_V2 §13 — Yoram gets a compact exceptions digest (morning +
+// evening). The FIELD portion (5 counts + numbered "פתוחים:" list) is what this
+// module renders. The LEADS portion is B2-blocked (columns of `lead incoming`
+// not resolved yet); a visually distinct TODO placeholder line stands in until
+// B2 lands.
+//
+// Content style follows the spec verbatim — no emojis, no CTA button (Yoram
+// reads and reacts in the CRM, not the bot).
+
+/** Hebrew label for a `TaskField.problemType` code (7 CHECK values in migration 009). */
+function problemTypeLabelHe(code: string): string {
+  const item = problemTypeMenu().find((p) => p.problemType === code);
+  return item?.label ?? code;
+}
+
+/** Compact single-line counts row per §13 (`שטח: בוצעו X · לא אושרו Y · …`). */
+function formatCountsLine(c: FieldExceptionCounts): string {
+  return (
+    `שטח: בוצעו ${c.finishedFieldToday} · ` +
+    `לא אושרו ${c.notConfirmedToday} · ` +
+    `עם בעיה ${c.hasProblemToday} · ` +
+    `ממתינות למידע ${c.waitingForInfoToday} · ` +
+    `לא סגרו יום ${c.notClosedDayToday}`
+  );
+}
+
+/**
+ * Leads placeholder — B2-blocked. Visually distinct so a human reviewer sees
+ * the TODO immediately (see brief). Do NOT compute/query any lead numbers here.
+ */
+const LEADS_TODO_LINE = 'לידים: (מחכה ל-B2 — טרם משולב)';
+
+/** Render one row of the numbered "פתוחים:" list. */
+function formatExceptionRow(ex: OpenFieldException, n: number): string {
+  const worker   = ex.workerName   ?? 'עובד לא ידוע';
+  const customer = ex.customerName ?? 'לקוח לא ידוע';
+  const note =
+    ex.note && ex.note.trim().length > 0
+      ? ex.note.trim()
+      : ex.problemType
+        ? problemTypeLabelHe(ex.problemType)
+        : '—';
+  return `${n}. ${worker} — ${customer}: ${note}`;
+}
+
+/**
+ * Yoram morning — §13 format.
+ *
+ * Template vars (compact): [name, 5 counts]. Rich text carries the full open-
+ * exceptions list. Empty open-exceptions list renders a one-liner
+ * "אין חריגים פתוחים." between the counts and leads blocks.
+ */
+export function formatGalitManagerMorning(input: {
+  counts: FieldExceptionCounts;
+  exceptions: OpenFieldException[];
+  user: { name: string | null };
+}): DigestContent {
+  const { counts, exceptions, user } = input;
+  const name = user.name ?? '';
+  const params = [
+    name,
+    String(counts.finishedFieldToday),
+    String(counts.notConfirmedToday),
+    String(counts.hasProblemToday),
+    String(counts.waitingForInfoToday),
+    String(counts.notClosedDayToday),
+  ];
+
+  const openBlock = exceptions.length === 0
+    ? 'אין חריגים פתוחים.'
+    : `פתוחים:\n${exceptions.map((e, i) => formatExceptionRow(e, i + 1)).join('\n')}`;
+
+  const text =
+    `סיכום גלית — בוקר טוב ${name}\n` +
+    `${formatCountsLine(counts)}\n` +
+    `${LEADS_TODO_LINE}\n\n` +
+    `${openBlock}`;
+
+  return { text, params, buttons: [] };
+}
+
+/**
+ * Yoram end-of-day — §13 format.
+ *
+ * Same shape as the morning; the header line switches to a "סיכום סוף יום"
+ * label. Empty open-exceptions list renders the same one-liner.
+ */
+export function formatGalitManagerEndOfDay(input: {
+  counts: FieldExceptionCounts;
+  exceptions: OpenFieldException[];
+  user: { name: string | null };
+}): DigestContent {
+  const { counts, exceptions, user } = input;
+  const name = user.name ?? '';
+  const params = [
+    name,
+    String(counts.finishedFieldToday),
+    String(counts.notConfirmedToday),
+    String(counts.hasProblemToday),
+    String(counts.waitingForInfoToday),
+    String(counts.notClosedDayToday),
+  ];
+
+  const openBlock = exceptions.length === 0
+    ? 'אין חריגים פתוחים.'
+    : `פתוחים:\n${exceptions.map((e, i) => formatExceptionRow(e, i + 1)).join('\n')}`;
+
+  const text =
+    `סיכום סוף יום — ${name}\n` +
+    `${formatCountsLine(counts)}\n` +
+    `${LEADS_TODO_LINE}\n\n` +
+    `${openBlock}`;
+
+  return { text, params, buttons: [] };
 }

@@ -6,7 +6,10 @@
  * routes via dispatchInternal so validation, pending-action creation, the
  * confirm prompt, and audit logging all run exactly as in Phase 2/3.
  */
-import type { AIIntentResult, FieldProblemType, ResolvedUser, TaskFilter, TaskListItem } from '../types';
+import type {
+  AIIntentResult, FieldProblemType, FieldStatusTransition,
+  ResolvedUser, TaskFilter, TaskListItem,
+} from '../types';
 import { TASK_TYPE_LABELS } from '../types';
 import { getProvider } from './provider';
 import { parseIntent } from './intentParser';
@@ -29,13 +32,19 @@ import { moduleLogger } from '../utils/logger';
 import {
   MENU_TRIGGER_RE, menuItemsFor, renderMenu, type MenuRoute,
   problemTypeMenu, renderProblemTypeMenu,
+  statusUpdateMenu, renderStatusUpdateMenu,
+  finishedFollowUpMenu, renderFinishedFollowUpMenu,
 } from './menu';
 import {
   findOpenTaskFieldForWorker,
+  resolveOpenTaskFieldByHint,
+  advanceFieldStatus,
+  writeFieldNotes,
   writeMissingInfo,
   writeProblem,
   notifyOfficeMissingInfo,
   notifyOfficeProblem,
+  type AdvanceTransition,
 } from '../services/inspections';
 import {
   matchDigestCommand, planDigestCommand, type DigestCommand,
@@ -235,7 +244,7 @@ async function continueConversation(
     return;
   }
 
-  // ── v2 inspector flows (D2-T7 + D2-T8) — carry no AI intent ──────────────────
+  // ── v2 inspector flows (D2-T5 + D2-T6 + D2-T7 + D2-T8) — no AI intent ──────
   if (ctx.awaiting === 'missing_info_note') {
     await handleMissingInfoNoteReply(user, text, ctx);
     return;
@@ -248,15 +257,28 @@ async function continueConversation(
     await handleProblemTypeNoteReply(user, text, ctx);
     return;
   }
-  if (ctx.awaiting === 'missing_info_disambig' || ctx.awaiting === 'problem_disambig') {
-    // TODO(D2-T5): resolve which of the N open TaskFields the worker means,
-    // by matching the reply against customer name / site address. For now we
-    // clear the state and tell the user we can't proceed yet.
-    await clearContext(user.phone);
-    await sendTextMessage({
-      to: user.phone,
-      text: 'זיהוי בדיקה ספציפית מתוך כמה בדיקות פתוחות עדיין לא זמין. פנה למשרד לעדכון.',
-    });
+  if (ctx.awaiting === 'missing_info_disambig') {
+    await handleDisambigReply(user, trimmed, 'missing_info');
+    return;
+  }
+  if (ctx.awaiting === 'problem_disambig') {
+    await handleDisambigReply(user, trimmed, 'problem');
+    return;
+  }
+  if (ctx.awaiting === 'status_disambig') {
+    await handleDisambigReply(user, trimmed, 'status', ctx.pendingTransition);
+    return;
+  }
+  if (ctx.awaiting === 'status_choice') {
+    await handleStatusChoiceReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'finished_followup') {
+    await handleFinishedFollowUpReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'finished_notes') {
+    await handleFinishedNotesReply(user, text, ctx);
     return;
   }
 
@@ -534,6 +556,41 @@ async function executeIntent(
       } else {
         await startReportProblemFlow(user);
       }
+      return;
+    }
+
+    case 'set_field_status': {
+      // D5-T3 free-text / voice intent. WAITING_FOR_INFO + HAS_PROBLEM are
+      // separate flows (they need a note / problemType), so re-route them to
+      // the corresponding entry points; the direct DEPARTED/ARRIVED/FINISHED
+      // path handles the rest.
+      const transition = intent.transition ?? null;
+      if (transition === 'WAITING_FOR_INFO') {
+        const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+        if (note) {
+          await runMissingInfoDirect(user, note);
+        } else {
+          await startMissingInfoFlow(user);
+        }
+        return;
+      }
+      if (transition === 'HAS_PROBLEM') {
+        const problemType = intent.problem_type ?? null;
+        const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+        if (problemType) {
+          await runProblemDirect(user, problemType, note || null);
+        } else {
+          await startReportProblemFlow(user);
+        }
+        return;
+      }
+      if (transition === 'DEPARTED' || transition === 'ARRIVED' || transition === 'FINISHED') {
+        const hint = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
+        await runAdvanceStatusDirect(user, transition, hint || null);
+        return;
+      }
+      // No transition supplied — fall through to help.
+      await sendTextMessage({ to: user.phone, text: helpText() });
       return;
     }
 
@@ -888,8 +945,7 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
       await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T4/T5).' });
       return;
     case 'update_inspection_status':
-      await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'פונקציה זו בפיתוח (D2-T3/T5/T6/T7/T8).' });
+      await startStatusUpdateFlow(user);
       return;
     case 'report_problem':
       await startReportProblemFlow(user);
@@ -1101,6 +1157,245 @@ async function runProblemDirect(
   });
   await notifyOfficeProblem(found.taskFieldId);
   await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+}
+
+// ── D2-T5 / D2-T6: on-demand status transitions + finished follow-up ────────
+// Menu item 3 → 3-item status sub-menu → DEPARTED/ARRIVED/FINISHED write.
+// A FINISHED write ALWAYS opens the 4-option follow-up (spec §7 / D2-T6).
+// The D5-T3 `set_field_status` intent gets a direct entry point via
+// `runAdvanceStatusDirect`. When the worker has >1 open TaskField, we hold
+// the requested transition in `pendingTransition` on the awaiting state and
+// resolve via `resolveOpenTaskFieldByHint`.
+
+const STATUS_HE_LABEL: Record<AdvanceTransition, string> = {
+  DEPARTED: 'בדרך',
+  ARRIVED:  'באתר',
+  FINISHED: 'הבדיקה הסתיימה',
+};
+
+/** Menu item 3 entry. Resolve open TaskField → show status sub-menu. */
+async function startStatusUpdateFlow(user: ResolvedUser): Promise<void> {
+  const found = await findOpenTaskFieldForWorker(user.id);
+  if (found === null) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין לך כרגע בדיקות פתוחות.' });
+    return;
+  }
+  if ('ambiguous' in found) {
+    await setContext(user.phone, { awaiting: 'status_disambig' });
+    await sendTextMessage({
+      to: user.phone,
+      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+    });
+    return;
+  }
+  await setContext(user.phone, { awaiting: 'status_choice', taskFieldId: found.taskFieldId });
+  await sendTextMessage({ to: user.phone, text: renderStatusUpdateMenu() });
+}
+
+async function handleStatusChoiceReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const items = statusUpdateMenu();
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `בחר מספר תקין:\n${renderStatusUpdateMenu()}`,
+    });
+    return;
+  }
+  const chosen = items[idx - 1];
+  await performTransition(user, ctx.taskFieldId, chosen.transition);
+}
+
+/**
+ * Shared write + reply path. FINISHED opens the 4-option follow-up + keeps
+ * the awaiting state alive (`finished_followup`); DEPARTED / ARRIVED clear it.
+ */
+async function performTransition(
+  user: ResolvedUser,
+  taskFieldId: string,
+  transition: AdvanceTransition,
+): Promise<void> {
+  await advanceFieldStatus({ taskFieldId, transition, updatedBy: user.id });
+  if (transition === 'FINISHED') {
+    await setContext(user.phone, { awaiting: 'finished_followup', taskFieldId });
+    await sendTextMessage({ to: user.phone, text: renderFinishedFollowUpMenu() });
+    return;
+  }
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
+}
+
+async function handleFinishedFollowUpReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const items = finishedFollowUpMenu();
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `בחר מספר תקין:\n${renderFinishedFollowUpMenu()}`,
+    });
+    return;
+  }
+  const chosen = items[idx - 1];
+  const taskFieldId = ctx.taskFieldId;
+  switch (chosen.choice) {
+    case 'no_notes':
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'רשמנו. כל טוב!' });
+      return;
+    case 'has_notes':
+      await setContext(user.phone, { awaiting: 'finished_notes', taskFieldId });
+      await sendTextMessage({ to: user.phone, text: 'מה ההערות מהשטח?' });
+      return;
+    case 'has_problem':
+      // Hand off to D2-T8 — reuse the same code path as `report_problem` menu
+      // tap. We already know the TaskField, so skip `findOpenTaskFieldForWorker`.
+      await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
+      await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
+      return;
+    case 'missing_info':
+      // Hand off to D2-T7 — reuse the same code path as `missing_report_info`.
+      await setContext(user.phone, { awaiting: 'missing_info_note', taskFieldId });
+      await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+      return;
+  }
+}
+
+async function handleFinishedNotesReply(
+  user: ResolvedUser,
+  raw: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const notes = raw.trim();
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  if (!notes) {
+    await sendTextMessage({ to: user.phone, text: 'מה ההערות מהשטח?' });
+    return;
+  }
+  await writeFieldNotes({ taskFieldId: ctx.taskFieldId, notes, updatedBy: user.id });
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'נשמר. תודה.' });
+}
+
+/** Direct dispatch used by the D5-T3 `set_field_status` free-text intent. */
+async function runAdvanceStatusDirect(
+  user: ResolvedUser,
+  transition: AdvanceTransition,
+  hint: string | null,
+): Promise<void> {
+  const found = hint
+    ? await resolveOpenTaskFieldByHint(user.id, hint)
+    : await findOpenTaskFieldForWorker(user.id);
+  if (found === null) {
+    await sendTextMessage({
+      to: user.phone,
+      text: hint
+        ? `לא הצלחתי לזהות בדיקה עבור "${hint}".`
+        : 'אין לך כרגע בדיקות פתוחות.',
+    });
+    return;
+  }
+  if ('ambiguous' in found) {
+    await setContext(user.phone, {
+      awaiting: 'status_disambig',
+      pendingTransition: transition,
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+    });
+    return;
+  }
+  await performTransition(user, found.taskFieldId, transition);
+}
+
+// ── D2-T5 disambig: resolve free-text hint into a specific TaskField ─────────
+// Shared handler for `status_disambig`, `missing_info_disambig`, and
+// `problem_disambig`. On unique match → transition into the appropriate
+// follow-up state (status sub-menu / note prompt / problem sub-menu). On no
+// match → keep the awaiting state and ask again. "ביטול" clears the state.
+
+type DisambigFlow = 'status' | 'missing_info' | 'problem';
+
+async function handleDisambigReply(
+  user: ResolvedUser,
+  trimmed: string,
+  flow: DisambigFlow,
+  pendingTransition?: FieldStatusTransition,
+): Promise<void> {
+  if (/^ביטול$/.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  if (!trimmed) {
+    await sendTextMessage({
+      to: user.phone,
+      text: 'לא הצלחתי לזהות. נסה שוב או כתוב "ביטול".',
+    });
+    return;
+  }
+  const found = await resolveOpenTaskFieldByHint(user.id, trimmed);
+  if (found === null || 'ambiguous' in found) {
+    await sendTextMessage({
+      to: user.phone,
+      text: 'לא הצלחתי לזהות. נסה שוב או כתוב "ביטול".',
+    });
+    return;
+  }
+  const taskFieldId = found.taskFieldId;
+
+  if (flow === 'status') {
+    // If a pendingTransition was pre-stored (free-text set_field_status path),
+    // perform it directly. Otherwise open the 3-item status sub-menu.
+    if (pendingTransition === 'DEPARTED' || pendingTransition === 'ARRIVED' || pendingTransition === 'FINISHED') {
+      await performTransition(user, taskFieldId, pendingTransition);
+      return;
+    }
+    if (pendingTransition === 'WAITING_FOR_INFO') {
+      await setContext(user.phone, { awaiting: 'missing_info_note', taskFieldId });
+      await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+      return;
+    }
+    if (pendingTransition === 'HAS_PROBLEM') {
+      await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
+      await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
+      return;
+    }
+    await setContext(user.phone, { awaiting: 'status_choice', taskFieldId });
+    await sendTextMessage({ to: user.phone, text: renderStatusUpdateMenu() });
+    return;
+  }
+  if (flow === 'missing_info') {
+    await setContext(user.phone, { awaiting: 'missing_info_note', taskFieldId });
+    await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+    return;
+  }
+  // flow === 'problem'
+  await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
+  await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
 }
 
 /** Pending dueDate-change approvals (manager/admin) — confirm via "אשר <id>" / "דחה <id>". */

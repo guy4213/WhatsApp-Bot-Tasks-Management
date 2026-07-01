@@ -62,6 +62,13 @@ export function runPreflight(): void {
   if (isProd && process.env.WHATSAPP_TEMPLATES_ENABLED !== 'true') {
     warnings.push('WHATSAPP_TEMPLATES_ENABLED!=true — proactive messages deliver only inside each user\'s 24h window');
   }
+
+  // D4-T1 (K3) — Yoram exceptions digest is only routed when YORAM_PHONE is
+  // set. It is OPTIONAL: unset / empty is a supported production state (legacy
+  // ADMIN morning + evening digests continue to run). Warn only, never fail.
+  if (isProd && !(process.env.YORAM_PHONE ?? '').trim()) {
+    warnings.push('YORAM_PHONE not set — Yoram exceptions digest (D4-T1) will not route; legacy ADMIN digest continues');
+  }
   if (isProd && !process.env.DATABASE_CA_CERT && process.env.DATABASE_SSL !== 'disable') {
     warnings.push('DATABASE_CA_CERT not set — DB TLS is encrypted but the server cert is not verified');
   }

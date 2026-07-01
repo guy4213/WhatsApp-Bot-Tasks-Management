@@ -150,3 +150,54 @@ export function renderProblemTypeMenu(): string {
   const items = problemTypeMenu();
   return 'בחר סוג בעיה:\n' + items.map((i) => `${i.n}. ${i.label}`).join('\n');
 }
+
+// ── D2-T5 status-update sub-menu ─────────────────────────────────────────────
+// Menu item 3 → 3-item numbered sub-menu (spec §7). Numbered text per D5-T4
+// policy (see the JSDoc on `problemTypeMenu` above).
+
+export interface StatusUpdateMenuItem {
+  n: number;
+  label: string;
+  transition: 'DEPARTED' | 'ARRIVED' | 'FINISHED';
+}
+
+export function statusUpdateMenu(): StatusUpdateMenuItem[] {
+  return [
+    { n: 1, label: 'יצאתי (בדרך)', transition: 'DEPARTED' },
+    { n: 2, label: 'הגעתי',        transition: 'ARRIVED'  },
+    { n: 3, label: 'סיימתי',       transition: 'FINISHED' },
+  ];
+}
+
+export function renderStatusUpdateMenu(): string {
+  return 'עדכון סטטוס בדיקה:\n' + statusUpdateMenu().map((i) => `${i.n}. ${i.label}`).join('\n');
+}
+
+// ── D2-T6 finished follow-up 4-option menu ───────────────────────────────────
+// After a FINISHED write we prompt for one of 4 follow-ups (spec §7): no
+// notes / field notes / has problem / missing info. Options 3 and 4 hand off
+// to the D2-T8 problem flow and the D2-T7 missing-info flow respectively.
+
+export type FinishedFollowUpChoice = 'no_notes' | 'has_notes' | 'has_problem' | 'missing_info';
+
+export interface FinishedFollowUpItem {
+  n: number;
+  label: string;
+  choice: FinishedFollowUpChoice;
+}
+
+export function finishedFollowUpMenu(): FinishedFollowUpItem[] {
+  return [
+    { n: 1, label: 'אין הערות',       choice: 'no_notes'     },
+    { n: 2, label: 'יש הערות מהשטח',  choice: 'has_notes'    },
+    { n: 3, label: 'יש בעיה',         choice: 'has_problem'  },
+    { n: 4, label: 'חסר מידע לדוח',   choice: 'missing_info' },
+  ];
+}
+
+export function renderFinishedFollowUpMenu(): string {
+  return (
+    'סיימת את הבדיקה. משהו נוסף?\n' +
+    finishedFollowUpMenu().map((i) => `${i.n}. ${i.label}`).join('\n')
+  );
+}

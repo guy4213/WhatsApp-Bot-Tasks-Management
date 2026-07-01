@@ -10,9 +10,14 @@ import {
   formatEmployeeMorning, formatManagerMorning,
   formatEmployeeEndOfDay, formatManagerEndOfDay,
   formatInspectorMorning,
+  formatGalitManagerMorning, formatGalitManagerEndOfDay,
   digestTemplateKey, type DigestContent,
 } from '../../whatsapp/digestContent';
 import { getInspectionsForWorkerOnDate } from '../../services/inspectionsQueries';
+import {
+  getFieldExceptionCounts, getOpenFieldExceptions,
+} from '../../services/exceptionsQueries';
+import { normalizeIsraeliPhone } from '../../auth/phoneNormalizer';
 
 const log = moduleLogger('digestDispatcher');
 
@@ -99,15 +104,27 @@ export async function selectDigestCandidates(): Promise<DueUserRow[]> {
 export async function runDigestDispatcher(): Promise<void> {
   const rows = await selectDigestCandidates();
 
+  // D4-T1 (K3) — cache Yoram's phone allow-list outside the loop so the per-
+  // user Yoram check is a cheap string compare, not a re-parse per row.
+  // Empty / unset → the entire Yoram branch is inert and legacy paths run.
+  const yoramPhoneRaw = (process.env.YORAM_PHONE ?? '').trim();
+  const yoramPhoneNormalized = yoramPhoneRaw
+    ? normalizeIsraeliPhone(yoramPhoneRaw)
+    : null;
+
   for (const row of rows) {
     const morningDue = row.morning_enabled && isDigestDue(row.morning_time, row.local_hm);
     const eveningDue = row.evening_enabled && isDigestDue(row.evening_time, row.local_hm);
-    if (morningDue) await dispatchOne(row, 'MORNING');
-    if (eveningDue) await dispatchOne(row, 'EVENING');
+    if (morningDue) await dispatchOne(row, 'MORNING', yoramPhoneNormalized);
+    if (eveningDue) await dispatchOne(row, 'EVENING', yoramPhoneNormalized);
   }
 }
 
-async function dispatchOne(row: DueUserRow, type: DigestType): Promise<void> {
+async function dispatchOne(
+  row: DueUserRow,
+  type: DigestType,
+  yoramPhoneNormalized: string | null,
+): Promise<void> {
   // INSERT-first dedup: only the instance that wins the claim sends.
   let claimed = false;
   try {
@@ -121,7 +138,7 @@ async function dispatchOne(row: DueUserRow, type: DigestType): Promise<void> {
   const isElevated = row.role === 'MANAGER' || row.role === 'ADMIN';
 
   try {
-    const content = await buildContent(row, type, isElevated);
+    const content = await buildContent(row, type, isElevated, yoramPhoneNormalized);
     const key = digestTemplateKey({ isElevated }, type);
     await notify({
       to: row.user_phone,
@@ -143,7 +160,33 @@ async function dispatchOne(row: DueUserRow, type: DigestType): Promise<void> {
   }
 }
 
-async function buildContent(row: DueUserRow, type: DigestType, isElevated: boolean): Promise<DigestContent> {
+async function buildContent(
+  row: DueUserRow,
+  type: DigestType,
+  isElevated: boolean,
+  yoramPhoneNormalized: string | null,
+): Promise<DigestContent> {
+  // D4-T1 (K3) — Yoram exceptions digest (FIELD portion only; leads portion is
+  // B2-blocked and rendered as a TODO placeholder in the formatter). Fires
+  // BEFORE the D2-T4 inspector branch and BEFORE the legacy ADMIN branch so it
+  // takes precedence when the phone matches. When `YORAM_PHONE` is unset (or
+  // the number doesn't parse), `yoramPhoneNormalized` is null and this branch
+  // is inert — legacy paths run unchanged. Dedup + audit + advisory-lock
+  // wiring are unchanged (same digestType, same claim ledger).
+  if (yoramPhoneNormalized) {
+    const rowPhoneNormalized = normalizeIsraeliPhone(row.user_phone);
+    if (rowPhoneNormalized && rowPhoneNormalized === yoramPhoneNormalized) {
+      const [counts, exceptions] = await Promise.all([
+        getFieldExceptionCounts(row.local_date),
+        getOpenFieldExceptions(row.local_date),
+      ]);
+      const user = { name: row.user_name };
+      return type === 'MORNING'
+        ? formatGalitManagerMorning({ counts, exceptions, user })
+        : formatGalitManagerEndOfDay({ counts, exceptions, user });
+    }
+  }
+
   if (type === 'MORNING') {
     // D2-T4 (K1): non-ADMIN users are inspectors and get the v2 numbered
     // inspections list. ADMIN keeps the legacy manager path. `formatEmployee
