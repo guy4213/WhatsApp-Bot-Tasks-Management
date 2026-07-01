@@ -25,6 +25,7 @@ import {
 import { claimLeadNotification } from '../../services/leadNotificationLog';
 import { suggestWorkerForLead, type InspectorCandidate } from '../../ai/leadSuggester';
 import { normalizeIsraeliPhone } from '../../auth/phoneNormalizer';
+import { getSashaPhone } from '../../services/specialUsers';
 
 const log = moduleLogger('leadAssignmentNotifier');
 
@@ -110,9 +111,12 @@ function formatEscalationAlert(
 }
 
 async function processEscalations(): Promise<void> {
-  const sashaPhoneRaw = (process.env.SASHA_PHONE ?? '').trim();
+  // Sasha is identified by User.name (see specialUsers.ts) — her phone comes
+  // from the DB, not env. When no active Sasha row exists, escalations are
+  // silently skipped (defensive: the alert has no recipient).
+  const sashaPhoneRaw = await getSashaPhone();
   if (!sashaPhoneRaw) {
-    log.debug('SASHA_PHONE not set — escalation job skipped');
+    log.debug('No active Sasha user with phone in DB — escalation job skipped');
     return;
   }
   const sashaPhone = normalizeIsraeliPhone(sashaPhoneRaw) ?? sashaPhoneRaw;

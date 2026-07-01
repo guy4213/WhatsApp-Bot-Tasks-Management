@@ -19,17 +19,22 @@ vi.mock('../ai/leadSuggester', () => ({
   suggestWorkerForLead: (...args: unknown[]) => suggestWorkerForLead(...args),
 }));
 
+const getSashaPhone = vi.fn();
+vi.mock('../services/specialUsers', () => ({
+  getSashaPhone: (...args: unknown[]) => getSashaPhone(...args),
+}));
+
 beforeEach(() => {
   poolQuery.mockReset();
   sendTextMessage.mockReset();
   sendTextMessage.mockResolvedValue(undefined);
   suggestWorkerForLead.mockReset();
   suggestWorkerForLead.mockResolvedValue({ userId: null, reason: 'לא נמצאה התאמה' });
-  delete process.env.SASHA_PHONE;
+  getSashaPhone.mockReset();
+  getSashaPhone.mockResolvedValue(null); // default: no Sasha in DB
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  delete process.env.SASHA_PHONE;
 });
 
 import { runLeadAssignmentNotifier } from '../scheduler/jobs/leadAssignmentNotifier';
@@ -152,7 +157,7 @@ describe('D3-T3 worker assignment alert', () => {
 
 describe('D3-T4 Sasha escalation', () => {
   beforeEach(() => {
-    process.env.SASHA_PHONE = '972509999999';
+    getSashaPhone.mockResolvedValue('972509999999');
   });
 
   it('claims ESCALATED_1H then sends to Sasha with AI suggestion', async () => {
@@ -194,8 +199,8 @@ describe('D3-T4 Sasha escalation', () => {
     expect(msg.text).toContain('הצעת שיבוץ: לא נמצאה התאמה');
   });
 
-  it('skips escalation entirely when SASHA_PHONE is unset', async () => {
-    delete process.env.SASHA_PHONE;
+  it('skips escalation entirely when no active Sasha user in DB', async () => {
+    getSashaPhone.mockResolvedValue(null);
     poolQuery.mockResolvedValueOnce(EMPTY); // findNewlyAssignedLeads
 
     await runLeadAssignmentNotifier();

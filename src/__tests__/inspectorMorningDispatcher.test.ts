@@ -1,23 +1,17 @@
 /**
- * D2-T4 — dispatcher morning branch routing tests.
+ * D2-T4 — dispatcher morning branch routing tests (name-based routing).
  *
  * Coverage:
- *  - non-ADMIN user → getInspectionsForWorkerOnDate + formatInspectorMorning
- *    is called (formatManagerMorning is NOT).
- *  - MANAGER (K1 says role !== 'ADMIN' == inspector) also routes to the
- *    inspector formatter.
- *  - ADMIN user → formatManagerMorning is called (inspector path NOT taken).
+ *  - Any non-Yoram user (SALES / MANAGER / ADMIN / WORKER) routes through
+ *    getInspectionsForWorkerOnDate + formatInspectorMorning.
+ *  - Per-day dedup preserved.
  *
- * X-T3 (2026-07-01): the retired `formatEmployeeMorning` / `getEmployeeMorning
- * Counts` mocks were removed — those helpers no longer exist.
+ * The retired formatManagerMorning path is no longer imported — Yoram is
+ * handled by galitManagerDispatcher.test.ts, everyone else gets inspector.
  *
  * Kept in its own file because `vi.mock('../whatsapp/digestContent', ...)` is
  * hoisted for the entire file — running it in the same file as the pure
  * formatter tests would replace the real function under test.
- *
- * The pg `pool` is mocked so `selectDigestCandidates` returns the fixture row
- * we drive; `notify`, `claimDigestSend`, `writeAuditLog` are stubbed so the
- * dispatch flow reaches `buildContent` without side effects.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InspectionListItem } from '../services/inspectionsQueries';
@@ -28,15 +22,13 @@ const poolQueryMock = vi.hoisted(() => vi.fn());
 
 const getInspectionsMock = vi.hoisted(() => vi.fn());
 const getEquipmentChecklistMock = vi.hoisted(() => vi.fn());
-const getCompanyMorningMock = vi.hoisted(() => vi.fn());
-const getCompanyEndOfDayMock = vi.hoisted(() => vi.fn());
 const getEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
 
 const formatInspectorMorningMock = vi.hoisted(() => vi.fn());
-const formatManagerMorningMock = vi.hoisted(() => vi.fn());
 const formatEquipmentReminderMock = vi.hoisted(() => vi.fn());
-const formatManagerEndOfDayMock = vi.hoisted(() => vi.fn());
 const formatEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
+const formatGalitManagerMorningMock = vi.hoisted(() => vi.fn());
+const formatGalitManagerEndOfDayMock = vi.hoisted(() => vi.fn());
 
 const sendButtonMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
 
@@ -53,6 +45,13 @@ vi.mock('../services/inspectionsQueries', () => ({
   getInspectionsForWorkerOnDate: getInspectionsMock,
   getEquipmentChecklistForFamilies: getEquipmentChecklistMock,
 }));
+vi.mock('../services/exceptionsQueries', () => ({
+  getFieldExceptionCounts: vi.fn(async () => ({
+    finishedFieldToday: 0, notConfirmedToday: 0, hasProblemToday: 0,
+    waitingForInfoToday: 0, notClosedDayToday: 0,
+  })),
+  getOpenFieldExceptions: vi.fn(async () => []),
+}));
 vi.mock('../services/incomingLeads', () => ({
   findOvernightUnassignedLeads: vi.fn(async () => []),
   findActiveInspectors: vi.fn(async () => []),
@@ -62,20 +61,19 @@ vi.mock('../ai/leadSuggester', () => ({
   suggestWorkerForLead: vi.fn(async () => ({ userId: null, reason: 'לא נמצאה התאמה' })),
 }));
 vi.mock('../services/tasks', () => ({
-  getCompanyMorning: getCompanyMorningMock,
-  getCompanyEndOfDay: getCompanyEndOfDayMock,
   getEmployeeEndOfDay: getEmployeeEndOfDayMock,
 }));
 vi.mock('../whatsapp/digestContent', () => ({
   formatInspectorMorning: formatInspectorMorningMock,
-  formatManagerMorning: formatManagerMorningMock,
   formatEquipmentReminder: formatEquipmentReminderMock,
-  formatManagerEndOfDay: formatManagerEndOfDayMock,
   formatEmployeeEndOfDay: formatEmployeeEndOfDayMock,
+  formatGalitManagerMorning: formatGalitManagerMorningMock,
+  formatGalitManagerEndOfDay: formatGalitManagerEndOfDayMock,
   digestTemplateKey: () => 'EMPLOYEE_MORNING_DIGEST',
 }));
 vi.mock('../whatsapp/sender', () => ({
   sendButtonMessage: sendButtonMessageMock,
+  sendTextMessage: vi.fn(async () => undefined),
 }));
 vi.mock('../whatsapp/templates', () => ({
   notify: notifyMock,
@@ -90,13 +88,13 @@ vi.mock('../utils/auditLog', () => ({
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('dispatcher morning branch — role routing (D2-T4)', () => {
+describe('dispatcher morning branch — routing (D2-T4)', () => {
   const stubContent = { text: 't', params: [], buttons: [] };
 
   function rowFor(role: string) {
     return {
       user_id: 'u-1',
-      user_name: 'דני',
+      user_name: 'דני', // NOT 'יורם' — this user is a regular worker
       user_phone: '972500000000',
       role,
       morning_enabled: true,
@@ -110,18 +108,13 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
 
   beforeEach(() => {
     formatInspectorMorningMock.mockReturnValue(stubContent);
-    formatManagerMorningMock.mockReturnValue(stubContent);
     formatEquipmentReminderMock.mockReturnValue({ text: 't', params: [], buttons: [] });
     getInspectionsMock.mockResolvedValue([]);
     getEquipmentChecklistMock.mockResolvedValue([]);
-    getCompanyMorningMock.mockResolvedValue({
-      dueToday: 0, overdue: 0, open: 0, employeesWithOverdue: 0, employees: [],
-    });
     claimDigestSendMock.mockResolvedValue(true);
   });
 
   afterEach(() => {
-    delete process.env.LEGACY_MANAGER_DIGEST_ENABLED;
     vi.clearAllMocks();
   });
 
@@ -131,7 +124,7 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
     await dispatcher.runDigestDispatcher();
   }
 
-  it('non-ADMIN (SALES) → formatInspectorMorning is called; formatManagerMorning is NOT', async () => {
+  it('SALES → formatInspectorMorning is called', async () => {
     const items: InspectionListItem[] = [
       {
         taskFieldId: 'tf-a', customerName: 'ל', siteAddress: 'א',
@@ -139,10 +132,6 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
         typeLabelHe: 'ט',
       },
     ];
-    // getInspectionsForWorkerOnDate is called twice per inspector morning:
-    // once by buildContent (inspector digest) and once by
-    // maybeDispatchEquipmentReminder (equipment reminder). Return the same
-    // list on every call.
     getInspectionsMock.mockResolvedValue(items);
 
     await fireMorning('SALES');
@@ -150,28 +139,19 @@ describe('dispatcher morning branch — role routing (D2-T4)', () => {
     expect(getInspectionsMock).toHaveBeenCalledWith('u-1', '2026-06-30');
     expect(formatInspectorMorningMock).toHaveBeenCalledTimes(1);
     expect(formatInspectorMorningMock).toHaveBeenCalledWith(items, { name: 'דני' });
-    expect(formatManagerMorningMock).not.toHaveBeenCalled();
-    // Dedup ledger was consulted (inspector morning) and the send fired.
     expect(claimDigestSendMock).toHaveBeenCalledWith('u-1', 'MORNING', '2026-06-30');
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
-  it('MANAGER (non-ADMIN) also routes through the inspector formatter — K1', async () => {
-    // K1: rule is `role !== 'ADMIN'`, so MANAGER is treated as an inspector
-    // for the morning path. Sasha's leads digest is D3-T2 (out of D2-T4 scope).
+  it('MANAGER → inspector morning fires (K1)', async () => {
     await fireMorning('MANAGER');
     expect(formatInspectorMorningMock).toHaveBeenCalledTimes(1);
-    expect(formatManagerMorningMock).not.toHaveBeenCalled();
   });
 
-  it('ADMIN + flag on → legacy formatManagerMorning path; inspector formatter NOT called', async () => {
-    // X-T5: LEGACY_MANAGER_DIGEST_ENABLED must be true for non-Yoram/non-Sasha ADMIN to reach legacy path.
-    process.env.LEGACY_MANAGER_DIGEST_ENABLED = 'true';
+  it('ADMIN (not Yoram) → inspector morning fires (treated as worker)', async () => {
     await fireMorning('ADMIN');
-    expect(formatManagerMorningMock).toHaveBeenCalledTimes(1);
-    expect(getCompanyMorningMock).toHaveBeenCalledTimes(1);
-    expect(formatInspectorMorningMock).not.toHaveBeenCalled();
-    expect(getInspectionsMock).not.toHaveBeenCalled();
+    expect(formatInspectorMorningMock).toHaveBeenCalledTimes(1);
+    expect(getInspectionsMock).toHaveBeenCalledTimes(2); // once for digest, once for equipment reminder
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 

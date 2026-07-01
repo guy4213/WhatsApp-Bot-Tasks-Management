@@ -4,12 +4,9 @@ import { sendButtonMessage, sendTextMessage } from '../../whatsapp/sender';
 import { writeAuditLog } from '../../utils/auditLog';
 import { moduleLogger } from '../../utils/logger';
 import { claimDigestSend, markDigestFailed, type DigestType } from '../../services/digestSendLog';
+import { getEmployeeEndOfDay } from '../../services/tasks';
 import {
-  getEmployeeEndOfDay, getCompanyMorning, getCompanyEndOfDay,
-} from '../../services/tasks';
-import {
-  formatManagerMorning,
-  formatEmployeeEndOfDay, formatManagerEndOfDay,
+  formatEmployeeEndOfDay,
   formatInspectorMorning,
   formatEquipmentReminder,
   formatGalitManagerMorning, formatGalitManagerEndOfDay,
@@ -25,13 +22,13 @@ import {
 import {
   getFieldExceptionCounts, getOpenFieldExceptions,
 } from '../../services/exceptionsQueries';
-import { normalizeIsraeliPhone } from '../../auth/phoneNormalizer';
 import {
   findOvernightUnassignedLeads,
   findActiveInspectors,
   getYoramLeadCounts,
 } from '../../services/incomingLeads';
 import { suggestWorkerForLead } from '../../ai/leadSuggester';
+import { isYoram, isSasha } from '../../services/specialUsers';
 
 const log = moduleLogger('digestDispatcher');
 
@@ -118,53 +115,31 @@ export async function selectDigestCandidates(): Promise<DueUserRow[]> {
 export async function runDigestDispatcher(): Promise<void> {
   const rows = await selectDigestCandidates();
 
-  // D4-T1 (K3) — cache Yoram's phone allow-list outside the loop so the per-
-  // user Yoram check is a cheap string compare, not a re-parse per row.
-  // Empty / unset → the entire Yoram branch is inert and legacy paths run.
-  const yoramPhoneRaw = (process.env.YORAM_PHONE ?? '').trim();
-  const yoramPhoneNormalized = yoramPhoneRaw
-    ? normalizeIsraeliPhone(yoramPhoneRaw)
-    : null;
-
-  // D3-T2 (K3) — Sasha's phone cached identically. When set, Sasha's row
-  // receives LEADS_MORNING at 09:30 and NO normal MORNING/EVENING.
-  const sashaPhoneRaw = (process.env.SASHA_PHONE ?? '').trim();
-  const sashaPhoneNormalized = sashaPhoneRaw
-    ? normalizeIsraeliPhone(sashaPhoneRaw)
-    : null;
-
   for (const row of rows) {
-    // D3-T2 (K3) — Sasha digest: leads-only at 09:30 regardless of configured
-    // morning time. Normal MORNING/EVENING are suppressed for Sasha so she does
-    // not receive the inspector or manager digest in addition to leads.
-    if (sashaPhoneNormalized) {
-      const rowPhone = normalizeIsraeliPhone(row.user_phone);
-      if (rowPhone && rowPhone === sashaPhoneNormalized) {
-        if (isDigestDue('09:30', row.local_hm)) {
-          await dispatchSashaLeadsMorning(row);
-        }
-        continue; // Sasha: no normal MORNING / EVENING
+    // Sasha (identified by User.name) — leads-only digest at 09:30. Normal
+    // MORNING/EVENING are suppressed so she doesn't also receive an inspector
+    // or manager digest on top of leads.
+    if (isSasha(row.user_name)) {
+      if (isDigestDue('09:30', row.local_hm)) {
+        await dispatchSashaLeadsMorning(row);
       }
+      continue;
     }
 
     const morningDue = row.morning_enabled && isDigestDue(row.morning_time, row.local_hm);
     const eveningDue = row.evening_enabled && isDigestDue(row.evening_time, row.local_hm);
     if (morningDue) {
-      await dispatchOne(row, 'MORNING', yoramPhoneNormalized, sashaPhoneNormalized);
-      // D2-T9 — piggyback on the morning slot per the task-spec design
-      // decision. Fires ONLY for inspector rows (K1: role !== 'ADMIN') AND
-      // when the Yoram allow-list did NOT redirect this row to the exceptions
-      // digest. Yoram receives an inspections-manager digest, not an inspector
-      // equipment reminder — skipping him here matches that intent. The
-      // equipment reminder has its OWN dedup row via `EQUIPMENT_MORNING`, so
-      // failing / dedup-skipping the inspector morning does NOT affect this.
-      const isYoram = yoramPhoneNormalized
-        && normalizeIsraeliPhone(row.user_phone) === yoramPhoneNormalized;
-      if (row.role !== 'ADMIN' && !isYoram) {
+      await dispatchOne(row, 'MORNING');
+      // Yoram receives the exceptions digest (in buildContent) — not an
+      // equipment reminder. Everyone else (all roles) is treated as a field
+      // worker per K1 and gets the equipment reminder as a piggy-back on the
+      // morning slot. The reminder is a no-op for users with no inspections
+      // today (checked inside maybeDispatchEquipmentReminder).
+      if (!isYoram(row.user_name)) {
         await maybeDispatchEquipmentReminder(row);
       }
     }
-    if (eveningDue) await dispatchOne(row, 'EVENING', yoramPhoneNormalized, sashaPhoneNormalized);
+    if (eveningDue) await dispatchOne(row, 'EVENING');
   }
 }
 
@@ -237,33 +212,7 @@ type PrimaryDigestType = Exclude<DigestType, 'EQUIPMENT_MORNING' | 'LEADS_MORNIN
 async function dispatchOne(
   row: DueUserRow,
   type: PrimaryDigestType,
-  yoramPhoneNormalized: string | null,
-  sashaPhoneNormalized: string | null,
 ): Promise<void> {
-  // X-T5 (K4 option c) — legacy ADMIN digest gate.
-  // For ADMIN users who are NOT Yoram and NOT Sasha, check the feature flag
-  // LEGACY_MANAGER_DIGEST_ENABLED. When the flag is off (default), skip early
-  // WITHOUT claiming a dedup row (so a future flag-on enablement will not be
-  // blocked by a stale claim). Sasha normally doesn't reach dispatchOne (she
-  // `continue`s in the loop), but we guard her here defensively.
-  // Yoram has already been handled separately in buildContent so he would still
-  // pass through here — but since his phone match in buildContent is what makes
-  // his digest useful, we only gate non-Yoram ADMINs.
-  if (row.role === 'ADMIN') {
-    const rowPhoneNorm = normalizeIsraeliPhone(row.user_phone);
-    const isYoramRow = yoramPhoneNormalized && rowPhoneNorm === yoramPhoneNormalized;
-    const isSashaRow = sashaPhoneNormalized && rowPhoneNorm === sashaPhoneNormalized;
-    if (!isYoramRow && !isSashaRow) {
-      if (process.env.LEGACY_MANAGER_DIGEST_ENABLED !== 'true') {
-        log.debug(
-          { userId: row.user_id, type },
-          'Legacy ADMIN digest DISABLED for non-Yoram/non-Sasha admin user',
-        );
-        return; // skip — do NOT claim the dedup slot
-      }
-    }
-  }
-
   // INSERT-first dedup: only the instance that wins the claim sends.
   let claimed = false;
   try {
@@ -274,10 +223,13 @@ async function dispatchOne(
   }
   if (!claimed) return; // already sent today (this user/type/day)
 
-  const isElevated = row.role === 'MANAGER' || row.role === 'ADMIN';
-
   try {
-    const content = await buildContent(row, type, isElevated, yoramPhoneNormalized);
+    const content = await buildContent(row, type);
+    // Everyone-except-Yoram is treated as a field worker for template routing
+    // (K1). Yoram gets the "elevated" template (manager end-of-day slot), but
+    // his content comes from `formatGalitManagerMorning/EndOfDay` — not the
+    // retired formatManagerMorning/EndOfDay.
+    const isElevated = isYoram(row.user_name);
     const key = digestTemplateKey({ isElevated }, type);
     await notify({
       to: row.user_phone,
@@ -287,7 +239,7 @@ async function dispatchOne(
       buttons: content.buttons,
     });
     await auditDigest(row, type, 'SUCCESS');
-    log.info({ userId: row.user_id, type, elevated: isElevated }, 'Digest sent');
+    log.info({ userId: row.user_id, type, name: row.user_name }, 'Digest sent');
   } catch (err) {
     log.error({ err, userId: row.user_id, type }, 'Digest send failed');
     try {
@@ -302,43 +254,30 @@ async function dispatchOne(
 async function buildContent(
   row: DueUserRow,
   type: PrimaryDigestType,
-  isElevated: boolean,
-  yoramPhoneNormalized: string | null,
 ): Promise<DigestContent> {
-  // D4-T1 (K3) — Yoram exceptions digest (FIELD portion only; leads portion is
-  // B2-blocked and rendered as a TODO placeholder in the formatter). Fires
-  // BEFORE the D2-T4 inspector branch and BEFORE the legacy ADMIN branch so it
-  // takes precedence when the phone matches. When `YORAM_PHONE` is unset (or
-  // the number doesn't parse), `yoramPhoneNormalized` is null and this branch
-  // is inert — legacy paths run unchanged. Dedup + audit + advisory-lock
-  // wiring are unchanged (same digestType, same claim ledger).
-  if (yoramPhoneNormalized) {
-    const rowPhoneNormalized = normalizeIsraeliPhone(row.user_phone);
-    if (rowPhoneNormalized && rowPhoneNormalized === yoramPhoneNormalized) {
-      const [counts, exceptions, leadCounts] = await Promise.all([
-        getFieldExceptionCounts(row.local_date),
-        getOpenFieldExceptions(row.local_date),
-        getYoramLeadCounts(row.local_date),
-      ]);
-      const user = { name: row.user_name };
-      return type === 'MORNING'
-        ? formatGalitManagerMorning({ counts, exceptions, user, leadCounts })
-        : formatGalitManagerEndOfDay({ counts, exceptions, user, leadCounts });
-    }
+  // Yoram (by User.name) — SPEC §13 exceptions digest (field counts + open
+  // exceptions + leads counts). Fires for both MORNING and EVENING.
+  if (isYoram(row.user_name)) {
+    const [counts, exceptions, leadCounts] = await Promise.all([
+      getFieldExceptionCounts(row.local_date),
+      getOpenFieldExceptions(row.local_date),
+      getYoramLeadCounts(row.local_date),
+    ]);
+    const user = { name: row.user_name };
+    return type === 'MORNING'
+      ? formatGalitManagerMorning({ counts, exceptions, user, leadCounts })
+      : formatGalitManagerEndOfDay({ counts, exceptions, user, leadCounts });
   }
 
+  // Everyone else (all roles: ADMIN / MANAGER / WORKER / TECHNICIAN) is
+  // treated as a field worker per K1. MORNING → inspector list §7,
+  // EVENING → employee end-of-day summary. The retired legacy manager
+  // digest formatters (formatManagerMorning / formatManagerEndOfDay) are no
+  // longer imported or referenced.
   if (type === 'MORNING') {
-    // D2-T4 (K1): non-ADMIN users are inspectors and get the v2 numbered
-    // inspections list. ADMIN keeps the legacy manager path. The old CRM
-    // `formatEmployeeMorning` fallback is retired (X-T3) — every non-ADMIN
-    // now flows through the inspector path.
-    if (row.role !== 'ADMIN') {
-      const items = await getInspectionsForWorkerOnDate(row.user_id, row.local_date);
-      return formatInspectorMorning(items, { name: row.user_name });
-    }
-    return formatManagerMorning(row.user_name, await getCompanyMorning());
+    const items = await getInspectionsForWorkerOnDate(row.user_id, row.local_date);
+    return formatInspectorMorning(items, { name: row.user_name });
   }
-  if (isElevated) return formatManagerEndOfDay(row.user_name, await getCompanyEndOfDay());
   return formatEmployeeEndOfDay(row.user_name, await getEmployeeEndOfDay(row.user_id));
 }
 

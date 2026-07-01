@@ -5,8 +5,8 @@
  *  - Inspector row with inspections today → equipment checklist loaded,
  *    formatter called, `sendButtonMessage` fired, dedup row claimed.
  *  - Inspector row with NO inspections today → no send, no formatter call.
- *  - ADMIN row → equipment reminder skipped entirely (K1 branch guard).
- *  - Yoram row (phone matches YORAM_PHONE) → equipment reminder skipped
+ *  - ADMIN row (not Yoram) → equipment reminder fires (treated as worker).
+ *  - Yoram row (User.name = 'יורם') → equipment reminder skipped
  *    (D4-T1 exceptions digest is what Yoram gets, not an inspector reminder).
  *  - `EQUIPMENT_MORNING` claim already taken → no send.
  *  - Getting the checklist returns [] → no send.
@@ -27,15 +27,13 @@ const poolQueryMock = vi.hoisted(() => vi.fn());
 
 const getInspectionsMock = vi.hoisted(() => vi.fn());
 const getEquipmentChecklistMock = vi.hoisted(() => vi.fn());
-const getCompanyMorningMock = vi.hoisted(() => vi.fn());
-const getCompanyEndOfDayMock = vi.hoisted(() => vi.fn());
 const getEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
 
 const formatInspectorMorningMock = vi.hoisted(() => vi.fn());
-const formatManagerMorningMock = vi.hoisted(() => vi.fn());
 const formatEquipmentReminderMock = vi.hoisted(() => vi.fn());
-const formatManagerEndOfDayMock = vi.hoisted(() => vi.fn());
 const formatEmployeeEndOfDayMock = vi.hoisted(() => vi.fn());
+const formatGalitManagerMorningMock = vi.hoisted(() => vi.fn());
+const formatGalitManagerEndOfDayMock = vi.hoisted(() => vi.fn());
 
 const sendButtonMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
 const notifyMock = vi.hoisted(() => vi.fn(async () => undefined));
@@ -59,21 +57,27 @@ vi.mock('../services/incomingLeads', () => ({
 vi.mock('../ai/leadSuggester', () => ({
   suggestWorkerForLead: vi.fn(async () => ({ userId: null, reason: 'לא נמצאה התאמה' })),
 }));
+vi.mock('../services/exceptionsQueries', () => ({
+  getFieldExceptionCounts: vi.fn(async () => ({
+    finishedFieldToday: 0, notConfirmedToday: 0, hasProblemToday: 0,
+    waitingForInfoToday: 0, notClosedDayToday: 0,
+  })),
+  getOpenFieldExceptions: vi.fn(async () => []),
+}));
 vi.mock('../services/tasks', () => ({
-  getCompanyMorning: getCompanyMorningMock,
-  getCompanyEndOfDay: getCompanyEndOfDayMock,
   getEmployeeEndOfDay: getEmployeeEndOfDayMock,
 }));
 vi.mock('../whatsapp/digestContent', () => ({
   formatInspectorMorning: formatInspectorMorningMock,
-  formatManagerMorning: formatManagerMorningMock,
   formatEquipmentReminder: formatEquipmentReminderMock,
-  formatManagerEndOfDay: formatManagerEndOfDayMock,
   formatEmployeeEndOfDay: formatEmployeeEndOfDayMock,
+  formatGalitManagerMorning: formatGalitManagerMorningMock,
+  formatGalitManagerEndOfDay: formatGalitManagerEndOfDayMock,
   digestTemplateKey: () => 'EMPLOYEE_MORNING_DIGEST',
 }));
 vi.mock('../whatsapp/sender', () => ({
   sendButtonMessage: sendButtonMessageMock,
+  sendTextMessage: vi.fn(async () => undefined),
 }));
 vi.mock('../whatsapp/templates', () => ({
   notify: notifyMock,
@@ -108,11 +112,11 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
     { family: 'radiation', code: 'elf_meter', labelHe: 'מד ELF', isRequired: true, sortOrder: 1 },
   ];
 
-  function rowFor(role: string, phone = '972500000000') {
+  function rowFor(role: string, name = 'דני') {
     return {
       user_id: 'u-1',
-      user_name: 'דני',
-      user_phone: phone,
+      user_name: name,
+      user_phone: '972500000000',
       role,
       morning_enabled: true,
       morning_time: '08:00',
@@ -125,20 +129,16 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
 
   beforeEach(() => {
     formatInspectorMorningMock.mockReturnValue(stubInspector);
-    formatManagerMorningMock.mockReturnValue(stubInspector);
     formatEquipmentReminderMock.mockReturnValue(stubEquipment);
+    formatGalitManagerMorningMock.mockReturnValue(stubInspector);
+    formatGalitManagerEndOfDayMock.mockReturnValue(stubInspector);
     getInspectionsMock.mockResolvedValue([]);
     getEquipmentChecklistMock.mockResolvedValue([]);
-    getCompanyMorningMock.mockResolvedValue({
-      dueToday: 0, overdue: 0, open: 0, employeesWithOverdue: 0, employees: [],
-    });
     // Default: both claim attempts (MORNING + EQUIPMENT_MORNING) succeed.
     claimDigestSendMock.mockResolvedValue(true);
   });
 
   afterEach(() => {
-    delete process.env.YORAM_PHONE;
-    delete process.env.LEGACY_MANAGER_DIGEST_ENABLED;
     vi.clearAllMocks();
   });
 
@@ -202,28 +202,24 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
     expect(sendButtonMessageMock).not.toHaveBeenCalled();
   });
 
-  it('ADMIN row + flag on → equipment reminder never fires (K1 branch guard); MORNING claim made, EQUIPMENT_MORNING not', async () => {
-    // X-T5: LEGACY_MANAGER_DIGEST_ENABLED must be true so the ADMIN reaches the claim step.
-    process.env.LEGACY_MANAGER_DIGEST_ENABLED = 'true';
+  it('ADMIN row (not Yoram) → equipment reminder fires (treated as worker)', async () => {
     getInspectionsMock.mockResolvedValue([oneInspection]);
     getEquipmentChecklistMock.mockResolvedValue(checklistRows);
 
-    await fireMorning(rowFor('ADMIN'));
+    await fireMorning(rowFor('ADMIN', 'גיא פרנסס'));
 
-    // Only the ADMIN MORNING claim; EQUIPMENT_MORNING is never even attempted.
     expect(claimDigestSendMock).toHaveBeenCalledWith('u-1', 'MORNING', '2026-06-30');
-    expect(claimDigestSendMock).not.toHaveBeenCalledWith('u-1', 'EQUIPMENT_MORNING', '2026-06-30');
-    expect(getEquipmentChecklistMock).not.toHaveBeenCalled();
-    expect(formatEquipmentReminderMock).not.toHaveBeenCalled();
-    expect(sendButtonMessageMock).not.toHaveBeenCalled();
+    expect(claimDigestSendMock).toHaveBeenCalledWith('u-1', 'EQUIPMENT_MORNING', '2026-06-30');
+    expect(getEquipmentChecklistMock).toHaveBeenCalledWith(['radiation']);
+    expect(formatEquipmentReminderMock).toHaveBeenCalledTimes(1);
+    expect(sendButtonMessageMock).toHaveBeenCalledTimes(1);
   });
 
-  it('Yoram (matching YORAM_PHONE) → equipment reminder skipped', async () => {
-    process.env.YORAM_PHONE = '972500000000';
+  it('Yoram (User.name = "יורם") → equipment reminder skipped', async () => {
     getInspectionsMock.mockResolvedValue([oneInspection]);
     getEquipmentChecklistMock.mockResolvedValue(checklistRows);
 
-    await fireMorning(rowFor('MANAGER', '972500000000'));
+    await fireMorning(rowFor('ADMIN', 'יורם'));
 
     expect(claimDigestSendMock).not.toHaveBeenCalledWith('u-1', 'EQUIPMENT_MORNING', '2026-06-30');
     expect(formatEquipmentReminderMock).not.toHaveBeenCalled();

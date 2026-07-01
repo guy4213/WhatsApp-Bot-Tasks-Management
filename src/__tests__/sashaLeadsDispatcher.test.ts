@@ -79,13 +79,9 @@ beforeEach(() => {
   sendTextMessage.mockResolvedValue(undefined);
   notify.mockReset();
   notify.mockResolvedValue(undefined);
-  delete process.env.SASHA_PHONE;
-  delete process.env.YORAM_PHONE;
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  delete process.env.SASHA_PHONE;
-  delete process.env.YORAM_PHONE;
 });
 
 import { runDigestDispatcher } from '../scheduler/jobs/digestDispatcher';
@@ -96,9 +92,9 @@ const OTHER_PHONE = '972501111111';
 function makeRow(overrides: Record<string, unknown> = {}) {
   return {
     user_id: 'u-sasha',
-    user_name: 'שי',
+    user_name: 'סשה', // routing key — must match SASHA_NAME in specialUsers.ts
     user_phone: SASHA_PHONE,
-    role: 'MANAGER',
+    role: 'ADMIN',
     morning_enabled: true,
     morning_time: '08:00',
     evening_enabled: true,
@@ -114,8 +110,7 @@ const CLAIM_GRANTED = { rowCount: 1, rows: [{ userId: 'u-sasha' }] };
 const CLAIM_DENIED  = { rowCount: 0, rows: [] };
 
 describe('Sasha leads morning dispatcher', () => {
-  it('sends LEADS_MORNING at 09:30 when phone matches SASHA_PHONE', async () => {
-    process.env.SASHA_PHONE = SASHA_PHONE;
+  it('sends LEADS_MORNING at 09:30 when User.name = "סשה"', async () => {
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // selectDigestCandidates
       .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend LEADS_MORNING
@@ -127,7 +122,6 @@ describe('Sasha leads morning dispatcher', () => {
   });
 
   it('does NOT send LEADS_MORNING when not in 09:30 window', async () => {
-    process.env.SASHA_PHONE = SASHA_PHONE;
     poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [makeRow({ local_hm: '08:05' })] });
 
     await runDigestDispatcher();
@@ -139,7 +133,6 @@ describe('Sasha leads morning dispatcher', () => {
   });
 
   it('skips send when claim is already taken (dedup)', async () => {
-    process.env.SASHA_PHONE = SASHA_PHONE;
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // selectDigestCandidates
       .mockResolvedValueOnce(CLAIM_DENIED); // claimDigestSend → already claimed
@@ -149,11 +142,11 @@ describe('Sasha leads morning dispatcher', () => {
     expect(sendTextMessage).not.toHaveBeenCalled();
   });
 
-  it('routes non-Sasha phone to normal MORNING path', async () => {
-    process.env.SASHA_PHONE = SASHA_PHONE;
+  it('routes non-Sasha name to normal MORNING path', async () => {
     // Use morning_time '09:30' so isDigestDue('09:30', '09:30') = true
     const normalRow = makeRow({
       user_id: 'u-other',
+      user_name: 'דני',
       user_phone: OTHER_PHONE,
       role: 'WORKER',
       morning_time: '09:30',
@@ -167,16 +160,6 @@ describe('Sasha leads morning dispatcher', () => {
 
     // Normal path uses notify(), not sendTextMessage
     expect(notify).toHaveBeenCalled();
-    expect(sendTextMessage).not.toHaveBeenCalled();
-  });
-
-  it('does not send LEADS_MORNING when SASHA_PHONE is unset', async () => {
-    const row = makeRow();
-    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [row] }); // selectDigestCandidates
-    // morningDue = isDigestDue('08:00', '09:30') → false (row has morning_time 08:00, local 09:30)
-    // eveningDue = isDigestDue('17:00', '09:30') → false
-    await runDigestDispatcher();
-
     expect(sendTextMessage).not.toHaveBeenCalled();
   });
 });

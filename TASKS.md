@@ -9,6 +9,46 @@ Conventions:
 
 ---
 
+## 0.1 Post-M9 routing refactor (2026-07-01)
+
+**Change:** Yoram + Sasha are now identified by `User.name` (constants in
+`src/services/specialUsers.ts` — `YORAM_NAME = 'יורם'`, `SASHA_NAME = 'סשה'`),
+not by env-var phone allow-lists. The DB is the source of truth for their
+phones (Sasha's phone is fetched via `getSashaPhone()` for the D3-T4 escalation
+alert).
+
+**Simplifications:**
+- Removed `YORAM_PHONE` and `SASHA_PHONE` env vars everywhere.
+- Removed `LEGACY_MANAGER_DIGEST_ENABLED` env var (X-T5 gate obsolete — see below).
+- Removed `formatManagerMorning` and `formatManagerEndOfDay` from the dispatch
+  path entirely (the retired formatters are still exported but unused).
+- Everyone-except-Yoram is now treated as a field worker regardless of role
+  (ADMIN / MANAGER / WORKER / TECHNICIAN): MORNING → `formatInspectorMorning`,
+  EVENING → `formatEmployeeEndOfDay`. K1 rule (`role !== 'ADMIN'` = inspector)
+  is superseded by name-based routing.
+- The X-T5 gate becomes moot — non-Yoram/non-Sasha ADMINs now receive the
+  same inspector treatment as workers, so no gate is needed.
+- Sasha's phone is looked up from the DB (`getSashaPhone()` in
+  `specialUsers.ts`) rather than read from an env var.
+
+**Files touched:** `src/services/specialUsers.ts` (new), `digestDispatcher.ts`,
+`leadAssignmentNotifier.ts`, `preflight.ts`, `.env.example`,
+`galitManagerDispatcher.test.ts`, `sashaLeadsDispatcher.test.ts`,
+`inspectorMorningDispatcher.test.ts`, `equipmentReminderDispatcher.test.ts`,
+`leadAssignmentNotifier.test.ts`. `legacyManagerGate.test.ts` deleted.
+
+**Impact on tasks:**
+- D4-T1 / D4-T2 status unchanged (still DONE) — routing logic replaced but
+  behavior for Yoram/Sasha is identical.
+- X-T5 effectively **withdrawn** (the gate is deleted — everyone is treated as
+  worker, so there's nothing to gate). Old K4 option (a) is now in effect by
+  default without an env flag.
+
+**Trade-off:** if the CRM renames Yoram or Sasha, edit the constants in
+`specialUsers.ts` (one line). Env-var drift is eliminated.
+
+---
+
 ## 0. Decisions log (locked 2026-06-30)
 
 The 7 K-tasks from §2 are closed. Resolutions:

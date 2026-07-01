@@ -63,19 +63,11 @@ export function runPreflight(): void {
     warnings.push('WHATSAPP_TEMPLATES_ENABLED!=true — proactive messages deliver only inside each user\'s 24h window');
   }
 
-  // D4-T1 (K3) — Yoram exceptions digest is only routed when YORAM_PHONE is
-  // set. It is OPTIONAL: unset / empty is a supported production state (legacy
-  // ADMIN morning + evening digests continue to run). Warn only, never fail.
-  if (isProd && !(process.env.YORAM_PHONE ?? '').trim()) {
-    warnings.push('YORAM_PHONE not set — Yoram exceptions digest (D4-T1) will not route; legacy ADMIN digest continues');
-  }
+  // Yoram + Sasha are identified by User.name at runtime (see specialUsers.ts).
+  // No env vars needed — the DB is the source of truth. If either row is
+  // missing from the User table, the corresponding digest is silently disabled
+  // (see specialUsers.getSashaPhone / isYoram / isSasha).
 
-  // D3-T2/D3-T4 (K3) — Sasha leads digest + escalation alerts are silently
-  // disabled when SASHA_PHONE is unset. This is intentional for environments
-  // that have not yet configured the Sasha lead-stream. Warn only in prod.
-  if (isProd && !(process.env.SASHA_PHONE ?? '').trim()) {
-    warnings.push('SASHA_PHONE not set — Sasha leads morning digest (D3-T2) and 1h escalation alerts (D3-T4) are disabled');
-  }
   if (isProd && !process.env.DATABASE_CA_CERT && process.env.DATABASE_SSL !== 'disable') {
     warnings.push('DATABASE_CA_CERT not set — DB TLS is encrypted but the server cert is not verified');
   }
