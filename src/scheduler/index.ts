@@ -64,7 +64,17 @@ export function startScheduler(): void {
   cron.schedule('*/5 * * * *', safe('dueDateReminder',     JOB_LOCK_IDS.dueDateReminder,    runDueDateReminder),          { timezone: TZ });
   cron.schedule('0 8 * * *',   safe('deadlineExceeded',    JOB_LOCK_IDS.deadlineExceeded,   runDeadlineExceededAlert),    { timezone: TZ });
   cron.schedule('0 9 * * *',   safe('deadlineApproaching', JOB_LOCK_IDS.deadlineApproaching, runDeadlineApproachingAlert), { timezone: TZ });
-  cron.schedule('*/2 * * * *', safe('completionNotifier',  JOB_LOCK_IDS.completionNotifier, runCompletionNotifier),       { timezone: TZ });
+
+  // X-T7: completionNotifier retired — v2 bot NEVER writes Task.status (CRM owns
+  // it). Reference implementation preserved at src/scheduler/jobs/completionNotifier.ts
+  // as the template for the D5-T6 shared polling job (K2 = polling). Re-enable
+  // only via COMPLETION_NOTIFIER_ENABLED=true.
+  if (process.env.COMPLETION_NOTIFIER_ENABLED === 'true') {
+    cron.schedule('*/2 * * * *', safe('completionNotifier', JOB_LOCK_IDS.completionNotifier, runCompletionNotifier), { timezone: TZ });
+    log.warn('COMPLETION_NOTIFIER_ENABLED=true — completionNotifier is ACTIVE (v2 bot must NOT write Task.status; ensure runCompletionNotifier is read-only wrt Task.status)');
+  } else {
+    log.info('completionNotifier is DISABLED (COMPLETION_NOTIFIER_ENABLED!=true) — retired per X-T7 (v2: CRM owns Task.status)');
+  }
 
   // Per-user scheduled digests — replaces the fixed 17:00 broadcast. Runs every
   // 5 minutes and fires each user's morning/evening digest when their local time

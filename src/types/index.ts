@@ -190,20 +190,51 @@ export type AIIntent =
   | 'confirm_pending_action'   // user approves their latest pending action ("כן"/"אשר")
   | 'decline_pending_action'   // user cancels their latest pending action ("לא"/"בטל")
   | 'team_workload'   // manager/admin asks who is loaded / overloaded
+  // v2 field-inspector intents (SPEC_FIELD_V2 §7–§9). The old CRM intents above
+  // are kept temporarily; X-T2 removes them once the v2 wiring lands.
+  | 'set_field_status'      // worker advances an inspection: departed/arrived/finished/waiting/problem
+  | 'report_problem'        // worker reports a problem on an inspection (optionally with problemType)
+  | 'report_missing_info'   // worker reports info missing for the final report
   | 'help'            // user asked what the bot can do
   | 'unknown';        // could not determine intent
+
+// v2 inspector-side sub-enums (SPEC_FIELD_V2 §4, §7, §9). These are the SUBSET
+// of `fieldStatus` transitions a worker can trigger via free text — the office-
+// triggered ones (ASSIGNED / CONFIRMED / DECLINED / NEEDS_MORE_INFO / CANCELED)
+// are NOT valid `set_field_status.transition` values.
+export type FieldStatusTransition =
+  | 'DEPARTED'
+  | 'ARRIVED'
+  | 'FINISHED'
+  | 'WAITING_FOR_INFO'
+  | 'HAS_PROBLEM';
+
+export type FieldProblemType =
+  | 'CUSTOMER_NOT_ANSWERING'
+  | 'NO_ACCESS'
+  | 'CUSTOMER_NOT_PRESENT'
+  | 'MISSING_EQUIPMENT'
+  | 'CANNOT_PERFORM'
+  | 'PROFESSIONAL_ISSUE'
+  | 'OTHER';
 
 export interface AIIntentResult {
   intent: AIIntent;
   confidence: number;                  // 0..1
-  task_reference: string | null;       // free-text describing which task (for edit/get)
+  task_reference: string | null;       // free-text describing which task (for edit/get) OR inspection ref for v2 field intents
   field: string | null;                // field name for edit_* intents
   new_value: unknown;                  // new value for edit_* intents
-  params: Record<string, unknown>;     // intent-specific extras (title, type, dueDate, priority, filter, ownerId, …)
+  params: Record<string, unknown>;     // intent-specific extras (title, type, dueDate, priority, filter, ownerId, note, …)
   missing_fields: string[];            // required params the model couldn't fill
   clarification: string | null;        // a Hebrew question to ask when something is missing/ambiguous
   requires_confirmation: boolean;
   requires_manager_approval: boolean;
+  // v2 field-inspector intent extras — populated only for set_field_status /
+  // report_problem. Optional & top-level (mirrors the shape of `field` /
+  // `new_value`), so the LLM tool-call layer enforces the enum via JSON schema
+  // and Zod rejects out-of-set values. `note` (free text) rides in params.note.
+  transition?: FieldStatusTransition | null;
+  problem_type?: FieldProblemType | null;
 }
 
 // ── Conversation history ───────────────────────────────────────────────────────

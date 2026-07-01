@@ -150,13 +150,13 @@ async function buildContent(row: DueUserRow, type: DigestType, isElevated: boole
   return formatEmployeeEndOfDay(row.user_name, await getEmployeeEndOfDay(row.user_id));
 }
 
-function auditDigest(
+async function auditDigest(
   row: DueUserRow,
   type: DigestType,
   status: 'SUCCESS' | 'FAILED',
   error?: string,
 ): Promise<void> {
-  return writeAuditLog({
+  await writeAuditLog({
     userId: row.user_id,
     whatsappNumber: row.user_phone,
     originalMessage: null,

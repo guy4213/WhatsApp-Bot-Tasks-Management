@@ -3,7 +3,9 @@ import { TASK_TYPE_LABELS } from '../types';
 import { getProvider, type LLMProvider } from './provider';
 import {
   INTENT_JSON_SCHEMA, TOOL_NAME, TOOL_DESCRIPTION,
-  EDITABLE_FIELDS, TASK_FILTERS, parseIntentResult,
+  EDITABLE_FIELDS, TASK_FILTERS,
+  FIELD_STATUS_TRANSITIONS, FIELD_PROBLEM_TYPES,
+  parseIntentResult,
 } from './schema';
 import { moduleLogger } from '../utils/logger';
 
@@ -57,6 +59,9 @@ export function buildSystemPrompt(ctx: ParseContext): string {
     '- decline_pending_action: the user REFUSES / cancels / rejects — a short standalone "לא", "בטל", "עצור", "לא מאשר", "דחה", "דחייה", "no". No other fields. High confidence. (A manager replying "דחה"/"מאשר" to an approval request also maps here / to confirm_pending_action.)',
     '  (Only classify as confirm/decline when the message is essentially just the affirmation/refusal, not part of a new request.)',
     '- team_workload: an ELEVATED user asks who is loaded / overloaded or wants a workload overview ("מי הכי עמוס", "עומס משימות בצוות", "כמה משימות פתוחות לכל אחד"). No params needed; backend checks the role.',
+    '- set_field_status: a FIELD INSPECTOR reports that they are advancing an inspection to a new operational status. Set the top-level "transition" field to one of: ' + FIELD_STATUS_TRANSITIONS.join(', ') + '. Map: "יצאתי"/"בדרך"/"נסעתי"→DEPARTED; "הגעתי"/"אני באתר"→ARRIVED; "סיימתי"/"גמרתי"→FINISHED; "אני מחכה למידע"/"צריך עוד פרטים לפני שאוכל לסיים"→WAITING_FOR_INFO; "יש לי בעיה"/"יש בעיה בבדיקה"→HAS_PROBLEM. If the worker names a specific customer/address ("יצאתי ללקוח כהן", "הגעתי לרעננה") put that in task_reference; otherwise leave task_reference=null and the backend disambiguates. Do NOT put the transition in params.',
+    '- report_problem: a FIELD INSPECTOR reports a problem with an inspection. If their phrasing maps cleanly to one of the 7 declared problem types, set the top-level "problem_type" field to it: ' + FIELD_PROBLEM_TYPES.join(', ') + '. Map: "הלקוח לא ענה"/"לא עונה בטלפון"→CUSTOMER_NOT_ANSWERING; "אין גישה"/"אין גישה לאתר"→NO_ACCESS; "הלקוח לא נמצא"/"אין אף אחד"→CUSTOMER_NOT_PRESENT; "חסר ציוד"/"אין לי את המכשיר"→MISSING_EQUIPMENT; "אי אפשר לבצע"/"לא ניתן לבצע"→CANNOT_PERFORM; "בעיה מקצועית"→PROFESSIONAL_ISSUE; anything else on a "problem" phrasing→OTHER. If the phrasing does NOT map cleanly, leave problem_type=null (the router will show the 7-item sub-menu). Free-text elaboration goes in params.note. Optional inline customer/address ref → task_reference.',
+    '- report_missing_info: a FIELD INSPECTOR reports that information is missing before the final report can be written ("חסר לי טופס דגימה", "חסר מספר היתר בנייה", "צריך שם מתכנן"). Put the specific missing item in params.note. Optional inline customer/address ref → task_reference. NOTE: this is different from set_field_status transition=WAITING_FOR_INFO — that one is a bare status update; report_missing_info specifies WHAT is missing.',
     '- help: user asks what you can do.',
     '- unknown: you cannot tell what they want, OR the request is out of scope. In two specific cases set a Hebrew "clarification" so the user gets a clear answer:',
     '    • STATUS CHANGE: ONLY when the user asks to mark a task done/closed/cancelled (e.g. "תסמן כבוצעה", "סמן כהושלם", "סגור את המשימה", "בטל את המשימה") → intent="unknown", confidence=0.9, clarification="לא ניתן לשנות סטטוס משימה דרך הבוט — הסטטוס מנוהל במערכת ה‑CRM." Do NOT use this for changing a task\'s OWNER (that is reassign_task) or its due date (that is edit_duedate).',
@@ -99,6 +104,17 @@ export function buildSystemPrompt(ctx: ParseContext): string {
     '- "מה פתוח עליי כרגע?" → list_tasks, params.filter="open", params.scope="own".',
     '- (right after acting on a task) "ועכשיו תשנה את תאריך היעד למחר" → edit_duedate, task_reference=null (SAME task — backend reuses it), new_value=<tomorrow ISO>, requires_manager_approval=true.',
     '- Hebrew messages often contain typos or missing/extra spaces ("תראה לי תמשימות שלי להיום", "תמשימות"). Read them charitably and still map to the right intent (here: list_tasks, filter="today", scope="own"). Do not drop to unknown over a spelling slip.',
+    '- "יצאתי לרעננה" → set_field_status, transition="DEPARTED", task_reference="רעננה".',
+    '- "בדרך" / "נסעתי" (no destination named) → set_field_status, transition="DEPARTED", task_reference=null.',
+    '- "הגעתי" / "אני באתר" → set_field_status, transition="ARRIVED", task_reference=null.',
+    '- "סיימתי" / "גמרתי את הבדיקה" → set_field_status, transition="FINISHED", task_reference=null.',
+    '- "אני מחכה למידע" / "צריך עוד פרטים לפני שאוכל לסיים" → set_field_status, transition="WAITING_FOR_INFO".',
+    '- "יש לי בעיה" / "יש בעיה בבדיקה" → set_field_status, transition="HAS_PROBLEM" (the router shows the 7-item sub-menu to pick problem_type).',
+    '- "הלקוח לא ענה" → report_problem, problem_type="CUSTOMER_NOT_ANSWERING".',
+    '- "אין גישה לאתר" → report_problem, problem_type="NO_ACCESS".',
+    '- "יש בעיה, לא מצליח למדוד" → report_problem, problem_type=null, params.note="לא מצליח למדוד" (router asks which type).',
+    '- "חסר לי טופס דגימה" → report_missing_info, params.note="טופס דגימה".',
+    '- "יצאתי ללקוח כהן" → set_field_status, transition="DEPARTED", task_reference="כהן".',
     ctx.history && ctx.history.length > 0
       ? `\nRECENT CONVERSATION (oldest→newest). Use it to resolve an EXPLICIT pick from a LIST the bot just showed — "השלישית"/"the third one" → map to that item's TITLE in task_reference. BUT for a continuation on the task just acted on ("אותה משימה", "תמשיך", "תן עליה פרטים", or simply another action with no new task named) set task_reference=null instead — the backend remembers the active task; do NOT copy an older list item's title. Emit exactly ONE tool call for the LATEST user message:\n` +
         ctx.history.map((h) => `${h.role === 'user' ? 'USER' : 'BOT'}: ${h.content}`).join('\n')

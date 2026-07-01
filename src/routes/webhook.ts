@@ -168,6 +168,52 @@ export async function processInbound(item: InboundMessage): Promise<void> {
       const payloadText = ((br?.id ?? lr?.id ?? br?.title ?? lr?.title) as string) ?? '';
       log.info({ from: item.fromPhone, msgId: item.msgId }, 'Inbound interactive reply');
       await handleIncomingMessage(item.fromPhone, payloadText);
+    } else if (type === 'audio') {
+      // D5-T2: download the Meta audio asset, transcribe via Whisper (K7),
+      // persist the transcript into WhatsappAuditLog.transcribedMessage, then
+      // fall through to the SAME text-routing path a typed message uses — the
+      // downstream handler cannot tell the two apart. Missing OPENAI_API_KEY
+      // or any download/transcription failure degrades to the fallback reply.
+      const mediaId = ((m.audio as Record<string, unknown>)?.id as string) ?? '';
+      log.info({ from: item.fromPhone, msgId: item.msgId, mediaId }, 'Inbound audio message');
+
+      // Seed an audit-log row so the transcript has somewhere to land.
+      const auditLogId = await writeAuditLog({
+        userId: null,
+        whatsappNumber: item.fromPhone,
+        originalMessage: `[audio mediaId=${mediaId}]`,
+        transcribedMessage: null,
+        detectedIntent: null,
+        detectedAction: null,
+        confidence: null,
+        targetTaskId: null,
+        oldValues: null,
+        newValues: null,
+        confirmationStatus: null,
+        approvalStatus: null,
+        approverUserId: null,
+        managerNotified: false,
+        executionStatus: null,
+        errorMessage: null,
+        pendingActionId: null,
+      });
+
+      const { handleVoiceMessage } = await import('../whatsapp/voice');
+      const transcript = await handleVoiceMessage({
+        mediaId,
+        from: item.fromPhone,
+        auditLogId: auditLogId ?? undefined,
+      });
+
+      if (transcript) {
+        await handleIncomingMessage(item.fromPhone, transcript);
+      } else {
+        const { sendTextMessage } = await import('../whatsapp/sender');
+        await sendTextMessage({
+          to: item.fromPhone,
+          text: 'לא הצלחתי להבין את ההודעה הקולית, אנא נסה שוב או שלח טקסט',
+        });
+      }
     } else {
       const { sendTextMessage } = await import('../whatsapp/sender');
       await sendTextMessage({

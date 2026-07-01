@@ -1263,14 +1263,14 @@ function describeIntent(intent: AIIntentResult): string {
 }
 
 /** Record a read / non-write event in the audit log (never throws). */
-function auditEvent(
+async function auditEvent(
   user: ResolvedUser,
   intent: string,
   taskId: string | null,
   status: 'SUCCESS' | 'SKIPPED' | 'FAILED',
   error?: string,
 ): Promise<void> {
-  return writeAuditLog({
+  await writeAuditLog({
     userId: user.id, whatsappNumber: user.phone,
     originalMessage: null, transcribedMessage: null,
     detectedIntent: intent, detectedAction: null, confidence: null,

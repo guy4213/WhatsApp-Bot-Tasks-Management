@@ -82,14 +82,14 @@ function getCallerPhone(request: { headers: Record<string, string | string[] | u
 }
 
 /** Record a denied/unauthorized attempt in the audit log (best-effort, never throws). */
-function auditDenied(
+async function auditDenied(
   userId: string | null,
   phone: string,
   action: string,
   taskId: string | null,
   reason: string,
 ): Promise<void> {
-  return writeAuditLog({
+  await writeAuditLog({
     userId, whatsappNumber: phone,
     originalMessage: null, transcribedMessage: null,
     detectedIntent: action.toLowerCase(), detectedAction: action, confidence: null,
