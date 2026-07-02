@@ -13,8 +13,11 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   extractFromContext,
   extractNote,
+  extractInspectionActions,
   type ExtractionRequest,
   type ExtractionResult,
+  type InspectionActionExtractionItem,
+  type TaskFieldContextValues,
 } from '../ai/contextExtractor';
 import type { LLMProvider, StructuredRequest } from '../ai/provider';
 
@@ -539,5 +542,225 @@ describe('extractFromContext — inspection_action', () => {
       null,
     );
     expect(result).toEqual({ values: {}, confidence: 0, clarification: null });
+  });
+});
+
+// ── extractInspectionActions — multi-action extraction ────────────────────────
+
+/** Build a mock provider that returns the given actions array. */
+function multiActionProvider(
+  actions: InspectionActionExtractionItem[],
+  confidence = 0.92,
+  clarification: string | null = null,
+): LLMProvider {
+  return mockProvider(async () => ({ actions, confidence, clarification }));
+}
+
+const sampleCtxValues: TaskFieldContextValues = {
+  customerName: 'חברת בטא',
+  contactName: 'רונית לוי',
+  contactPhone: '052-7654321',
+  siteAddress: 'הרצל 5 תל אביב',
+  siteCity: 'תל אביב',
+  inspectionTypeLabel: 'בדיקת רעש',
+  workerName: 'דני כהן',
+};
+
+describe('extractInspectionActions — multi-action extraction', () => {
+  // 1. Two actions: site + reassign
+  it('site + reassign: returns two ordered actions at high confidence', async () => {
+    const provider = multiActionProvider([
+      { action: 'correct_site', newSiteAddress: 'רוטשילד 15' },
+      { action: 'reassign', newWorkerName: 'דני' },
+    ]);
+    const result = await extractInspectionActions(
+      'תשנה את הכתובת לרוטשילד 15 ותשייך את זה לדני',
+      sampleCtxValues,
+      undefined,
+      provider,
+    );
+    expect(result.confidence).toBeGreaterThanOrEqual(0.85);
+    expect(result.actions).toHaveLength(2);
+    expect(result.actions[0].action).toBe('correct_site');
+    expect(result.actions[0].newSiteAddress).toBe('רוטשילד 15');
+    expect(result.actions[1].action).toBe('reassign');
+    expect(result.actions[1].newWorkerName).toBe('דני');
+    expect(result.clarification).toBeNull();
+  });
+
+  // 2. Two actions: correct_type + site
+  it('correct_type + site: returns two ordered actions', async () => {
+    const provider = multiActionProvider([
+      { action: 'correct_type', newInspectionTypeQuery: 'קרינה' },
+      { action: 'correct_site', newContactName: 'גל', newContactPhone: '050-XXX' },
+    ]);
+    const result = await extractInspectionActions(
+      'תשנה את סוג הבדיקה לקרינה ואת איש הקשר לגל, 050-XXX',
+      sampleCtxValues,
+      undefined,
+      provider,
+    );
+    expect(result.actions).toHaveLength(2);
+    expect(result.actions[0].action).toBe('correct_type');
+    expect(result.actions[0].newInspectionTypeQuery).toBe('קרינה');
+    expect(result.actions[1].action).toBe('correct_site');
+    expect(result.actions[1].newContactName).toBe('גל');
+    expect(result.actions[1].newContactPhone).toBe('050-XXX');
+  });
+
+  // 3. Two actions: reassign + correct_type
+  it('reassign + correct_type: two ordered actions', async () => {
+    const provider = multiActionProvider([
+      { action: 'reassign', newWorkerName: 'משה' },
+      { action: 'correct_type', newInspectionTypeQuery: 'אסבסט' },
+    ]);
+    const result = await extractInspectionActions(
+      'שייך מחדש למשה ושנה סוג בדיקה לאסבסט',
+      sampleCtxValues,
+      undefined,
+      provider,
+    );
+    expect(result.actions).toHaveLength(2);
+    expect(result.actions[0].action).toBe('reassign');
+    expect(result.actions[1].action).toBe('correct_type');
+  });
+
+  // 4. All three action types in one message
+  it('site + reassign + correct_type: all three in order', async () => {
+    const provider = multiActionProvider([
+      { action: 'correct_site', newSiteAddress: 'רוטשילד 15', newContactName: 'גל' },
+      { action: 'reassign', newWorkerName: 'דני' },
+      { action: 'correct_type', newInspectionTypeQuery: 'קרינה' },
+    ]);
+    const result = await extractInspectionActions(
+      'שנה כתובת לרוטשילד 15, איש קשר לגל, שייך לדני, וסוג בדיקה לקרינה',
+      sampleCtxValues,
+      undefined,
+      provider,
+    );
+    expect(result.actions).toHaveLength(3);
+    expect(result.actions[0].action).toBe('correct_site');
+    expect(result.actions[0].newSiteAddress).toBe('רוטשילד 15');
+    expect(result.actions[0].newContactName).toBe('גל');
+    expect(result.actions[1].action).toBe('reassign');
+    expect(result.actions[2].action).toBe('correct_type');
+  });
+
+  // 5. Site with 2 fields → ONE action (no split)
+  it('address + contact merged into one correct_site action', async () => {
+    const provider = multiActionProvider([
+      { action: 'correct_site', newSiteAddress: 'רוטשילד 15', newContactName: 'גל' },
+    ]);
+    const result = await extractInspectionActions(
+      'תשנה את הכתובת לרוטשילד 15 ואת איש הקשר לגל',
+      sampleCtxValues,
+      undefined,
+      provider,
+    );
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0].action).toBe('correct_site');
+    expect(result.actions[0].newSiteAddress).toBe('רוטשילד 15');
+    expect(result.actions[0].newContactName).toBe('גל');
+  });
+
+  // 6. Ambiguous phrasing → low confidence
+  it('ambiguous phrasing → confidence < 0.60, empty actions, clarification set', async () => {
+    const provider = mockProvider(async () => ({
+      actions: [],
+      confidence: 0.35,
+      clarification: 'לא הצלחתי להבין מה לשנות.',
+    }));
+    const result = await extractInspectionActions(
+      'הבדיקה הזאת נראית בעייתית',
+      sampleCtxValues,
+      undefined,
+      provider,
+    );
+    expect(result.confidence).toBeLessThan(0.60);
+    expect(result.actions).toHaveLength(0);
+    expect(result.clarification).toBeTruthy();
+  });
+
+  // 7. Completely unrelated message → 0 actions
+  it('unrelated message → 0 actions, low confidence', async () => {
+    const provider = mockProvider(async () => ({
+      actions: [],
+      confidence: 0.1,
+      clarification: null,
+    }));
+    const result = await extractInspectionActions('שלום טוב', sampleCtxValues, undefined, provider);
+    expect(result.actions).toHaveLength(0);
+    expect(result.confidence).toBeLessThan(0.60);
+  });
+
+  // 8. Provider throws → graceful empty result (no crash)
+  it('provider throws → returns empty result without crashing', async () => {
+    const provider = mockProvider(async () => { throw new Error('LLM timeout'); });
+    const result = await extractInspectionActions(
+      'תשנה את הכתובת',
+      sampleCtxValues,
+      undefined,
+      provider,
+    );
+    expect(result).toEqual({ actions: [], confidence: 0, clarification: null });
+  });
+
+  // 9. Provider is null → graceful empty
+  it('provider null → returns empty result', async () => {
+    const result = await extractInspectionActions('תשנה', sampleCtxValues, undefined, null);
+    expect(result).toEqual({ actions: [], confidence: 0, clarification: null });
+  });
+
+  // 10. Empty message → graceful empty
+  it('empty message → returns empty result', async () => {
+    const provider = multiActionProvider([{ action: 'correct_site', newSiteAddress: 'test' }]);
+    const result = await extractInspectionActions('   ', undefined, undefined, provider);
+    expect(result).toEqual({ actions: [], confidence: 0, clarification: null });
+  });
+
+  // 11. Single-object response is normalised to 1-element array
+  it('single-object response normalised to 1-element array', async () => {
+    const provider = mockProvider(async () => ({
+      actions: { action: 'correct_site', newSiteAddress: 'בן יהודה 5' },
+      confidence: 0.91,
+      clarification: null,
+    }));
+    const result = await extractInspectionActions(
+      'שנה כתובת לבן יהודה 5',
+      sampleCtxValues,
+      undefined,
+      provider,
+    );
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0].action).toBe('correct_site');
+    expect(result.actions[0].newSiteAddress).toBe('בן יהודה 5');
+  });
+
+  // 12. Clarification is suppressed when confidence >= 0.7
+  it('clarification suppressed when confidence >= 0.7', async () => {
+    const provider = mockProvider(async () => ({
+      actions: [{ action: 'reassign', newWorkerName: 'יוסי' }],
+      confidence: 0.80,
+      clarification: 'should be suppressed',
+    }));
+    const result = await extractInspectionActions('שייך ליוסי', sampleCtxValues, undefined, provider);
+    expect(result.clarification).toBeNull();
+    expect(result.actions[0].newWorkerName).toBe('יוסי');
+  });
+
+  // 13. Context values are passed to the system prompt
+  it('passes currentTaskFieldValues in the system prompt', async () => {
+    let seenSystem = '';
+    const provider: LLMProvider = {
+      name: 'spy',
+      emitStructured: async (req) => {
+        seenSystem = req.system;
+        return { actions: [], confidence: 0.1, clarification: null };
+      },
+    };
+    await extractInspectionActions('שנה', sampleCtxValues, undefined, provider);
+    expect(seenSystem).toContain('רונית לוי');
+    expect(seenSystem).toContain('דני כהן');
+    expect(seenSystem).toContain('בדיקת רעש');
   });
 });

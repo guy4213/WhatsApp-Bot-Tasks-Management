@@ -27,6 +27,31 @@ export interface ExtractionField {
   required?: boolean;
 }
 
+/**
+ * A single action extracted from a multi-action inspection_action intent.
+ * Fields not relevant to the action are absent/undefined.
+ */
+export interface InspectionActionExtractionItem {
+  action: 'correct_site' | 'correct_type' | 'reassign' | 'back' | 'cancel' | null;
+  newSiteAddress?: string;
+  newSiteCity?: string;
+  newContactName?: string;
+  newContactPhone?: string;
+  newInspectionTypeQuery?: string;
+  newWorkerName?: string;
+}
+
+/**
+ * Result of extracting multi-action from inspection_action intent.
+ * actions: 0..N (ordered as the user requested them).
+ * confidence: overall (min of per-action confidence, or 0 on failure).
+ */
+export interface InspectionActionExtraction {
+  actions: InspectionActionExtractionItem[];
+  confidence: number;
+  clarification: string | null;
+}
+
 export type ExtractionIntent =
   | 'correct_site'
   | 'correct_type_search'
@@ -80,7 +105,52 @@ export interface ExtractionResult {
   clarification: string | null;
 }
 
-// ── Tool schema ───────────────────────────────────────────────────────────────
+// ── Tool schemas ──────────────────────────────────────────────────────────────
+
+/** Schema for multi-action inspection_action extraction. */
+const EXTRACT_MULTI_ACTION_TOOL_NAME = 'extract_inspection_actions';
+const EXTRACT_MULTI_ACTION_TOOL_DESCRIPTION =
+  'Extract one or more structured actions from a free-text Hebrew message about an inspection. Return an array of actions (order = user request order), overall confidence, and optional clarification.';
+
+const INSPECTION_ACTION_ITEM_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    action: {
+      type: ['string', 'null'],
+      enum: ['correct_site', 'correct_type', 'reassign', 'back', 'cancel', null],
+      description: 'The action type.',
+    },
+    newSiteAddress:         { type: ['string', 'null'], description: 'New site address (for correct_site).' },
+    newSiteCity:            { type: ['string', 'null'], description: 'New site city (for correct_site).' },
+    newContactName:         { type: ['string', 'null'], description: 'New contact name (for correct_site).' },
+    newContactPhone:        { type: ['string', 'null'], description: 'New contact phone (for correct_site).' },
+    newInspectionTypeQuery: { type: ['string', 'null'], description: 'Inspection type search query (for correct_type).' },
+    newWorkerName:          { type: ['string', 'null'], description: 'New worker name (for reassign).' },
+  },
+  required: ['action'],
+};
+
+const EXTRACT_MULTI_ACTION_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    actions: {
+      type: 'array',
+      description: 'Ordered list of extracted actions (0..N).',
+      items: INSPECTION_ACTION_ITEM_SCHEMA,
+    },
+    confidence: {
+      type: 'number',
+      description: 'Overall confidence (min of per-action confidence), 0–1.',
+    },
+    clarification: {
+      type: ['string', 'null'],
+      description: 'Hebrew clarification when confidence < 0.7. null otherwise.',
+    },
+  },
+  required: ['actions', 'confidence', 'clarification'],
+};
 
 const EXTRACT_TOOL_NAME = 'extract_context_fields';
 const EXTRACT_TOOL_DESCRIPTION =
@@ -139,7 +209,7 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
 
   return [
     'המשתמש צופה בפרטי בדיקה ספציפית ושולח הודעה חופשית (כולל קולית).',
-    'מטרתך: לזהות איזו פעולה המשתמש רוצה לבצע על הבדיקה הנוכחית, ואילו ערכים חדשים הוא מספק.',
+    'מטרתך: לזהות איזו פעולה (או פעולות) המשתמש רוצה לבצע על הבדיקה הנוכחית, ואילו ערכים חדשים הוא מספק.',
     '',
     'פעולות אפשריות (שדה "action"):',
     '- correct_site  → שינוי פרטי אתר: כתובת, עיר, שם איש קשר, טלפון איש קשר',
@@ -150,7 +220,7 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
     '',
     currentValues,
     '',
-    'כללים חשובים:',
+    'כללים חשובים — פעולה יחידה:',
     '- אם המשתמש מזכיר שם/טלפון של איש קשר קיים (כפי שמופיע בערכים הנוכחיים) — זה הקשר לאישור, לא מונח חיפוש לזיהוי המשימה. המשתמש כבר מסתכל על הבדיקה הנכונה.',
     '- "החלף את איש הקשר מ-X ל-Y" → action=correct_site, newContactName=Y (ו-newContactPhone אם ניתן טלפון).',
     '- "שנה את הכתובת ל..." → action=correct_site, newSiteAddress=<הערך>, newSiteCity=<עיר אם צוינה>.',
@@ -160,6 +230,21 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
     '- "ביטול" / "עצור" → action=cancel.',
     '- אם אינך בטוח מה הפעולה — החזר confidence נמוך מ-0.60.',
     '- לא ניתן לזהות פעולה ברורה — החזר action=null, confidence < 0.60.',
+    '',
+    'כללים חשובים — מספר פעולות בהודעה אחת:',
+    'המשתמש יכול לבקש מספר שינויים בהודעה אחת. במקרה כזה, החזר מערך של פעולות לפי סדר הבקשה.',
+    'דוגמאות:',
+    '"תשנה את הכתובת לרוטשילד 15 ותשייך את זה לדני" →',
+    '  actions: [{ action: "correct_site", newSiteAddress: "רוטשילד 15" }, { action: "reassign", newWorkerName: "דני" }]',
+    '"תשנה את סוג הבדיקה לקרינה ואת איש הקשר לגל, 050-XXX" →',
+    '  actions: [{ action: "correct_type", newInspectionTypeQuery: "קרינה" }, { action: "correct_site", newContactName: "גל", newContactPhone: "050-XXX" }]',
+    '',
+    'אם הפעולות זהות עם שדות שונים באותה קטגוריה (למשל: כתובת + איש קשר) — אחד את השדות באותה פעולה אחת:',
+    '"תשנה את הכתובת לרוטשילד 15 ואת איש הקשר לגל" →',
+    '  actions: [{ action: "correct_site", newSiteAddress: "רוטשילד 15", newContactName: "גל" }]',
+    '',
+    'אל תפרק פעולה אחת ל-2 בגלל שיש כמה שדות —',
+    '"תשנה את איש הקשר לגל ואת הטלפון ל-050-XXX" זו פעולה אחת (correct_site עם 2 שדות).',
   ].join('\n');
 }
 
@@ -350,6 +435,121 @@ export async function extractFromContext(
       : null;
 
   return { values, confidence, clarification };
+}
+
+// ── Multi-action extractor for inspection_action ──────────────────────────────
+
+/** Build the system prompt for multi-action inspection_action extraction. */
+function buildMultiActionSystemPrompt(currentTaskFieldValues?: TaskFieldContextValues): string {
+  return [
+    BASE_SYSTEM_PREFIX,
+    '',
+    buildInspectionActionBlock(currentTaskFieldValues),
+  ].join('\n');
+}
+
+/** Build the user message for multi-action extraction. */
+function buildMultiActionUserMessage(
+  message: string,
+  history?: Array<{ role: 'user' | 'bot'; content: string }>,
+): string {
+  const historyBlock = history && history.length > 0
+    ? [
+        'היסטוריית שיחה (3-5 תורות אחרונות):',
+        ...history.map((t) => `${t.role === 'bot' ? 'בוט' : 'משתמש'}: ${t.content}`),
+        '',
+      ].join('\n')
+    : '';
+
+  return [
+    historyBlock,
+    `הודעת המשתמש: "${message}"`,
+    '',
+    'זהה את כל הפעולות המבוקשות. החזר מערך "actions" לפי סדר הבקשה.',
+    'אם אין פעולה ברורה — החזר actions: [], confidence < 0.60.',
+  ].join('\n');
+}
+
+/**
+ * Extract zero or more inspection actions from a single free-text message.
+ *
+ * Returns an `InspectionActionExtraction` — never throws.
+ * The `provider` param is injectable for tests.
+ */
+export async function extractInspectionActions(
+  message: string,
+  currentTaskFieldValues?: TaskFieldContextValues,
+  history?: Array<{ role: 'user' | 'bot'; content: string }>,
+  provider: LLMProvider | null = getProvider(),
+): Promise<InspectionActionExtraction> {
+  const empty: InspectionActionExtraction = { actions: [], confidence: 0, clarification: null };
+
+  if (!provider) {
+    log.debug('extractInspectionActions: no provider configured — returning empty');
+    return empty;
+  }
+
+  if (!message.trim()) return empty;
+
+  let raw: Record<string, unknown>;
+  try {
+    raw = await provider.emitStructured({
+      system: buildMultiActionSystemPrompt(currentTaskFieldValues),
+      user: buildMultiActionUserMessage(message, history),
+      toolName: EXTRACT_MULTI_ACTION_TOOL_NAME,
+      toolDescription: EXTRACT_MULTI_ACTION_TOOL_DESCRIPTION,
+      schema: EXTRACT_MULTI_ACTION_SCHEMA,
+    });
+  } catch (err) {
+    log.error({ err }, 'extractInspectionActions: provider call failed');
+    return empty;
+  }
+
+  const confidence = typeof raw.confidence === 'number'
+    ? Math.max(0, Math.min(1, raw.confidence))
+    : 0;
+
+  const clarification =
+    confidence < 0.7 && typeof raw.clarification === 'string' && raw.clarification.trim()
+      ? raw.clarification.trim()
+      : null;
+
+  // Normalize the actions array — accept both array and legacy single-object shape.
+  let rawActions: unknown[];
+  if (Array.isArray(raw.actions)) {
+    rawActions = raw.actions;
+  } else if (raw.actions !== null && raw.actions !== undefined) {
+    // Graceful: wrap a single object if the LLM returned one accidentally.
+    rawActions = [raw.actions];
+  } else {
+    return { actions: [], confidence, clarification };
+  }
+
+  const actions: InspectionActionExtractionItem[] = [];
+  for (const item of rawActions) {
+    if (typeof item !== 'object' || item === null) continue;
+    const obj = item as Record<string, unknown>;
+    const action = (typeof obj.action === 'string' ? obj.action.trim() : null) as
+      InspectionActionExtractionItem['action'];
+
+    const str = (key: string): string | undefined => {
+      const v = obj[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      return undefined;
+    };
+
+    actions.push({
+      action,
+      newSiteAddress:         str('newSiteAddress'),
+      newSiteCity:            str('newSiteCity'),
+      newContactName:         str('newContactName'),
+      newContactPhone:        str('newContactPhone'),
+      newInspectionTypeQuery: str('newInspectionTypeQuery'),
+      newWorkerName:          str('newWorkerName'),
+    });
+  }
+
+  return { actions, confidence, clarification };
 }
 
 // ── Convenience: extract a single "note" field from any free-text note intent ─

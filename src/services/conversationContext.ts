@@ -78,7 +78,11 @@ export type AwaitingKind =
   | 'mgr_workers_pick_worker'      // waiting for user to pick a worker from the list
   | 'mgr_search_await_query'       // waiting for free-text search query
   | 'mgr_search_pick_task'         // waiting for user to pick from search results
-  | 'mgr_search_action';           // waiting for inline action after picking a search result
+  | 'mgr_search_action'            // waiting for inline action after picking a search result
+  // Multi-action confirmation: manager sent a voice/free-text message with several
+  // changes in one shot. Bot shows a consolidated confirm message; this state
+  // awaits the CONFIRM_YES_MULTI_ACTION / CONFIRM_NO_MULTI_ACTION reply.
+  | 'mgr_multi_action_confirm';    // waiting for confirm/cancel of multi-action batch
 
 export interface ConversationState {
   awaiting: AwaitingKind;
@@ -158,6 +162,18 @@ export interface ConversationState {
   mgrLeadIds?: string[];              // numbered list of lead IDs for picker
   mgrLeadNames?: string[];            // lead display names (parallel array)
   mgrSearchKind?: 'customer' | 'worker' | 'product'; // which search type is active
+  // Multi-action batch pending confirmation (mgr_multi_action_confirm state).
+  // Serializable subset of InspectionActionExtractionItem — no imported types
+  // to keep the context module free of AI-layer imports.
+  pendingMultiActions?: Array<{
+    action: 'correct_site' | 'correct_type' | 'reassign' | 'back' | 'cancel' | null;
+    newSiteAddress?: string;
+    newSiteCity?: string;
+    newContactName?: string;
+    newContactPhone?: string;
+    newInspectionTypeQuery?: string;
+    newWorkerName?: string;
+  }>;
 }
 
 export async function getContext(phone: string): Promise<ConversationState | null> {

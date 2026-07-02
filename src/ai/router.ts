@@ -86,7 +86,10 @@ import {
   assignLead,
 } from '../services/incomingLeads';
 import { suggestWorkerForLead } from './leadSuggester';
-import { extractFromContext, extractNote, type ExtractionRequest } from './contextExtractor';
+import {
+  extractFromContext, extractNote, extractInspectionActions,
+  type ExtractionRequest, type InspectionActionExtractionItem,
+} from './contextExtractor';
 // Display helpers for manager-menu inspection list rows and detail views (Bug 2 fix).
 import {
   hebrewShortLabel,
@@ -164,6 +167,10 @@ const NUMERIC_PICKER_AWAITING: Set<AwaitingKind> = new Set<AwaitingKind>([
 // Hebrew/English navigation vocabulary, or interactive button/list payload IDs
 // (CONFIRM_*, MGR_MENU_*, ACTION_*) that arrive from tapped WhatsApp buttons.
 const NUMERIC_PICKER_NAV_RE = /^(?:\d+|חזרה|ביטול|עצור|אישור|כן|לא|חיפוש|yes|no|cancel|ok|CONFIRM_(?:YES|NO|EDIT)_\w+|MGR_MENU_\d+|ACTION_(?:CORRECT_SITE|CORRECT_TYPE|REASSIGN|BACK))$/i;
+
+// Payload IDs for the multi-action confirmation buttons.
+const CONFIRM_YES_MULTI = 'CONFIRM_YES_MULTI_ACTION';
+const CONFIRM_NO_MULTI  = 'CONFIRM_NO_MULTI_ACTION';
 
 /** True when `trimmed` is either digits or a known picker navigation word. */
 function looksLikeNumericPickerInput(trimmed: string): boolean {
@@ -641,6 +648,11 @@ async function continueConversation(
   }
   if (ctx.awaiting === 'mgr_search_action') {
     await handleMgrTaskActionReply(user, trimmed, ctx);
+    return;
+  }
+
+  if (ctx.awaiting === 'mgr_multi_action_confirm') {
+    await handleMgrMultiActionConfirmReply(user, trimmed, ctx);
     return;
   }
 
@@ -4387,6 +4399,13 @@ async function handleMgrTaskActionReply(
 /**
  * Context-aware free-text handler for mgr_*_action states.
  * Invoked when the user sends non-digit text while viewing a specific TaskField.
+ *
+ * Flow:
+ * 1. Call extractInspectionActions → get actions[].
+ * 2. Low confidence / empty → numbered menu fallback.
+ * 3. Single action → fast-path (same as before).
+ * 4. Multiple actions → build consolidated confirm, store pendingMultiActions,
+ *    set awaiting=mgr_multi_action_confirm.
  */
 async function handleMgrActionFreeText(
   user: ResolvedUser,
@@ -4397,43 +4416,30 @@ async function handleMgrActionFreeText(
 ): Promise<void> {
   // Load current TaskField values for the extractor context.
   const snapshot = await getTaskFieldValuesForContext(taskFieldId);
-
-  const INSPECTION_ACTION_FIELDS: ExtractionRequest['fields'] = [
-    { key: 'action',                  labelHe: 'פעולה',           kind: 'string' },
-    { key: 'newSiteAddress',          labelHe: 'כתובת אתר חדשה',  kind: 'address' },
-    { key: 'newSiteCity',             labelHe: 'עיר חדשה',         kind: 'string' },
-    { key: 'newContactName',          labelHe: 'שם איש קשר חדש',  kind: 'string' },
-    { key: 'newContactPhone',         labelHe: 'טלפון איש קשר חדש', kind: 'phone' },
-    { key: 'newInspectionTypeQuery',  labelHe: 'סוג בדיקה חדש',   kind: 'string' },
-    { key: 'newWorkerName',           labelHe: 'שם עובד חדש',     kind: 'string' },
-  ];
+  const ctxValues = snapshot
+    ? {
+        customerName: snapshot.customerName,
+        contactName: snapshot.contactName,
+        contactPhone: snapshot.contactPhone,
+        siteAddress: snapshot.siteAddress,
+        siteCity: snapshot.siteCity,
+        inspectionTypeLabel: snapshot.inspectionTypeLabel,
+        workerName: snapshot.workerName,
+      }
+    : undefined;
 
   const history = await getHistory(user.phone);
-  const result = await extractFromContext(
-    {
-      message: text,
-      intent: 'inspection_action',
-      fields: INSPECTION_ACTION_FIELDS,
-      history: history.map((t) => ({ role: t.role === 'assistant' ? 'bot' : 'user', content: t.content })),
-      todayIsoDate: localJerusalemDate(),
-      currentTaskFieldValues: snapshot
-        ? {
-            customerName: snapshot.customerName,
-            contactName: snapshot.contactName,
-            contactPhone: snapshot.contactPhone,
-            siteAddress: snapshot.siteAddress,
-            siteCity: snapshot.siteCity,
-            inspectionTypeLabel: snapshot.inspectionTypeLabel,
-            workerName: snapshot.workerName,
-          }
-        : undefined,
-    },
-  );
+  const mappedHistory = history.map((t) => ({
+    role: (t.role === 'assistant' ? 'bot' : 'user') as 'user' | 'bot',
+    content: t.content,
+  }));
 
-  const action = typeof result.values.action === 'string' ? result.values.action.trim() : null;
+  const extraction = await extractInspectionActions(text, ctxValues, mappedHistory);
 
-  // Low confidence → fall back to numbered prompt.
-  if (result.confidence < CONF_LOW || !action) {
+  const { actions, confidence, clarification } = extraction;
+
+  // ── Fallback: low confidence or nothing extracted ──────────────────────────
+  if (confidence < CONF_LOW || actions.length === 0) {
     await setContext(user.phone, {
       awaiting: ctx.awaiting,
       mgrSelectedTaskFieldId: taskFieldId,
@@ -4441,7 +4447,102 @@ async function handleMgrActionFreeText(
     });
     await sendTextMessage({
       to: user.phone,
-      text: (result.clarification ?? 'לא הבנתי — כתוב 1/2/3/4 או נסח מחדש.') + '\n\n' + MGR_TASK_INLINE_ACTIONS,
+      text: (clarification ?? 'לא הבנתי — כתוב 1/2/3/4 או נסח מחדש.') + '\n\n' + MGR_TASK_INLINE_ACTIONS,
+    });
+    return;
+  }
+
+  // ── Single action fast-path ────────────────────────────────────────────────
+  if (actions.length === 1) {
+    await dispatchSingleAction(user, ctx, taskFieldId, taskId, actions[0], confidence, clarification);
+    return;
+  }
+
+  // ── Multi-action path ──────────────────────────────────────────────────────
+  // Filter out back/cancel from the batch (shouldn't appear, but be defensive).
+  const batchActions = actions.filter(
+    (a) => a.action !== 'back' && a.action !== 'cancel' && a.action !== null,
+  );
+
+  if (batchActions.length === 0) {
+    // All actions were back/cancel — treat as cancel.
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+
+  // Build human-readable summary of planned changes.
+  const labelMap: Record<string, string> = {
+    siteAddress: 'כתובת האתר', siteCity: 'עיר',
+    fieldContactName: 'שם איש קשר', fieldContactPhone: 'טלפון איש קשר',
+    newInspectionTypeQuery: 'סוג בדיקה', newWorkerName: 'עובד',
+    newSiteAddress: 'כתובת האתר', newSiteCity: 'עיר',
+    newContactName: 'שם איש קשר', newContactPhone: 'טלפון איש קשר',
+  };
+
+  const lines: string[] = [];
+  for (const act of batchActions) {
+    if (act.action === 'correct_site') {
+      if (act.newSiteAddress) lines.push(`כתובת האתר → ${act.newSiteAddress}${act.newSiteCity ? ', ' + act.newSiteCity : ''}`);
+      else if (act.newSiteCity) lines.push(`עיר → ${act.newSiteCity}`);
+      if (act.newContactName) lines.push(`שם איש קשר → ${act.newContactName}${act.newContactPhone ? ', ' + act.newContactPhone : ''}`);
+      else if (act.newContactPhone) lines.push(`טלפון איש קשר → ${act.newContactPhone}`);
+    } else if (act.action === 'correct_type') {
+      lines.push(`סוג בדיקה → ${act.newInspectionTypeQuery ?? '(לא צוין)'}`);
+    } else if (act.action === 'reassign') {
+      lines.push(`עובד → ${act.newWorkerName ?? '(לא צוין)'}`);
+    }
+  }
+
+  const numberedLines = lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
+  const clarNote = confidence < CONF_HIGH && confidence >= CONF_LOW
+    ? '\n\nאני לא בטוח לגמרי — בדוק שוב:'
+    : '';
+
+  const confirmBody = `הבנתי — ${lines.length} שינויים:${clarNote}\n\n${numberedLines}`;
+
+  await setContext(user.phone, {
+    awaiting: 'mgr_multi_action_confirm',
+    mgrSelectedTaskFieldId: taskFieldId,
+    mgrSelectedTaskId: taskId,
+    pendingMultiActions: batchActions,
+  });
+
+  await sendButtonMessage({
+    to: user.phone,
+    body: confirmBody,
+    buttons: [
+      { id: CONFIRM_YES_MULTI, title: 'אישור' },
+      { id: CONFIRM_NO_MULTI,  title: 'ביטול' },
+    ],
+  });
+}
+
+/**
+ * Dispatch a single extracted action — shared by the single-action fast path
+ * and internally by multi-action helpers.
+ */
+async function dispatchSingleAction(
+  user: ResolvedUser,
+  ctx: ConversationState,
+  taskFieldId: string,
+  taskId: string,
+  item: InspectionActionExtractionItem,
+  confidence: number,
+  clarification: string | null,
+): Promise<void> {
+  const action = item.action;
+
+  if (!action) {
+    // No recognisable action even at high confidence — fall back to menu.
+    await setContext(user.phone, {
+      awaiting: ctx.awaiting,
+      mgrSelectedTaskFieldId: taskFieldId,
+      mgrSelectedTaskId: taskId,
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: (clarification ?? 'לא הבנתי — כתוב 1/2/3/4 או נסח מחדש.') + '\n\n' + MGR_TASK_INLINE_ACTIONS,
     });
     return;
   }
@@ -4460,14 +4561,14 @@ async function handleMgrActionFreeText(
   if (action === 'correct_site') {
     // Extract whichever site fields were provided.
     const siteFields: Array<{ key: keyof import('../services/taskFieldCorrections').SiteMetadataFields; value: string }> = [];
-    const fieldMappings: Array<[string, keyof import('../services/taskFieldCorrections').SiteMetadataFields]> = [
+    const fieldMappings: Array<[keyof InspectionActionExtractionItem, keyof import('../services/taskFieldCorrections').SiteMetadataFields]> = [
       ['newSiteAddress', 'siteAddress'],
       ['newSiteCity', 'siteCity'],
       ['newContactName', 'fieldContactName'],
       ['newContactPhone', 'fieldContactPhone'],
     ];
     for (const [extractedKey, dbKey] of fieldMappings) {
-      const val = result.values[extractedKey];
+      const val = item[extractedKey];
       if (typeof val === 'string' && val.trim()) {
         siteFields.push({ key: dbKey, value: val.trim() });
       }
@@ -4479,7 +4580,7 @@ async function handleMgrActionFreeText(
       return;
     }
 
-    if (result.confidence >= CONF_HIGH) {
+    if (confidence >= CONF_HIGH) {
       // High confidence: apply all extracted fields directly.
       for (const { key, value } of siteFields) {
         await updateSiteMetadata(taskFieldId, user.id, { [key]: value });
@@ -4518,9 +4619,7 @@ async function handleMgrActionFreeText(
   }
 
   if (action === 'correct_type') {
-    const typeQuery = typeof result.values.newInspectionTypeQuery === 'string'
-      ? result.values.newInspectionTypeQuery.trim()
-      : null;
+    const typeQuery = item.newInspectionTypeQuery?.trim() ?? null;
 
     const allTypes = await listInspectionTypes();
     let typesToShow = allTypes;
@@ -4545,7 +4644,7 @@ async function handleMgrActionFreeText(
       return;
     }
 
-    const lines = display.map((t, i) => `${i + 1}. [${t.code}] ${t.labelHe}`);
+    const typeLines = display.map((t, i) => `${i + 1}. [${t.code}] ${t.labelHe}`);
     await setContext(user.phone, {
       awaiting: 'correct_type_pick_from_list',
       taskFieldId,
@@ -4554,7 +4653,7 @@ async function handleMgrActionFreeText(
     const extraLine = typesToShow.length > 20 ? `\nועוד ${typesToShow.length - 20}. כתוב מילת חיפוש לצמצום.` : '';
     await sendTextMessage({
       to: user.phone,
-      text: `בחר סוג בדיקה חדש (השב במספר):\n${lines.join('\n')}${extraLine}`,
+      text: `בחר סוג בדיקה חדש (השב במספר):\n${typeLines.join('\n')}${extraLine}`,
     });
     return;
   }
@@ -4570,9 +4669,7 @@ async function handleMgrActionFreeText(
       return;
     }
 
-    const workerQuery = typeof result.values.newWorkerName === 'string'
-      ? result.values.newWorkerName.trim()
-      : null;
+    const workerQuery = item.newWorkerName?.trim() ?? null;
 
     // Fuzzy match on the worker list.
     const allWorkers = await findUsersByName(workerQuery ?? '');
@@ -4589,7 +4686,7 @@ async function handleMgrActionFreeText(
       return;
     }
 
-    if (allWorkers.length === 1 && result.confidence >= CONF_HIGH) {
+    if (allWorkers.length === 1 && confidence >= CONF_HIGH) {
       // Single unambiguous match + high confidence → confirm before writing.
       const worker = allWorkers[0];
       await setContext(user.phone, {
@@ -4630,6 +4727,140 @@ async function handleMgrActionFreeText(
   });
   await sendTextMessage({
     to: user.phone,
-    text: (result.clarification ?? 'לא הבנתי — כתוב 1/2/3/4 או נסח מחדש.') + '\n\n' + MGR_TASK_INLINE_ACTIONS,
+    text: (clarification ?? 'לא הבנתי — כתוב 1/2/3/4 או נסח מחדש.') + '\n\n' + MGR_TASK_INLINE_ACTIONS,
+  });
+}
+
+/**
+ * Handle the confirm/cancel reply in the mgr_multi_action_confirm state.
+ * Loops through pendingMultiActions, applies each, and reports the result.
+ */
+async function handleMgrMultiActionConfirmReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const taskFieldId = ctx.mgrSelectedTaskFieldId;
+  const taskId = ctx.mgrSelectedTaskId;
+  const pendingActions = ctx.pendingMultiActions ?? [];
+
+  const isYes = trimmed === '1'
+    || /^CONFIRM_YES_/i.test(trimmed)
+    || YES_RE.test(trimmed);
+  const isNo = trimmed === '2'
+    || /^CONFIRM_NO_/i.test(trimmed)
+    || NO_RE.test(trimmed);
+
+  if (isNo || (!isYes && !isNo)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+
+  // Yes — apply all pending actions in order.
+  if (!taskFieldId || !taskId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית — לא נמצא מזהה בדיקה. נסה שוב.' });
+    return;
+  }
+
+  const results: Array<{ label: string; ok: boolean; note?: string }> = [];
+
+  for (const act of pendingActions) {
+    if (act.action === 'correct_site') {
+      const fieldMappings: Array<[keyof typeof act, keyof import('../services/taskFieldCorrections').SiteMetadataFields]> = [
+        ['newSiteAddress', 'siteAddress'],
+        ['newSiteCity', 'siteCity'],
+        ['newContactName', 'fieldContactName'],
+        ['newContactPhone', 'fieldContactPhone'],
+      ];
+
+      let appliedAny = false;
+      for (const [extractedKey, dbKey] of fieldMappings) {
+        const val = act[extractedKey];
+        if (typeof val === 'string' && val.trim()) {
+          try {
+            await updateSiteMetadata(taskFieldId, user.id, { [dbKey]: val.trim() });
+            appliedAny = true;
+          } catch (err) {
+            log.error({ err, dbKey }, 'multi-action: updateSiteMetadata failed');
+          }
+        }
+      }
+
+      // Build a human-readable label for the result line.
+      const parts: string[] = [];
+      if (act.newSiteAddress) parts.push(`כתובת: ${act.newSiteAddress}`);
+      if (act.newSiteCity) parts.push(`עיר: ${act.newSiteCity}`);
+      if (act.newContactName) parts.push(`איש קשר: ${act.newContactName}`);
+      if (act.newContactPhone) parts.push(`טלפון: ${act.newContactPhone}`);
+      const label = parts.join(', ') || 'עדכון פרטי אתר';
+      results.push({ label, ok: appliedAny });
+
+    } else if (act.action === 'correct_type') {
+      const typeQuery = act.newInspectionTypeQuery?.trim() ?? '';
+      const label = `סוג בדיקה${typeQuery ? ': ' + typeQuery : ''}`;
+      try {
+        const allTypes = await listInspectionTypes();
+        const lower = typeQuery.toLowerCase();
+        const matches = typeQuery
+          ? allTypes.filter((t) => t.labelHe.includes(typeQuery) || t.code.toLowerCase().includes(lower))
+          : [];
+
+        if (matches.length === 1) {
+          await correctInspectionType(taskFieldId, matches[0].id, user.id, user.name);
+          results.push({ label, ok: true });
+        } else if (matches.length === 0) {
+          results.push({ label, ok: false, note: `לא נמצא סוג בדיקה "${typeQuery}"` });
+        } else {
+          // Ambiguous — skip
+          results.push({ label, ok: false, note: `מספר סוגים תואמים "${typeQuery}" — לא בוצע` });
+        }
+      } catch (err) {
+        log.error({ err }, 'multi-action: correctInspectionType failed');
+        results.push({ label, ok: false, note: 'שגיאה בעדכון סוג בדיקה' });
+      }
+
+    } else if (act.action === 'reassign') {
+      const workerQuery = act.newWorkerName?.trim() ?? '';
+      const label = `עובד${workerQuery ? ': ' + workerQuery : ''}`;
+      if (!user.isElevated) {
+        results.push({ label, ok: false, note: 'אין הרשאה לשיוך מחדש' });
+        continue;
+      }
+      try {
+        const matches = await findUsersByName(workerQuery);
+        if (matches.length === 1) {
+          await reassignTask(taskId, matches[0].id, user.id);
+          results.push({ label, ok: true });
+        } else if (matches.length === 0) {
+          results.push({ label, ok: false, note: `לא נמצא עובד בשם "${workerQuery}"` });
+        } else {
+          results.push({ label, ok: false, note: `מספר עובדים תואמים "${workerQuery}" — לא בוצע` });
+        }
+      } catch (err) {
+        log.error({ err }, 'multi-action: reassignTask failed');
+        results.push({ label, ok: false, note: 'שגיאה בשיוך מחדש' });
+      }
+    }
+    // back/cancel: already filtered out before storing
+  }
+
+  await clearContext(user.phone);
+
+  if (results.length === 0) {
+    await sendTextMessage({ to: user.phone, text: 'לא בוצעו שינויים.' });
+    return;
+  }
+
+  const doneLine = results.filter((r) => r.ok).length > 0 ? 'בוצעו:' : '';
+  const summaryLines = results.map((r) => {
+    if (r.ok) return `בוצע — ${r.label}`;
+    return `לא בוצע — ${r.label}${r.note ? ': ' + r.note : ''}`;
+  });
+
+  await sendTextMessage({
+    to: user.phone,
+    text: [doneLine, ...summaryLines].filter(Boolean).join('\n'),
   });
 }

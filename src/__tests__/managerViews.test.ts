@@ -60,14 +60,21 @@ describe('getManagementSnapshot', () => {
     expect(params).toContain(LOCAL_DATE);
   });
 
-  it('second query counts open exceptions on TaskField', async () => {
+  it('second query counts open exceptions on TaskField scoped by scheduledStartAt today', async () => {
     mockAllThreeQueries();
     await getManagementSnapshot(LOCAL_DATE);
-    const [sql] = poolQuery.mock.calls[1];
+    const [sql, params] = poolQuery.mock.calls[1];
     expect(sql).toMatch(/"TaskField"/);
     expect(sql).toMatch(/hasOpenProblem/);
     expect(sql).toMatch(/missingReportInfo/);
     expect(sql).toMatch(/WAITING_FOR_INFO/);
+    // "Today" = scheduledStartAt in the local Asia/Jerusalem day.
+    expect(sql).toMatch(/scheduledStartAt/);
+    expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
+    expect(params).toContain(LOCAL_DATE);
+    // Must NOT re-introduce assignedAt/finishedAt as day-scoping columns.
+    expect(sql).not.toMatch(/tf\."assignedAt"\s*(>=|<)/);
+    expect(sql).not.toMatch(/tf\."finishedAt"\s*(>=|<)/);
   });
 
   it('third query aggregates IncomingLead counts including escalation', async () => {
@@ -79,6 +86,11 @@ describe('getManagementSnapshot', () => {
     expect(sql).toMatch(/ESCALATED_1H/);
     expect(sql).toMatch(/overnight/i);
     expect(params).toContain(LOCAL_DATE);
+    // Regression: leads keep using `receivedAt` (per spec, leads filtering was
+    // NOT part of the scheduledStartAt alignment). Do not swap this to
+    // scheduledStartAt — IncomingLead has no such column.
+    expect(sql).toMatch(/"receivedAt"/);
+    expect(sql).not.toMatch(/scheduledStartAt/);
   });
 
   it('returns parsed numeric values', async () => {
@@ -148,13 +160,17 @@ describe('getTodayFieldInspections', () => {
 // ── getFieldExceptionRows ─────────────────────────────────────────────────────
 
 describe('getFieldExceptionRows', () => {
-  it('open_exceptions: filters hasOpenProblem OR missingReportInfo/WAITING_FOR_INFO', async () => {
+  it('open_exceptions: filters by hasOpenProblem / missingReportInfo AND scheduledStartAt today', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     await getFieldExceptionRows(LOCAL_DATE, 'open_exceptions');
-    const [sql] = poolQuery.mock.calls[0];
+    const [sql, params] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/hasOpenProblem/);
     expect(sql).toMatch(/missingReportInfo/);
     expect(sql).toMatch(/WAITING_FOR_INFO/);
+    // Daily menu context — must be scoped by scheduledStartAt in Asia/Jerusalem.
+    expect(sql).toMatch(/scheduledStartAt/);
+    expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
+    expect(params).toContain(LOCAL_DATE);
   });
 
   it('not_confirmed: filters fieldStatus = ASSIGNED and scheduledStartAt today', async () => {
@@ -167,18 +183,25 @@ describe('getFieldExceptionRows', () => {
     expect(params).toContain(LOCAL_DATE);
   });
 
-  it('has_problem: filters fieldStatus = HAS_PROBLEM', async () => {
+  it('has_problem: filters fieldStatus = HAS_PROBLEM AND scheduledStartAt today', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     await getFieldExceptionRows(LOCAL_DATE, 'has_problem');
-    const [sql] = poolQuery.mock.calls[0];
+    const [sql, params] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/'HAS_PROBLEM'/);
+    // Daily menu context — must be scoped by scheduledStartAt in Asia/Jerusalem.
+    expect(sql).toMatch(/scheduledStartAt/);
+    expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
+    expect(params).toContain(LOCAL_DATE);
   });
 
-  it('waiting_for_info: filters fieldStatus = WAITING_FOR_INFO', async () => {
+  it('waiting_for_info: filters fieldStatus = WAITING_FOR_INFO AND scheduledStartAt today', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     await getFieldExceptionRows(LOCAL_DATE, 'waiting_for_info');
-    const [sql] = poolQuery.mock.calls[0];
+    const [sql, params] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/'WAITING_FOR_INFO'/);
+    expect(sql).toMatch(/scheduledStartAt/);
+    expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
+    expect(params).toContain(LOCAL_DATE);
   });
 
   it('not_closed: filters scheduledStartAt today and excludes FINISHED_FIELD/CANCELED/DECLINED', async () => {

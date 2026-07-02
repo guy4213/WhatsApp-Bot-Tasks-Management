@@ -62,12 +62,20 @@ export async function getManagementSnapshot(localDate: string): Promise<Manageme
     [localDate],
   );
 
-  // Query 2: open exceptions (hasOpenProblem OR (missingReportInfo AND WAITING_FOR_INFO))
+  // Query 2: open exceptions for the local day (scheduledStartAt window).
+  // "Today" is scheduledStartAt in Asia/Jerusalem — this is the manager DAILY
+  // snapshot, so an open problem from yesterday for yesterday's inspection
+  // does not count against today's snapshot. See the file header note.
   const { rows: exRows } = await pool.query<{ cnt: string }>(
     `SELECT COUNT(*) AS cnt
-     FROM "TaskField"
-     WHERE "hasOpenProblem" = true
-        OR ("missingReportInfo" = true AND "fieldStatus" = 'WAITING_FOR_INFO')`,
+     FROM "TaskField" tf
+     WHERE tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+       AND (
+         tf."hasOpenProblem" = true
+         OR (tf."missingReportInfo" = true AND tf."fieldStatus" = 'WAITING_FOR_INFO')
+       )`,
+    [localDate],
   );
 
   // Query 3: lead counts
@@ -194,12 +202,15 @@ export async function getTodayFieldInspections(
 
 // ── Field exception rows ──────────────────────────────────────────────────────
 
+// All 5 filters are DAILY (manager daily menu context) and scope by
+// TaskField.scheduledStartAt in the local Asia/Jerusalem day. See the
+// exceptionsQueries.ts file header for the "today" definition.
 export type FieldExceptionFilter =
-  | 'open_exceptions'   // hasOpenProblem OR (missingReportInfo AND WAITING_FOR_INFO)
-  | 'not_confirmed'     // fieldStatus = ASSIGNED (scheduled today)
-  | 'has_problem'       // fieldStatus = HAS_PROBLEM
-  | 'waiting_for_info'  // fieldStatus = WAITING_FOR_INFO
-  | 'not_closed';       // scheduled today, not in FINISHED_FIELD/CANCELED/DECLINED
+  | 'open_exceptions'   // scheduled today AND (hasOpenProblem OR missingReportInfo+WAITING_FOR_INFO)
+  | 'not_confirmed'     // scheduled today AND fieldStatus = ASSIGNED
+  | 'has_problem'       // scheduled today AND fieldStatus = HAS_PROBLEM
+  | 'waiting_for_info'  // scheduled today AND fieldStatus = WAITING_FOR_INFO
+  | 'not_closed';       // scheduled today AND fieldStatus NOT IN FINISHED_FIELD/CANCELED/DECLINED
 
 export interface FieldExceptionRow {
   taskFieldId: string;
@@ -223,29 +234,34 @@ export async function getFieldExceptionRows(
   let whereClause: string;
   const params: unknown[] = [localDate];
 
+  // Every filter is DAILY — always scope by scheduledStartAt (Asia/Jerusalem).
+  // Shared prefix; each `case` appends its status predicate on top.
+  const scheduledTodayPrefix = `
+    tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
+    AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'`;
+
   switch (filter) {
     case 'open_exceptions':
-      whereClause = `(
-        tf."hasOpenProblem" = true
-        OR (tf."missingReportInfo" = true AND tf."fieldStatus" = 'WAITING_FOR_INFO')
-      )`;
+      whereClause = `${scheduledTodayPrefix}
+        AND (
+          tf."hasOpenProblem" = true
+          OR (tf."missingReportInfo" = true AND tf."fieldStatus" = 'WAITING_FOR_INFO')
+        )`;
       break;
     case 'not_confirmed':
-      whereClause = `
-        tf."fieldStatus" = 'ASSIGNED'
-        AND tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
-        AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'`;
+      whereClause = `${scheduledTodayPrefix}
+        AND tf."fieldStatus" = 'ASSIGNED'`;
       break;
     case 'has_problem':
-      whereClause = `tf."fieldStatus" = 'HAS_PROBLEM'`;
+      whereClause = `${scheduledTodayPrefix}
+        AND tf."fieldStatus" = 'HAS_PROBLEM'`;
       break;
     case 'waiting_for_info':
-      whereClause = `tf."fieldStatus" = 'WAITING_FOR_INFO'`;
+      whereClause = `${scheduledTodayPrefix}
+        AND tf."fieldStatus" = 'WAITING_FOR_INFO'`;
       break;
     case 'not_closed':
-      whereClause = `
-        tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
-        AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+      whereClause = `${scheduledTodayPrefix}
         AND tf."fieldStatus" NOT IN ('FINISHED_FIELD','CANCELED','DECLINED')`;
       break;
   }

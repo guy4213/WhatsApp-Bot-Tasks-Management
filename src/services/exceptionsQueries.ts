@@ -9,8 +9,15 @@
  *
  * Local-day windowing mirrors `getInspectionsForWorkerOnDate` in
  * `inspectionsQueries.ts` — a half-open UTC range derived from a 'YYYY-MM-DD'
- * string via `AT TIME ZONE 'Asia/Jerusalem'` (index-friendly on the
- * `TaskField.assignedAt` / `finishedAt` timestamp columns).
+ * string via `AT TIME ZONE 'Asia/Jerusalem'`.
+ *
+ * "Today" definition (2026-07-02 alignment): every daily count and every open
+ * exception in Yoram's digest is scoped by `TaskField.scheduledStartAt` — the
+ * planned inspection time set at CRM scheduling. `assignedAt` (row creation
+ * time) and `finishedAt` (actual completion time) do NOT define the daily
+ * operational scope. Rationale: a TaskField created today but scheduled next
+ * week is next-week work, not today's; a TaskField created last week but
+ * scheduled today IS today's work.
  *
  * Status ownership: the CRM owns `Task.status`. We NEVER read/write it. The live
  * field lifecycle is on `TaskField.fieldStatus` (10 values from migration 009).
@@ -28,11 +35,15 @@ const log = moduleLogger('exceptionsQueries');
 /**
  * The 5 field counts rendered in Yoram's digest per SPEC §13.
  *
- *   בוצעו           = finishedFieldToday    (fieldStatus = FINISHED_FIELD, finishedAt within local day)
- *   לא אושרו        = notConfirmedToday     (still at ASSIGNED, assignedAt within local day)
- *   עם בעיה         = hasProblemToday       (hasOpenProblem = true, either finished today or still open today)
- *   ממתינות למידע   = waitingForInfoToday   (fieldStatus = WAITING_FOR_INFO, assigned today)
- *   לא סגרו יום     = notClosedDayToday     (assigned today, not in FINISHED_FIELD/CANCELED/DECLINED)
+ * "Today" = scheduledStartAt within the local Asia/Jerusalem day (see file
+ * header). All 5 counts share the same day-scoping predicate on
+ * `TaskField.scheduledStartAt`.
+ *
+ *   בוצעו           = finishedFieldToday    (scheduled today AND fieldStatus = FINISHED_FIELD)
+ *   לא אושרו        = notConfirmedToday     (scheduled today AND fieldStatus = ASSIGNED)
+ *   עם בעיה         = hasProblemToday       (scheduled today AND hasOpenProblem = true)
+ *   ממתינות למידע   = waitingForInfoToday   (scheduled today AND fieldStatus = WAITING_FOR_INFO)
+ *   לא סגרו יום     = notClosedDayToday     (scheduled today AND fieldStatus NOT IN FINISHED_FIELD/CANCELED/DECLINED)
  */
 export interface FieldExceptionCounts {
   finishedFieldToday: number;
@@ -76,6 +87,10 @@ export async function getFieldExceptionCounts(
     waitingForInfoToday: string;
     notClosedDayToday: string;
   }>(
+    // All 5 counts share the same "scheduled today (Asia/Jerusalem)" window
+    // on TaskField.scheduledStartAt. The WHERE clause pre-filters to today's
+    // scheduled TaskFields so every COUNT(*) FILTER only slices among rows we
+    // already know are today's work. See file header for rationale.
     `WITH bounds AS (
        SELECT
          ($1::date)                   AT TIME ZONE 'Asia/Jerusalem' AS day_start,
@@ -84,37 +99,22 @@ export async function getFieldExceptionCounts(
      SELECT
        COUNT(*) FILTER (
          WHERE tf."fieldStatus" = 'FINISHED_FIELD'
-           AND tf."finishedAt" IS NOT NULL
-           AND tf."finishedAt" >= b.day_start
-           AND tf."finishedAt" <  b.day_end
        )                                                                       AS "finishedFieldToday",
        COUNT(*) FILTER (
          WHERE tf."fieldStatus" = 'ASSIGNED'
-           AND tf."assignedAt" >= b.day_start
-           AND tf."assignedAt" <  b.day_end
        )                                                                       AS "notConfirmedToday",
        COUNT(*) FILTER (
          WHERE tf."hasOpenProblem" = true
-           AND (
-             (tf."finishedAt" IS NOT NULL
-                AND tf."finishedAt" >= b.day_start
-                AND tf."finishedAt" <  b.day_end)
-             OR (tf."assignedAt" >= b.day_start
-                AND tf."assignedAt" <  b.day_end
-                AND tf."fieldStatus" NOT IN ('CANCELED','DECLINED'))
-           )
        )                                                                       AS "hasProblemToday",
        COUNT(*) FILTER (
          WHERE tf."fieldStatus" = 'WAITING_FOR_INFO'
-           AND tf."assignedAt" >= b.day_start
-           AND tf."assignedAt" <  b.day_end
        )                                                                       AS "waitingForInfoToday",
        COUNT(*) FILTER (
-         WHERE tf."assignedAt" >= b.day_start
-           AND tf."assignedAt" <  b.day_end
-           AND tf."fieldStatus" NOT IN ('FINISHED_FIELD','CANCELED','DECLINED')
+         WHERE tf."fieldStatus" NOT IN ('FINISHED_FIELD','CANCELED','DECLINED')
        )                                                                       AS "notClosedDayToday"
-     FROM "TaskField" tf, bounds b`,
+     FROM "TaskField" tf, bounds b
+     WHERE tf."scheduledStartAt" >= b.day_start
+       AND tf."scheduledStartAt" <  b.day_end`,
     [localDate],
   );
 
@@ -138,20 +138,17 @@ export async function getFieldExceptionCounts(
  *   • `missingReportInfo = true` AND `fieldStatus = 'WAITING_FOR_INFO'`
  *                                                            (kind = 'missing_info').
  *
+ * Scoped to TaskFields scheduled for `localDate` (Asia/Jerusalem) — this is
+ * Yoram's DAILY digest, and the "today" definition is scheduledStartAt (see
+ * file header). A problem opened yesterday for yesterday's inspection stays
+ * yesterday's problem; today's list shows today's open exceptions only.
+ *
  * Ordered by `managerNotifiedAt ASC NULLS LAST` — oldest-known first, unnotified
  * last (so Yoram catches the fresh unnotified ones at the bottom).
- *
- * `localDate` is currently unused inside the query (open exceptions are
- * unbounded by date — an open problem from yesterday is still open today) but
- * is threaded through to keep the API symmetric with `getFieldExceptionCounts`
- * and to leave room for a future "only show ones the manager hasn't seen today"
- * filter without changing signatures.
  */
 export async function getOpenFieldExceptions(
   localDate: string,
 ): Promise<OpenFieldException[]> {
-  void localDate; // reserved for future filtering; see doc comment above
-
   const { rows } = await pool.query<{
     taskFieldId: string;
     workerName: string | null;
@@ -200,11 +197,14 @@ export async function getOpenFieldExceptions(
      LEFT JOIN "Project"      p  ON p.id  = t."projectId"
      LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
      LEFT JOIN "User" u          ON u.id  = t."ownerId"
-     WHERE (
-       tf."hasOpenProblem" = true
-       OR (tf."missingReportInfo" = true AND tf."fieldStatus" = 'WAITING_FOR_INFO')
-     )
+     WHERE tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+       AND (
+         tf."hasOpenProblem" = true
+         OR (tf."missingReportInfo" = true AND tf."fieldStatus" = 'WAITING_FOR_INFO')
+       )
      ORDER BY tf."managerNotifiedAt" ASC NULLS LAST`,
+    [localDate],
   );
 
   log.info({ localDate, count: rows.length }, 'Loaded open field exceptions');

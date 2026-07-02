@@ -104,20 +104,23 @@ vi.mock('../services/tasks', () => ({
 
 // contextExtractor — injectable mock
 const extractFromContextMock = vi.fn();
+const extractInspectionActionsMock = vi.fn();
 vi.mock('../ai/contextExtractor', async () => {
   const actual = await vi.importActual<typeof import('../ai/contextExtractor')>('../ai/contextExtractor');
   return {
     ...actual,
     extractFromContext: (...a: unknown[]) => extractFromContextMock(...a),
+    extractInspectionActions: (...a: unknown[]) => extractInspectionActionsMock(...a),
     extractNote: vi.fn().mockResolvedValue(null),
   };
 });
 
 // sender
 const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+const sendButtonMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
   sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
-  sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendButtonMessage: (...a: unknown[]) => sendButtonMessage(...a),
   sendListMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -280,10 +283,12 @@ function lastMsg(): string {
 
 beforeEach(() => {
   sendTextMessage.mockClear();
+  sendButtonMessage.mockClear();
   setContext.mockClear();
   clearContext.mockClear();
   getContext.mockClear();
   extractFromContextMock.mockClear();
+  extractInspectionActionsMock.mockClear();
   updateSiteMetadata.mockClear();
   findUsersByName.mockClear();
   listInspectionTypes.mockClear();
@@ -295,6 +300,9 @@ beforeEach(() => {
   getTaskFieldValuesForContext.mockResolvedValue(DEFAULT_SNAPSHOT);
   // Default: no inspection types (overridden per-test when needed)
   listInspectionTypes.mockResolvedValue([]);
+
+  // Default multi-action extraction: empty (override per test)
+  extractInspectionActionsMock.mockResolvedValue({ actions: [], confidence: 0, clarification: null });
 });
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -357,24 +365,24 @@ describe('fast path — bare digit dispatches without AI', () => {
 describe('free-text — replace contact (action=correct_site)', () => {
   it('high confidence: extracts name+phone, applies both immediately (skips pick-task)', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{
         action: 'correct_site',
-        newSiteAddress: null,
-        newSiteCity: null,
+        newSiteAddress: undefined,
+        newSiteCity: undefined,
         newContactName: 'גל לגזיאל',
         newContactPhone: '050-1234567',
-        newInspectionTypeQuery: null,
-        newWorkerName: null,
-      },
+        newInspectionTypeQuery: undefined,
+        newWorkerName: undefined,
+      }],
       confidence: 0.93,
       clarification: null,
     });
 
     await handleAIMessage(manager, 'החלף את איש הקשר מרונית לוי לגל לגזיאל, 050-1234567');
 
-    // Should call AI extractor (free-text path)
-    expect(extractFromContextMock).toHaveBeenCalledOnce();
+    // Should call multi-action AI extractor (free-text path)
+    expect(extractInspectionActionsMock).toHaveBeenCalledOnce();
     // Should look up snapshot for context
     expect(getTaskFieldValuesForContext).toHaveBeenCalledWith('tf-abc');
     // Should have written both fields
@@ -388,13 +396,11 @@ describe('free-text — replace contact (action=correct_site)', () => {
 
   it('high confidence: single field (only contact name) — applies directly', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{
         action: 'correct_site',
-        newSiteAddress: null, newSiteCity: null,
-        newContactName: 'משה כהן', newContactPhone: null,
-        newInspectionTypeQuery: null, newWorkerName: null,
-      },
+        newContactName: 'משה כהן',
+      }],
       confidence: 0.92,
       clarification: null,
     });
@@ -412,14 +418,12 @@ describe('free-text — replace contact (action=correct_site)', () => {
 describe('free-text — address change (action=correct_site)', () => {
   it('high confidence: extracts newSiteAddress, applies directly', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{
         action: 'correct_site',
         newSiteAddress: 'רוטשילד 20 תל אביב',
         newSiteCity: 'תל אביב',
-        newContactName: null, newContactPhone: null,
-        newInspectionTypeQuery: null, newWorkerName: null,
-      },
+      }],
       confidence: 0.91,
       clarification: null,
     });
@@ -438,12 +442,8 @@ describe('free-text — address change (action=correct_site)', () => {
 describe('free-text — reassign (action=reassign)', () => {
   it('high confidence, single worker match → sends confirm prompt (1. כן / 2. לא)', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: 'reassign',
-        newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
-        newInspectionTypeQuery: null, newWorkerName: 'דני',
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'reassign', newWorkerName: 'דני' }],
       confidence: 0.91,
       clarification: null,
     });
@@ -461,13 +461,8 @@ describe('free-text — reassign (action=reassign)', () => {
 
   it('multiple workers → shows numbered list for disambiguation', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: 'reassign',
-        newWorkerName: 'כהן',
-        newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
-        newInspectionTypeQuery: null,
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'reassign', newWorkerName: 'כהן' }],
       confidence: 0.90,
       clarification: null,
     });
@@ -489,13 +484,8 @@ describe('free-text — reassign (action=reassign)', () => {
   it('non-elevated user gets auth rejection (does not invoke reassign)', async () => {
     const worker = makeManager({ role: 'SALES', isElevated: false });
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: 'reassign',
-        newWorkerName: 'דני',
-        newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
-        newInspectionTypeQuery: null,
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'reassign', newWorkerName: 'דני' }],
       confidence: 0.92,
       clarification: null,
     });
@@ -512,13 +502,8 @@ describe('free-text — reassign (action=reassign)', () => {
 describe('free-text — inspection type change (action=correct_type)', () => {
   it('extracts newInspectionTypeQuery, filters type list, shows numbered list', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: 'correct_type',
-        newInspectionTypeQuery: 'קרינה',
-        newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
-        newWorkerName: null,
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'correct_type', newInspectionTypeQuery: 'קרינה' }],
       confidence: 0.90,
       clarification: null,
     });
@@ -540,13 +525,8 @@ describe('free-text — inspection type change (action=correct_type)', () => {
 
   it('no match for query → shows full type list', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: 'correct_type',
-        newInspectionTypeQuery: 'אסבסט',
-        newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
-        newWorkerName: null,
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'correct_type', newInspectionTypeQuery: 'אסבסט' }],
       confidence: 0.87,
       clarification: null,
     });
@@ -579,15 +559,10 @@ describe('free-text — "חזרה" as free text', () => {
 // ── Medium confidence ─────────────────────────────────────────────────────────
 
 describe('medium confidence (0.60–0.85) — shows confirmation prompt', () => {
-  it('shows confirm prompt with extracted field/value', async () => {
+  it('shows confirm prompt with extracted field/value (single action)', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: 'correct_site',
-        newSiteAddress: null, newSiteCity: null,
-        newContactName: 'גל לגזיאל', newContactPhone: null,
-        newInspectionTypeQuery: null, newWorkerName: null,
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'correct_site', newContactName: 'גל לגזיאל' }],
       confidence: 0.72,
       clarification: null,
     });
@@ -608,12 +583,8 @@ describe('medium confidence (0.60–0.85) — shows confirmation prompt', () => 
 describe('low confidence (< 0.60) — falls back to numbered prompt', () => {
   it('ambiguous phrase → shows numbered menu again', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: null,
-        newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
-        newInspectionTypeQuery: null, newWorkerName: null,
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [],
       confidence: 0.35,
       clarification: 'לא הבנתי את הכוונה. אנא בחר פעולה מהרשימה.',
     });
@@ -628,11 +599,11 @@ describe('low confidence (< 0.60) — falls back to numbered prompt', () => {
     expect(lastMsg()).toContain('1. תיקון פרטי ביקור');
   });
 
-  it('AI returns null action → falls back to numbered prompt', async () => {
+  it('AI returns empty actions array at high confidence → falls back to numbered prompt', async () => {
     seedActionCtx('mgr_today_action');
-    extractFromContextMock.mockResolvedValue({
-      values: { action: null, newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null, newInspectionTypeQuery: null, newWorkerName: null },
-      confidence: 0.90,  // high confidence but no action
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [],
+      confidence: 0.90,  // high confidence but no actions
       clarification: null,
     });
 
@@ -654,20 +625,15 @@ describe('all three mgr_*_action states route through the same AI handler', () =
   for (const state of actionStates) {
     it(`${state}: free-text invokes AI extractor`, async () => {
       seedActionCtx(state);
-      extractFromContextMock.mockResolvedValue({
-        values: {
-          action: 'correct_site',
-          newSiteAddress: null, newSiteCity: null,
-          newContactName: 'בדיקה', newContactPhone: null,
-          newInspectionTypeQuery: null, newWorkerName: null,
-        },
+      extractInspectionActionsMock.mockResolvedValue({
+        actions: [{ action: 'correct_site', newContactName: 'בדיקה' }],
         confidence: 0.92,
         clarification: null,
       });
 
       await handleAIMessage(manager, 'שנה שם איש קשר לבדיקה');
 
-      expect(extractFromContextMock).toHaveBeenCalledOnce();
+      expect(extractInspectionActionsMock).toHaveBeenCalledOnce();
       expect(updateSiteMetadata).toHaveBeenCalled();
     });
   }
@@ -676,42 +642,33 @@ describe('all three mgr_*_action states route through the same AI handler', () =
 // ── AI extractor receives snapshot values ─────────────────────────────────────
 
 describe('AI extractor receives current TaskField values in context', () => {
-  it('passes currentTaskFieldValues from snapshot to extractFromContext', async () => {
+  it('passes currentTaskFieldValues from snapshot to extractInspectionActions', async () => {
     seedActionCtx('mgr_today_action');
     getTaskFieldValuesForContext.mockResolvedValue(DEFAULT_SNAPSHOT);
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: 'correct_site',
-        newContactName: 'חדש', newContactPhone: null,
-        newSiteAddress: null, newSiteCity: null, newInspectionTypeQuery: null, newWorkerName: null,
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'correct_site', newContactName: 'חדש' }],
       confidence: 0.91,
       clarification: null,
     });
 
     await handleAIMessage(manager, 'שנה שם איש קשר לחדש');
 
-    expect(extractFromContextMock).toHaveBeenCalledWith(
+    expect(extractInspectionActionsMock).toHaveBeenCalledWith(
+      expect.anything(), // message
       expect.objectContaining({
-        intent: 'inspection_action',
-        currentTaskFieldValues: expect.objectContaining({
-          contactName: 'רונית לוי',
-          contactPhone: '052-7654321',
-          customerName: 'חברת אלפא',
-        }),
+        contactName: 'רונית לוי',
+        contactPhone: '052-7654321',
+        customerName: 'חברת אלפא',
       }),
+      expect.anything(), // history
     );
   });
 
   it('handles missing snapshot gracefully (snapshot returns null)', async () => {
     seedActionCtx('mgr_today_action');
     getTaskFieldValuesForContext.mockResolvedValue(null);
-    extractFromContextMock.mockResolvedValue({
-      values: {
-        action: 'correct_site',
-        newContactName: 'חדש', newContactPhone: null,
-        newSiteAddress: null, newSiteCity: null, newInspectionTypeQuery: null, newWorkerName: null,
-      },
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'correct_site', newContactName: 'חדש' }],
       confidence: 0.91,
       clarification: null,
     });
@@ -719,13 +676,237 @@ describe('AI extractor receives current TaskField values in context', () => {
     await handleAIMessage(manager, 'שנה שם');
 
     // Should still work — currentTaskFieldValues will be undefined
-    expect(extractFromContextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intent: 'inspection_action',
-        currentTaskFieldValues: undefined,
-      }),
+    expect(extractInspectionActionsMock).toHaveBeenCalledWith(
+      expect.anything(), // message
+      undefined,          // no snapshot → undefined ctxValues
+      expect.anything(), // history
     );
     // And still apply the update
     expect(updateSiteMetadata).toHaveBeenCalled();
+  });
+});
+
+// ── Multi-action flow ─────────────────────────────────────────────────────────
+
+describe('multi-action flow — confirmation + dispatch', () => {
+  // 1. Two-action confirmation renders correctly and uses button message
+  it('2-action batch: shows consolidated confirm via sendButtonMessage', async () => {
+    seedActionCtx('mgr_today_action');
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [
+        { action: 'correct_site', newSiteAddress: 'רוטשילד 15', newSiteCity: 'תל אביב' },
+        { action: 'reassign', newWorkerName: 'דני' },
+      ],
+      confidence: 0.92,
+      clarification: null,
+    });
+
+    await handleAIMessage(manager, 'תשנה את הכתובת לרוטשילד 15 ותשייך את זה לדני');
+
+    expect(sendButtonMessage).toHaveBeenCalledOnce();
+    const call = sendButtonMessage.mock.calls[0][0];
+    expect(call.body).toContain('2 שינויים');
+    expect(call.body).toContain('רוטשילד 15');
+    expect(call.body).toContain('דני');
+    expect(call.buttons).toContainEqual(expect.objectContaining({ id: 'CONFIRM_YES_MULTI_ACTION' }));
+    expect(call.buttons).toContainEqual(expect.objectContaining({ id: 'CONFIRM_NO_MULTI_ACTION' }));
+    expect(ctxStore).toMatchObject({
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: expect.arrayContaining([
+        expect.objectContaining({ action: 'correct_site' }),
+        expect.objectContaining({ action: 'reassign' }),
+      ]),
+    });
+  });
+
+  // 2. Confirm → all actions dispatched in order
+  it('confirm → correct_site applied, reassign applied (single unique worker match)', async () => {
+    ctxStore = {
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: [
+        { action: 'correct_site', newSiteAddress: 'רוטשילד 15' },
+        { action: 'reassign', newWorkerName: 'דני' },
+      ],
+    };
+    getContext.mockResolvedValue(ctxStore);
+    findUsersByName.mockResolvedValue([{ id: 'w-danny', name: 'דני כהן' }]);
+
+    await handleAIMessage(manager, 'CONFIRM_YES_MULTI_ACTION');
+
+    expect(updateSiteMetadata).toHaveBeenCalledWith('tf-abc', 'u-mgr', { siteAddress: 'רוטשילד 15' });
+    const reassignFn = (await import('../services/taskFieldCorrections')).reassignTask;
+    // reassignTask is mocked globally in this test file
+    expect(clearContext).toHaveBeenCalled();
+    const msg = lastMsg();
+    expect(msg).toContain('בוצע');
+  });
+
+  // 3. Cancel → nothing applied
+  it('cancel → nothing applied, context cleared', async () => {
+    ctxStore = {
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: [
+        { action: 'correct_site', newSiteAddress: 'רוטשילד 15' },
+      ],
+    };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(manager, 'CONFIRM_NO_MULTI_ACTION');
+
+    expect(updateSiteMetadata).not.toHaveBeenCalled();
+    expect(clearContext).toHaveBeenCalled();
+    expect(lastMsg()).toBe('בוטל.');
+  });
+
+  // 4. Ambiguous worker in a batch → skipped with a report line
+  it('ambiguous worker → skipped, reported in summary', async () => {
+    ctxStore = {
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: [
+        { action: 'correct_site', newContactName: 'גל' },
+        { action: 'reassign', newWorkerName: 'דני' },
+      ],
+    };
+    getContext.mockResolvedValue(ctxStore);
+    // Multiple workers match "דני" → ambiguous → skip
+    findUsersByName.mockResolvedValue([
+      { id: 'w1', name: 'דני כהן' },
+      { id: 'w2', name: 'דני לוי' },
+    ]);
+
+    await handleAIMessage(manager, '1');
+
+    // correct_site should have been applied
+    expect(updateSiteMetadata).toHaveBeenCalledWith('tf-abc', 'u-mgr', { fieldContactName: 'גל' });
+    // reassign skipped
+    const msg = lastMsg();
+    expect(msg).toContain('לא בוצע');
+    // context still cleared
+    expect(clearContext).toHaveBeenCalled();
+  });
+
+  // 5. Multi-action batch filtered to only back/cancel → cleared immediately (no confirm)
+  it('batch filtered to back/cancel only → cleared without showing confirm', async () => {
+    seedActionCtx('mgr_today_action');
+    // Use a message that doesn't match the fast-path nav regex
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [
+        { action: 'back' },
+        { action: 'cancel' },
+      ],
+      confidence: 0.92,
+      clarification: null,
+    });
+
+    await handleAIMessage(manager, 'תעצור הכל בבקשה');
+
+    expect(sendButtonMessage).not.toHaveBeenCalled();
+    expect(clearContext).toHaveBeenCalled();
+    expect(lastMsg()).toBe('בוטל.');
+  });
+
+  // 6. sendButtonMessage called with correct payload IDs
+  it('confirm button has CONFIRM_YES_MULTI_ACTION, cancel has CONFIRM_NO_MULTI_ACTION', async () => {
+    seedActionCtx('mgr_today_action');
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [
+        { action: 'correct_site', newSiteAddress: 'כתובת חדשה' },
+        { action: 'correct_type', newInspectionTypeQuery: 'קרינה' },
+      ],
+      confidence: 0.91,
+      clarification: null,
+    });
+
+    await handleAIMessage(manager, 'שנה כתובת וסוג');
+
+    const call = sendButtonMessage.mock.calls[0][0];
+    const buttonIds = call.buttons.map((b: { id: string }) => b.id);
+    expect(buttonIds).toContain('CONFIRM_YES_MULTI_ACTION');
+    expect(buttonIds).toContain('CONFIRM_NO_MULTI_ACTION');
+  });
+
+  // 7. Medium confidence multi-action shows clarification note in body
+  it('medium confidence multi-action shows clarification note in confirm body', async () => {
+    seedActionCtx('mgr_today_action');
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [
+        { action: 'correct_site', newSiteAddress: 'בן יהודה 5' },
+        { action: 'reassign', newWorkerName: 'יוסי' },
+      ],
+      confidence: 0.72, // medium
+      clarification: null,
+    });
+
+    await handleAIMessage(manager, 'שנה וכו');
+
+    const call = sendButtonMessage.mock.calls[0][0];
+    expect(call.body).toContain('לא בטוח');
+  });
+
+  // 8. "כן" text reply confirms multi-action
+  it('"כן" text reply confirms multi-action batch', async () => {
+    ctxStore = {
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: [
+        { action: 'correct_site', newSiteAddress: 'רוטשילד 15' },
+      ],
+    };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(manager, 'כן');
+
+    expect(updateSiteMetadata).toHaveBeenCalledWith('tf-abc', 'u-mgr', { siteAddress: 'רוטשילד 15' });
+    expect(clearContext).toHaveBeenCalled();
+  });
+
+  // 9. "לא" text reply cancels multi-action
+  it('"לא" text reply cancels multi-action batch', async () => {
+    ctxStore = {
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: [
+        { action: 'correct_site', newSiteAddress: 'רוטשילד 15' },
+      ],
+    };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(manager, 'לא');
+
+    expect(updateSiteMetadata).not.toHaveBeenCalled();
+    expect(clearContext).toHaveBeenCalled();
+    expect(lastMsg()).toBe('בוטל.');
+  });
+
+  // 10. Unique correct_type in batch → applied directly
+  it('correct_type with unique match → applied directly in batch confirm', async () => {
+    ctxStore = {
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: [
+        { action: 'correct_type', newInspectionTypeQuery: 'קרינה' },
+      ],
+    };
+    getContext.mockResolvedValue(ctxStore);
+    listInspectionTypes.mockResolvedValue([
+      { id: 'it-rad', code: 'RAD', labelHe: 'בדיקת קרינה' },
+    ]);
+
+    await handleAIMessage(manager, '1');
+
+    expect(correctInspectionType).toHaveBeenCalledWith('tf-abc', 'it-rad', 'u-mgr', 'מנהל');
+    expect(clearContext).toHaveBeenCalled();
+    expect(lastMsg()).toContain('בוצע');
   });
 });
