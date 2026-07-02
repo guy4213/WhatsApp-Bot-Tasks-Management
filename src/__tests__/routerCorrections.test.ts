@@ -102,10 +102,11 @@ vi.mock('../ai/taskResolver', () => ({
 // sender
 const sendTextMessage   = vi.fn().mockResolvedValue(undefined);
 const sendButtonMessage = vi.fn().mockResolvedValue(undefined);
+const sendListMessage   = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
   sendTextMessage:   (...a: unknown[]) => sendTextMessage(...a),
   sendButtonMessage: (...a: unknown[]) => sendButtonMessage(...a),
-  sendListMessage:   vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   (...a: unknown[]) => sendListMessage(...a),
 }));
 
 // Conversation context: simple in-memory state.
@@ -222,6 +223,7 @@ beforeEach(() => {
   listInspectionTypes.mockReset(); listInspectionTypes.mockResolvedValue([]);
   getTaskFieldForCorrection.mockReset(); getTaskFieldForCorrection.mockResolvedValue(null);
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
+  sendListMessage.mockReset(); sendListMessage.mockResolvedValue(undefined);
   setContext.mockClear();
   clearContext.mockClear();
 });
@@ -282,8 +284,9 @@ describe('D2-T12 — correct_task_field_site', () => {
 
     expect(ctxStore?.awaiting).toBe('correct_site_await_value');
     expect(ctxStore?.taskFieldId).toBe('tf-1');
-    const text = sendTextMessage.mock.calls[0][0].text;
-    expect(text).toContain('מה לתקן');
+    // Site field picker is now a List Message.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('מה לתקן');
   });
 
   it('auth-rejects WORKER trying to correct another worker\'s TaskField', async () => {

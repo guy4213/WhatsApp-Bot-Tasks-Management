@@ -18,6 +18,7 @@ import { pool } from '../db/connection';
 import { sendTextMessage } from '../whatsapp/sender';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
+import { formatShortDateTimeIL } from '../ai/inspectionFormatters';
 
 const log = moduleLogger('taskFieldCorrections');
 
@@ -398,6 +399,157 @@ export async function getTaskFieldForCorrection(
     currentInspectionTypeId: r.inspectionTypeId,
     currentLabelHe: r.labelHe,
   };
+}
+
+// ── Reschedule — update scheduledStartAt / scheduledEndAt / durationMinutes ───
+
+export interface RescheduleTaskFieldPatch {
+  scheduledStartAt?: Date;
+  durationMinutes?: number;
+}
+
+/**
+ * Update the scheduled time (and optionally duration) of a TaskField.
+ *
+ * Rules:
+ * - If durationMinutes provided → new end = new start + duration.
+ * - If only scheduledStartAt provided → keep existing duration, shift both
+ *   start + end by the delta (end = start + existing_duration).
+ * - Rejects FINISHED_FIELD / CANCELED with ClosedInspectionError.
+ * - Resets workerNotifiedAt = NULL so the D5-T6 poller re-sends the
+ *   assignment card with the new time.
+ * - Sends a preemptive WhatsApp text to the assigned worker.
+ * - Writes an audit log entry.
+ *
+ * Auth: MANAGER / ADMIN only — enforced by the caller (router).
+ */
+export async function updateTaskFieldSchedule(
+  taskFieldId: string,
+  actorId: string,
+  patch: RescheduleTaskFieldPatch,
+): Promise<void> {
+  if (!patch.scheduledStartAt && patch.durationMinutes === undefined) {
+    throw new Error('updateTaskFieldSchedule: no patch fields supplied');
+  }
+
+  // 1. Fetch current row.
+  const prefetch = await pool.query<{
+    fieldStatus: string;
+    scheduledStartAt: Date | null;
+    scheduledEndAt: Date | null;
+    durationMinutes: number | null;
+    siteAddress: string | null;
+    siteCity: string | null;
+    workerPhone: string | null;
+  }>(
+    `SELECT tf."fieldStatus",
+            tf."scheduledStartAt",
+            tf."scheduledEndAt",
+            tf."durationMinutes",
+            tf."siteAddress",
+            tf."siteCity",
+            u.phone AS "workerPhone"
+       FROM "TaskField" tf
+       JOIN "Task" t ON t.id = tf."taskId"
+       LEFT JOIN "User" u ON u.id = t."ownerId"
+      WHERE tf.id = $1`,
+    [taskFieldId],
+  );
+  if (prefetch.rowCount === 0) {
+    throw new Error(`updateTaskFieldSchedule: TaskField ${taskFieldId} not found`);
+  }
+  const row = prefetch.rows[0];
+
+  // 2. Status guard.
+  if (row.fieldStatus === 'FINISHED_FIELD' || row.fieldStatus === 'CANCELED') {
+    throw new ClosedInspectionError(
+      `cannot reschedule finished/canceled inspection (fieldStatus=${row.fieldStatus})`,
+    );
+  }
+
+  // 3. Compute new start + end.
+  const newStart = patch.scheduledStartAt ?? row.scheduledStartAt;
+  if (!newStart) {
+    throw new Error('updateTaskFieldSchedule: no start time available');
+  }
+
+  let newDurationMinutes: number | null;
+  let newEnd: Date;
+
+  if (patch.durationMinutes !== undefined) {
+    // Explicit duration supplied.
+    newDurationMinutes = patch.durationMinutes;
+    newEnd = new Date(newStart.getTime() + patch.durationMinutes * 60_000);
+  } else if (row.durationMinutes !== null) {
+    // Keep existing duration, shift end.
+    newDurationMinutes = row.durationMinutes;
+    newEnd = new Date(newStart.getTime() + row.durationMinutes * 60_000);
+  } else if (row.scheduledEndAt) {
+    // Derive duration from existing start→end delta.
+    const existingDelta = row.scheduledEndAt.getTime() - (row.scheduledStartAt?.getTime() ?? 0);
+    newDurationMinutes = Math.round(existingDelta / 60_000);
+    newEnd = new Date(newStart.getTime() + existingDelta);
+  } else {
+    // No duration info — default 60 min.
+    newDurationMinutes = 60;
+    newEnd = new Date(newStart.getTime() + 60 * 60_000);
+  }
+
+  // 4. Transactional UPDATE.
+  await pool.query(
+    `UPDATE "TaskField"
+        SET "scheduledStartAt"   = $2,
+            "scheduledEndAt"     = $3,
+            "durationMinutes"    = $4,
+            "workerNotifiedAt"   = NULL,
+            "updatedByUserId"    = $5,
+            "updatedAt"          = now()
+      WHERE id = $1`,
+    [taskFieldId, newStart, newEnd, newDurationMinutes, actorId],
+  );
+
+  log.info({ taskFieldId, actorId, newStart, newEnd, newDurationMinutes }, 'reschedule: TaskField schedule updated');
+
+  // 5. Preemptive WhatsApp notification to the assigned worker.
+  const workerPhone = row.workerPhone;
+  if (workerPhone) {
+    const siteParts = [row.siteAddress, row.siteCity].filter(Boolean).join(', ') || 'לא ידוע';
+    const notifyText =
+      `משימה בכתובת ${siteParts} תוזמנה מחדש ל-${formatShortDateTimeIL(newStart)}`;
+    await sendTextMessage({ to: workerPhone, text: notifyText }).catch((err) => {
+      log.warn({ err, workerPhone }, 'reschedule: worker preemptive notification failed');
+    });
+  }
+
+  // 6. Audit log.
+  await writeAuditLog({
+    userId: actorId,
+    whatsappNumber: '',
+    originalMessage: null,
+    transcribedMessage: null,
+    detectedIntent: 'reschedule',
+    detectedAction: 'UPDATE_TASKFIELD_SCHEDULE',
+    confidence: null,
+    targetTaskId: null,
+    oldValues: {
+      taskFieldId,
+      scheduledStartAt: row.scheduledStartAt?.toISOString() ?? null,
+      scheduledEndAt: row.scheduledEndAt?.toISOString() ?? null,
+    },
+    newValues: {
+      taskFieldId,
+      scheduledStartAt: newStart.toISOString(),
+      scheduledEndAt: newEnd.toISOString(),
+      durationMinutes: newDurationMinutes,
+    },
+    confirmationStatus: 'CONFIRMED',
+    approvalStatus: 'NOT_REQUIRED',
+    approverUserId: null,
+    managerNotified: false,
+    executionStatus: 'SUCCESS',
+    errorMessage: null,
+    pendingActionId: null,
+  });
 }
 
 /** Find a Task by id and return its ownerId + productName. */

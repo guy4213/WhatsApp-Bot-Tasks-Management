@@ -47,10 +47,11 @@ vi.mock('../services/pendingActions', () => ({
 }));
 
 const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+const sendListMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
   sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
   sendButtonMessage: vi.fn().mockResolvedValue(undefined),
-  sendListMessage:   vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   (...a: unknown[]) => sendListMessage(...a),
 }));
 
 let ctxStore: Record<string, unknown> | null = null;
@@ -114,6 +115,7 @@ beforeEach(() => {
   dayFieldSummary.mockReset();
   getManagersForBroadcast.mockReset(); getManagersForBroadcast.mockResolvedValue([]);
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
+  sendListMessage.mockReset(); sendListMessage.mockResolvedValue(undefined);
   setContext.mockClear();
   clearContext.mockClear();
 });
@@ -149,19 +151,22 @@ describe('D2-T10 — menu item 7 opens day summary + 4-option follow-up', () => 
 
     await pressMenu(user, 7);
 
-    // 2 messages: the summary body + the follow-up menu
-    expect(sendTextMessage).toHaveBeenCalledTimes(2);
+    // 1 text message (the summary body) + 1 list message (the follow-up menu).
+    expect(sendTextMessage).toHaveBeenCalledTimes(1);
     const summaryText = sendTextMessage.mock.calls[0][0].text;
     expect(summaryText).toContain('סיכום יום');
     expect(summaryText).toContain('בוצעו: משה כהן (קרינה)');
     expect(summaryText).toContain('ממתינות למידע: 1');
 
-    const menuText = sendTextMessage.mock.calls[1][0].text;
-    expect(menuText).toContain('יש מה להשלים?');
-    expect(menuText).toContain('1. הכל בוצע');
-    expect(menuText).toContain('2. חסר מידע לדוח');
-    expect(menuText).toContain('3. צריך לחזור ללקוח');
-    expect(menuText).toContain('4. בעיה פתוחה');
+    // Follow-up is now a List Message.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    const listArg = sendListMessage.mock.calls[0][0];
+    expect(listArg.body).toContain('יש מה להשלים?');
+    const rows = listArg.sections[0].rows;
+    expect(rows.some((r: { id: string; title: string }) => r.title === 'הכל בוצע')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.title === 'חסר מידע לדוח')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.title === 'צריך לחזור ללקוח')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.title === 'בעיה פתוחה')).toBe(true);
     expect(ctxStore).toMatchObject({ awaiting: 'day_summary_choice' });
   });
 
@@ -311,12 +316,14 @@ describe('D2-T10 — option 4 (בעיה פתוחה) hands off to D2-T8', () => {
     dayFieldSummary.mockResolvedValueOnce({ finished: [], waitingForInfoCount: 0 });
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 7);
-    sendTextMessage.mockClear();
+    sendListMessage.mockClear();
 
     const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, '4');
 
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('בחר סוג בעיה:');
+    // Problem-type menu is now a List Message.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('בחר סוג בעיה:');
     expect(ctxStore).toMatchObject({ awaiting: 'problem_type_choice', taskFieldId: 'tf-1' });
   });
 
@@ -338,11 +345,11 @@ describe('D2-T10 — option 4 (בעיה פתוחה) hands off to D2-T8', () => {
 // ── Invalid choice ──────────────────────────────────────────────────────────
 
 describe('D2-T10 — out-of-range numeric follow-up choice', () => {
-  it('resends menu with "בחר מספר תקין:" prefix, keeps awaiting', async () => {
+  it('resends the list menu, keeps awaiting', async () => {
     const user = makeUser();
     dayFieldSummary.mockResolvedValueOnce({ finished: [], waitingForInfoCount: 0 });
     await pressMenu(user, 7);
-    sendTextMessage.mockClear();
+    sendListMessage.mockClear();
 
     const { handleAIMessage } = await loadRouter();
     // Digits pass the free-text escape hatch; "9" is out of the 1-4 range and
@@ -352,8 +359,9 @@ describe('D2-T10 — out-of-range numeric follow-up choice', () => {
     expect(writeFieldNotes).not.toHaveBeenCalled();
     expect(writeMissingInfo).not.toHaveBeenCalled();
     expect(writeProblem).not.toHaveBeenCalled();
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('בחר מספר תקין:');
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('יש מה להשלים?');
+    // Day-summary follow-up menu is now a List Message — re-sends on invalid input.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('יש מה להשלים?');
     expect(ctxStore).toMatchObject({ awaiting: 'day_summary_choice' });
   });
 });

@@ -166,13 +166,15 @@ export interface ConversationState {
   // Serializable subset of InspectionActionExtractionItem — no imported types
   // to keep the context module free of AI-layer imports.
   pendingMultiActions?: Array<{
-    action: 'correct_site' | 'correct_type' | 'reassign' | 'back' | 'cancel' | null;
+    action: 'correct_site' | 'correct_type' | 'reassign' | 'reschedule' | 'back' | 'cancel' | null;
     newSiteAddress?: string;
     newSiteCity?: string;
     newContactName?: string;
     newContactPhone?: string;
     newInspectionTypeQuery?: string;
     newWorkerName?: string;
+    newScheduledStartAt?: string;
+    newDurationMinutes?: number;
   }>;
 }
 

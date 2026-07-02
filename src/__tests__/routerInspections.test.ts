@@ -44,10 +44,11 @@ vi.mock('../services/inspections', () => ({
 }));
 
 const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+const sendListMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
   sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
   sendButtonMessage: vi.fn().mockResolvedValue(undefined),
-  sendListMessage:   vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   (...a: unknown[]) => sendListMessage(...a),
 }));
 
 // Conversation context: simple in-memory state so we can drive multi-turn.
@@ -128,6 +129,7 @@ beforeEach(() => {
   notifyOfficeDeclined.mockReset(); notifyOfficeDeclined.mockResolvedValue(undefined);
   notifyOfficeNeedsMoreInfo.mockReset(); notifyOfficeNeedsMoreInfo.mockResolvedValue(undefined);
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
+  sendListMessage.mockReset(); sendListMessage.mockResolvedValue(undefined);
   setContext.mockClear();
   clearContext.mockClear();
 });
@@ -205,11 +207,15 @@ describe('D2-T8 — report-problem flow via menu item 4', () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 4);
-    expect(sendTextMessage).toHaveBeenCalledTimes(1);
-    const menuText = sendTextMessage.mock.calls[0][0].text;
-    expect(menuText).toContain('בחר סוג בעיה:');
-    expect(menuText).toContain('1. הלקוח לא ענה');
-    expect(menuText).toContain('7. אחר');
+    // Now sent as a List Message, not numbered text.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    const listArg = sendListMessage.mock.calls[0][0];
+    expect(listArg.body).toContain('בחר סוג בעיה:');
+    const rows = listArg.sections[0].rows;
+    expect(rows.some((r: { id: string; title: string }) => r.id === 'PROBLEM_TYPE_1')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.title === 'הלקוח לא ענה')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.id === 'PROBLEM_TYPE_7')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.title === 'אחר')).toBe(true);
     expect(ctxStore).toMatchObject({ awaiting: 'problem_type_choice', taskFieldId: 'tf-1' });
   });
 
@@ -266,11 +272,11 @@ describe('D2-T8 — report-problem flow via menu item 4', () => {
     expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
   });
 
-  it('out-of-range numeric problem-type choice → resend menu with a "בחר מספר תקין:" prefix, keep awaiting', async () => {
+  it('out-of-range numeric problem-type choice → resends the list menu, keep awaiting', async () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 4);
-    sendTextMessage.mockClear();
+    sendListMessage.mockClear();
 
     const { handleAIMessage } = await loadRouter();
     // "99" is a digit → passes the numeric-picker escape hatch, reaches the
@@ -280,8 +286,9 @@ describe('D2-T8 — report-problem flow via menu item 4', () => {
     await handleAIMessage(user, '99');
 
     expect(writeProblem).not.toHaveBeenCalled();
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('בחר מספר תקין:');
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('בחר סוג בעיה:');
+    // Menu is now a List Message — the invalid-input branch re-sends the list.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('בחר סוג בעיה:');
     expect(ctxStore).toMatchObject({ awaiting: 'problem_type_choice', taskFieldId: 'tf-1' });
   });
 
@@ -410,7 +417,9 @@ describe('D5-T3 free-text intent dispatch (skips sub-menus)', () => {
     await handleAIMessage(user, 'כן');
 
     expect(writeProblem).not.toHaveBeenCalled();
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('בחר סוג בעיה:');
+    // Problem-type menu is now a List Message.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('בחר סוג בעיה:');
     expect(ctxStore).toMatchObject({ awaiting: 'problem_type_choice', taskFieldId: 'tf-9' });
   });
 });
@@ -471,7 +480,7 @@ describe('D2-T5 — status update flow via menu item 3', () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 3);
-    sendTextMessage.mockClear();
+    sendListMessage.mockClear();
 
     const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, '3');
@@ -481,10 +490,13 @@ describe('D2-T5 — status update flow via menu item 3', () => {
       transition: 'FINISHED',
       updatedBy: user.id,
     });
-    const followUpText = sendTextMessage.mock.calls.at(-1)?.[0].text;
-    expect(followUpText).toContain('סיימת את הבדיקה. משהו נוסף?');
-    expect(followUpText).toContain('1. אין הערות');
-    expect(followUpText).toContain('4. חסר מידע לדוח');
+    // Follow-up menu is now a List Message.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    const listArg = sendListMessage.mock.calls[0][0];
+    expect(listArg.body).toContain('סיימת את הבדיקה. משהו נוסף?');
+    const rows = listArg.sections[0].rows;
+    expect(rows.some((r: { id: string; title: string }) => r.title === 'אין הערות')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.title === 'חסר מידע לדוח')).toBe(true);
     expect(ctxStore).toMatchObject({ awaiting: 'finished_followup', taskFieldId: 'tf-1' });
   });
 
@@ -565,11 +577,14 @@ describe('D2-T6 — finished follow-up menu', () => {
   it('option 3 (יש בעיה) → hands off to D2-T8 problem_type_choice + sub-menu emitted', async () => {
     const user = makeUser();
     await reachFinishedFollowUp(user);
+    sendListMessage.mockClear();
     const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, '3');
     // No fresh open-TaskField lookup — we already have tf-1 from the FINISHED write.
     expect(findOpenTaskFieldForWorker).toHaveBeenCalledTimes(1); // only the initial startStatusUpdateFlow call
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('בחר סוג בעיה:');
+    // Problem-type menu is now a List Message.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('בחר סוג בעיה:');
     expect(ctxStore).toMatchObject({ awaiting: 'problem_type_choice', taskFieldId: 'tf-1' });
   });
 
@@ -583,15 +598,17 @@ describe('D2-T6 — finished follow-up menu', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'missing_info_note', taskFieldId: 'tf-1' });
   });
 
-  it('out-of-range numeric follow-up choice → resend menu with "בחר מספר תקין:"', async () => {
+  it('out-of-range numeric follow-up choice → resends the list menu, keep awaiting', async () => {
     const user = makeUser();
     await reachFinishedFollowUp(user);
+    sendListMessage.mockClear();
     const { handleAIMessage } = await loadRouter();
     // Digits pass the escape hatch; free-text goes to AI now.
     await handleAIMessage(user, '9');
     expect(writeFieldNotes).not.toHaveBeenCalled();
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('בחר מספר תקין:');
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('סיימת את הבדיקה. משהו נוסף?');
+    // Follow-up menu is now a List Message — the invalid-input branch re-sends the list.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('סיימת את הבדיקה. משהו נוסף?');
     expect(ctxStore).toMatchObject({ awaiting: 'finished_followup', taskFieldId: 'tf-1' });
   });
 });
@@ -659,7 +676,9 @@ describe('D5-T3 set_field_status intent → direct advanceFieldStatus', () => {
       transition: 'FINISHED',
       updatedBy: user.id,
     });
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('סיימת את הבדיקה. משהו נוסף?');
+    // Follow-up menu is now a List Message.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('סיימת את הבדיקה. משהו נוסף?');
     expect(ctxStore).toMatchObject({ awaiting: 'finished_followup', taskFieldId: 'tf-1' });
   });
 
@@ -745,7 +764,9 @@ describe('D2-T5 — free-text hint resolves ambiguous open TaskField', () => {
     resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-9', customerName: null });
     const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, 'רעננה');
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('בחר סוג בעיה:');
+    // Problem-type menu is now a List Message.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('בחר סוג בעיה:');
     expect(ctxStore).toMatchObject({ awaiting: 'problem_type_choice', taskFieldId: 'tf-9' });
   });
 

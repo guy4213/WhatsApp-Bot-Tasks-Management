@@ -32,13 +32,15 @@ export interface ExtractionField {
  * Fields not relevant to the action are absent/undefined.
  */
 export interface InspectionActionExtractionItem {
-  action: 'correct_site' | 'correct_type' | 'reassign' | 'back' | 'cancel' | null;
+  action: 'correct_site' | 'correct_type' | 'reassign' | 'reschedule' | 'back' | 'cancel' | null;
   newSiteAddress?: string;
   newSiteCity?: string;
   newContactName?: string;
   newContactPhone?: string;
   newInspectionTypeQuery?: string;
   newWorkerName?: string;
+  newScheduledStartAt?: string;   // ISO 8601 datetime
+  newDurationMinutes?: number;
 }
 
 /**
@@ -118,7 +120,7 @@ const INSPECTION_ACTION_ITEM_SCHEMA = {
   properties: {
     action: {
       type: ['string', 'null'],
-      enum: ['correct_site', 'correct_type', 'reassign', 'back', 'cancel', null],
+      enum: ['correct_site', 'correct_type', 'reassign', 'reschedule', 'back', 'cancel', null],
       description: 'The action type.',
     },
     newSiteAddress:         { type: ['string', 'null'], description: 'New site address (for correct_site).' },
@@ -127,6 +129,8 @@ const INSPECTION_ACTION_ITEM_SCHEMA = {
     newContactPhone:        { type: ['string', 'null'], description: 'New contact phone (for correct_site).' },
     newInspectionTypeQuery: { type: ['string', 'null'], description: 'Inspection type search query (for correct_type).' },
     newWorkerName:          { type: ['string', 'null'], description: 'New worker name (for reassign).' },
+    newScheduledStartAt:    { type: ['string', 'null'], description: 'New scheduled start time ISO 8601 (for reschedule). Include timezone offset +03:00 for Israel.' },
+    newDurationMinutes:     { type: ['number', 'null'], description: 'New duration in minutes (for reschedule, optional).' },
   },
   required: ['action'],
 };
@@ -215,6 +219,7 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
     '- correct_site  → שינוי פרטי אתר: כתובת, עיר, שם איש קשר, טלפון איש קשר',
     '- correct_type  → שינוי סוג הבדיקה',
     '- reassign      → שיוך מחדש לעובד אחר',
+    '- reschedule    → שינוי תאריך ושעה (ואופציונלית משך) של הבדיקה',
     '- back          → חזרה לרשימה הקודמת',
     '- cancel        → ביטול / עצור',
     '',
@@ -226,6 +231,12 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
     '- "שנה את הכתובת ל..." → action=correct_site, newSiteAddress=<הערך>, newSiteCity=<עיר אם צוינה>.',
     '- "לשייך מחדש ל..." → action=reassign, newWorkerName=<השם>.',
     '- "שנה סוג בדיקה ל..." → action=correct_type, newInspectionTypeQuery=<הערך>.',
+    '- "תשנה תאריך ושעה ל-11/7 14:00" → action=reschedule, newScheduledStartAt="2026-07-11T14:00:00+03:00".',
+    '- "לתזמן מחדש למחר בעשר" → action=reschedule, newScheduledStartAt=<מחר T10:00:00+03:00>.',
+    '- "להזיז את הבדיקה ל-..." / "לדחות ל-..." / "תעביר ל-..." → action=reschedule.',
+    '- "שעה וחצי" / "90 דקות" / "שעתיים" → newDurationMinutes (60/90/120 וכו\').',
+    '- תאריך יחסי: "מחר" = יום הבא, "יום ראשון" = ראשון הבא, "ב-10" / "בעשר" = 10:00.',
+    '- אם ניתן תאריך בלבד ללא שעה — confidence < 0.60 (בקש הבהרה).',
     '- "חזרה" / "תחזור" / "4" → action=back.',
     '- "ביטול" / "עצור" → action=cancel.',
     '- אם אינך בטוח מה הפעולה — החזר confidence נמוך מ-0.60.',
@@ -538,6 +549,12 @@ export async function extractInspectionActions(
       return undefined;
     };
 
+    const numVal = (key: string): number | undefined => {
+      const v = obj[key];
+      if (typeof v === 'number' && isFinite(v)) return v;
+      return undefined;
+    };
+
     actions.push({
       action,
       newSiteAddress:         str('newSiteAddress'),
@@ -546,6 +563,8 @@ export async function extractInspectionActions(
       newContactPhone:        str('newContactPhone'),
       newInspectionTypeQuery: str('newInspectionTypeQuery'),
       newWorkerName:          str('newWorkerName'),
+      newScheduledStartAt:    str('newScheduledStartAt'),
+      newDurationMinutes:     numVal('newDurationMinutes'),
     });
   }
 

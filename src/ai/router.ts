@@ -94,6 +94,7 @@ import {
 import {
   hebrewShortLabel,
   formatHebrewDateTime,
+  formatShortDateTimeIL,
   formatInspectionListRow,
   formatInspectionDetail,
   formatLeadListRow,
@@ -103,10 +104,12 @@ import {
   type LeadListRowData,
 } from './inspectionFormatters';
 // D2-T12/T13/T14: site metadata correction, task reassign, inspection type correction.
+// Reschedule: updateTaskFieldSchedule.
 import {
   updateSiteMetadata,
   reassignTask,
   correctInspectionType,
+  updateTaskFieldSchedule,
   ClosedInspectionError,
   listInspectionTypes,
   getTaskFieldForCorrection,
@@ -166,7 +169,7 @@ const NUMERIC_PICKER_AWAITING: Set<AwaitingKind> = new Set<AwaitingKind>([
 // Nav words a numeric picker will accept without escaping to AI: pure digits,
 // Hebrew/English navigation vocabulary, or interactive button/list payload IDs
 // (CONFIRM_*, MGR_MENU_*, ACTION_*) that arrive from tapped WhatsApp buttons.
-const NUMERIC_PICKER_NAV_RE = /^(?:\d+|חזרה|ביטול|עצור|אישור|כן|לא|חיפוש|yes|no|cancel|ok|CONFIRM_(?:YES|NO|EDIT)_\w+|MGR_MENU_\d+|ACTION_(?:CORRECT_SITE|CORRECT_TYPE|REASSIGN|BACK))$/i;
+const NUMERIC_PICKER_NAV_RE = /^(?:\d+|חזרה|ביטול|עצור|אישור|כן|לא|חיפוש|yes|no|cancel|ok|CONFIRM_(?:YES|NO|EDIT)_\w+|MGR_MENU_\d+|ACTION_(?:CORRECT_SITE|CORRECT_TYPE|REASSIGN|BACK)|MGR_LEADS_\d+|MGR_EXC_\d+|MGR_WRK_\d+|MGR_SRC_\d+|EMP_MENU_\d+|PROBLEM_TYPE_\d+|FIN_FUP_\d+|DAY_FUP_\d+|SITE_FIELD_\d+)$/i;
 
 // Payload IDs for the multi-action confirmation buttons.
 const CONFIRM_YES_MULTI = 'CONFIRM_YES_MULTI_ACTION';
@@ -1294,27 +1297,28 @@ async function showMenu(user: ResolvedUser): Promise<void> {
   const awaitingKind = isManagerMenuUser(user) ? 'mgr_menu_root' : 'menu';
   await setContext(user.phone, { awaiting: awaitingKind });
 
-  // Group B: manager menu → Meta List Message (up to 10 rows, avoids typing).
-  // Falls back to numbered text on any send failure.
-  if (isManagerMenuUser(user)) {
-    const items = menuItemsFor(user);
-    try {
-      await sendListMessage({
-        to: user.phone,
-        body: 'שלום, מה תרצה לעשות?',
-        buttonLabel: 'פתח תפריט',
-        sections: [{
-          title: 'תפריט ניהול',
-          rows: items.map((r) => ({
-            id: `MGR_MENU_${r.n}`,
-            title: r.label,
-          })),
-        }],
-      });
-      return;
-    } catch (err) {
-      log.warn({ err }, 'sendListMessage failed for manager menu — falling back to text');
-    }
+  // All menus → Meta List Message (up to 10 rows). Falls back to numbered text.
+  const items = menuItemsFor(user);
+  const isManager = isManagerMenuUser(user);
+  const payloadPrefix = isManager ? 'MGR_MENU_' : 'EMP_MENU_';
+  const body = isManager ? 'שלום, מה תרצה לעשות?' : 'תפריט — בחר:';
+  const sectionTitle = isManager ? 'תפריט ניהול' : 'תפריט עובד';
+  try {
+    await sendListMessage({
+      to: user.phone,
+      body,
+      buttonLabel: 'פתח תפריט',
+      sections: [{
+        title: sectionTitle,
+        rows: items.map((r) => ({
+          id: `${payloadPrefix}${r.n}`,
+          title: r.label,
+        })),
+      }],
+    });
+    return;
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for menu — falling back to text');
   }
 
   await sendTextMessage({ to: user.phone, text: renderMenu(user) });
@@ -1325,8 +1329,12 @@ async function showMenu(user: ResolvedUser): Promise<void> {
  *  (see `NUMERIC_PICKER_AWAITING`) before they ever reach this handler, so any
  *  input arriving here is either digits or a nav word (`ביטול` etc.). */
 async function handleMenuReply(user: ResolvedUser, trimmed: string): Promise<void> {
+  // Resolve EMP_MENU_N list-tap payloads to digit.
+  const resolved = /^EMP_MENU_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^EMP_MENU_/i, '')
+    : trimmed;
   const items = menuItemsFor(user);
-  const idx = parseInt(trimmed, 10);
+  const idx = parseInt(resolved, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
     await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${items.length}.` });
     return; // keep the menu context so the next number still works
@@ -1509,7 +1517,25 @@ async function startReportProblemFlow(user: ResolvedUser): Promise<void> {
     awaiting: 'problem_type_choice',
     taskFieldId: found.taskFieldId,
   });
-  await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
+  await sendProblemTypeMenu(user.phone);
+}
+
+/** Send the problem-type sub-menu as a List Message (fallback: numbered text). */
+async function sendProblemTypeMenu(phone: string): Promise<void> {
+  const items = problemTypeMenu();
+  try {
+    await sendListMessage({
+      to: phone,
+      body: 'בחר סוג בעיה:',
+      buttonLabel: 'סוג בעיה',
+      sections: [{
+        rows: items.map((i) => ({ id: `PROBLEM_TYPE_${i.n}`, title: i.label })),
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for problem_type menu — falling back to text');
+    await sendTextMessage({ to: phone, text: renderProblemTypeMenu() });
+  }
 }
 
 async function handleProblemTypeChoiceReply(
@@ -1522,14 +1548,15 @@ async function handleProblemTypeChoiceReply(
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
+  // Resolve PROBLEM_TYPE_N list-tap payloads to digit.
+  const resolved = /^PROBLEM_TYPE_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^PROBLEM_TYPE_/i, '')
+    : trimmed;
   const items = problemTypeMenu();
-  const idx = parseInt(trimmed, 10);
+  const idx = parseInt(resolved, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
     // Invalid — resend the menu, keep the awaiting state.
-    await sendTextMessage({
-      to: user.phone,
-      text: `בחר מספר תקין:\n${renderProblemTypeMenu()}`,
-    });
+    await sendProblemTypeMenu(user.phone);
     return;
   }
   const chosen = items[idx - 1];
@@ -1682,11 +1709,29 @@ async function performTransition(
   await advanceFieldStatus({ taskFieldId, transition, updatedBy: user.id });
   if (transition === 'FINISHED') {
     await setContext(user.phone, { awaiting: 'finished_followup', taskFieldId });
-    await sendTextMessage({ to: user.phone, text: renderFinishedFollowUpMenu() });
+    await sendFinishedFollowUpMenu(user.phone);
     return;
   }
   await clearContext(user.phone);
   await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
+}
+
+/** Send the finished follow-up menu as a List Message (fallback: numbered text). */
+async function sendFinishedFollowUpMenu(phone: string): Promise<void> {
+  const items = finishedFollowUpMenu();
+  try {
+    await sendListMessage({
+      to: phone,
+      body: 'סיימת את הבדיקה. משהו נוסף?',
+      buttonLabel: 'בחר',
+      sections: [{
+        rows: items.map((i) => ({ id: `FIN_FUP_${i.n}`, title: i.label })),
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for finished_followup menu — falling back to text');
+    await sendTextMessage({ to: phone, text: renderFinishedFollowUpMenu() });
+  }
 }
 
 async function handleFinishedFollowUpReply(
@@ -1699,13 +1744,14 @@ async function handleFinishedFollowUpReply(
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
+  // Resolve FIN_FUP_N list-tap payloads to digit.
+  const resolved = /^FIN_FUP_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^FIN_FUP_/i, '')
+    : trimmed;
   const items = finishedFollowUpMenu();
-  const idx = parseInt(trimmed, 10);
+  const idx = parseInt(resolved, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
-    await sendTextMessage({
-      to: user.phone,
-      text: `בחר מספר תקין:\n${renderFinishedFollowUpMenu()}`,
-    });
+    await sendFinishedFollowUpMenu(user.phone);
     return;
   }
   const chosen = items[idx - 1];
@@ -1723,7 +1769,7 @@ async function handleFinishedFollowUpReply(
       // Hand off to D2-T8 — reuse the same code path as `report_problem` menu
       // tap. We already know the TaskField, so skip `findOpenTaskFieldForWorker`.
       await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
-      await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
+      await sendProblemTypeMenu(user.phone);
       return;
     case 'missing_info':
       // Hand off to D2-T7 — reuse the same code path as `missing_report_info`.
@@ -1838,7 +1884,7 @@ async function handleDisambigReply(
     }
     if (pendingTransition === 'HAS_PROBLEM') {
       await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
-      await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
+      await sendProblemTypeMenu(user.phone);
       return;
     }
     await setContext(user.phone, { awaiting: 'status_choice', taskFieldId });
@@ -1852,7 +1898,7 @@ async function handleDisambigReply(
   }
   // flow === 'problem'
   await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
-  await sendTextMessage({ to: user.phone, text: renderProblemTypeMenu() });
+  await sendProblemTypeMenu(user.phone);
 }
 
 // ── D2-T9: equipment reminder button taps + missing-note flow ───────────────
@@ -2084,17 +2130,36 @@ async function startDaySummaryFlow(user: ResolvedUser): Promise<void> {
   const summary = formatDayFieldSummary(finished, waitingForInfoCount, user.name);
   await sendTextMessage({ to: user.phone, text: summary });
   await setContext(user.phone, { awaiting: 'day_summary_choice' });
-  await sendTextMessage({ to: user.phone, text: renderDaySummaryFollowUpMenu() });
+  await sendDaySummaryFollowUpMenu(user.phone);
+}
+
+/** Send the day-summary follow-up menu as a List Message (fallback: numbered text). */
+async function sendDaySummaryFollowUpMenu(phone: string): Promise<void> {
+  const items = daySummaryFollowUpMenu();
+  try {
+    await sendListMessage({
+      to: phone,
+      body: 'יש מה להשלים?',
+      buttonLabel: 'בחר',
+      sections: [{
+        rows: items.map((i) => ({ id: `DAY_FUP_${i.n}`, title: i.label })),
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for day_summary_choice menu — falling back to text');
+    await sendTextMessage({ to: phone, text: renderDaySummaryFollowUpMenu() });
+  }
 }
 
 async function handleDaySummaryChoiceReply(user: ResolvedUser, trimmed: string): Promise<void> {
+  // Resolve DAY_FUP_N list-tap payloads to digit.
+  const resolved = /^DAY_FUP_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^DAY_FUP_/i, '')
+    : trimmed;
   const items = daySummaryFollowUpMenu();
-  const idx = parseInt(trimmed, 10);
+  const idx = parseInt(resolved, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
-    await sendTextMessage({
-      to: user.phone,
-      text: `בחר מספר תקין:\n${renderDaySummaryFollowUpMenu()}`,
-    });
+    await sendDaySummaryFollowUpMenu(user.phone);
     return;
   }
   const chosen = items[idx - 1];
@@ -2710,17 +2775,34 @@ async function resolveAndShowSiteFieldMenu(
 
 async function showSiteFieldMenu(user: ResolvedUser, taskFieldId: string): Promise<void> {
   await setContext(user.phone, { awaiting: 'correct_site_await_value', taskFieldId });
-  await sendTextMessage({
-    to: user.phone,
-    text: [
-      'מה לתקן? כתוב בתבנית: <שדה>: <ערך חדש>',
-      '1. כתובת אתר  (siteAddress)',
-      '2. עיר  (siteCity)',
-      '3. שם איש קשר  (fieldContactName)',
-      '4. טלפון איש קשר  (fieldContactPhone)',
-      'לדוגמה: "כתובת אתר: רוטשילד 10 תל אביב"',
-    ].join('\n'),
-  });
+  try {
+    await sendListMessage({
+      to: user.phone,
+      body: 'מה לתקן? בחר שדה ואז שלח את הערך החדש.',
+      buttonLabel: 'בחר שדה',
+      sections: [{
+        rows: [
+          { id: 'SITE_FIELD_1', title: 'כתובת אתר' },
+          { id: 'SITE_FIELD_2', title: 'עיר' },
+          { id: 'SITE_FIELD_3', title: 'שם איש קשר' },
+          { id: 'SITE_FIELD_4', title: 'טלפון איש קשר' },
+        ],
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for site field menu — falling back to text');
+    await sendTextMessage({
+      to: user.phone,
+      text: [
+        'מה לתקן? כתוב בתבנית: <שדה>: <ערך חדש>',
+        '1. כתובת אתר  (siteAddress)',
+        '2. עיר  (siteCity)',
+        '3. שם איש קשר  (fieldContactName)',
+        '4. טלפון איש קשר  (fieldContactPhone)',
+        'לדוגמה: "כתובת אתר: רוטשילד 10 תל אביב"',
+      ].join('\n'),
+    });
+  }
 }
 
 /** Map of Hebrew label variants → camelCase column key for site metadata fields. */
@@ -2731,6 +2813,14 @@ const SITE_FIELD_MAP: Record<string, keyof import('../services/taskFieldCorrecti
   'fieldcontactname': 'fieldContactName',
   'טלפון': 'fieldContactPhone', 'טלפון איש קשר': 'fieldContactPhone',
   'fieldcontactphone': 'fieldContactPhone',
+};
+
+// Map SITE_FIELD_N payload id → field label for the colon-split path.
+const SITE_FIELD_PAYLOAD_MAP: Record<string, string> = {
+  SITE_FIELD_1: 'כתובת אתר',
+  SITE_FIELD_2: 'עיר',
+  SITE_FIELD_3: 'שם איש קשר',
+  SITE_FIELD_4: 'טלפון איש קשר',
 };
 
 async function handleCorrectSiteAwaitValueReply(
@@ -2746,6 +2836,18 @@ async function handleCorrectSiteAwaitValueReply(
   const text = raw.trim();
   if (!text) {
     await showSiteFieldMenu(user, ctx.taskFieldId);
+    return;
+  }
+
+  // ── SITE_FIELD_N list-tap → prompt the user to type the new value ──
+  const siteFieldLabel = SITE_FIELD_PAYLOAD_MAP[text.toUpperCase()];
+  if (siteFieldLabel) {
+    // User tapped a field row — ask them to type the new value.
+    await sendTextMessage({
+      to: user.phone,
+      text: `הזן את הערך החדש עבור "${siteFieldLabel}":`,
+    });
+    // Keep the same context (correct_site_await_value) — next message is the value.
     return;
   }
 
@@ -3722,11 +3824,34 @@ function renderMgrExceptionsSub(): string {
 
 async function showMgrExceptionsSub(user: ResolvedUser): Promise<void> {
   await setContext(user.phone, { awaiting: 'mgr_exceptions_sub' });
-  await sendTextMessage({ to: user.phone, text: renderMgrExceptionsSub() });
+  try {
+    await sendListMessage({
+      to: user.phone,
+      body: 'חריגים ודיווחים — בחר:',
+      buttonLabel: 'בחר',
+      sections: [{
+        rows: [
+          { id: 'MGR_EXC_1', title: 'חריגים פתוחים' },
+          { id: 'MGR_EXC_2', title: 'משימות לא אושרו' },
+          { id: 'MGR_EXC_3', title: 'משימות עם בעיה' },
+          { id: 'MGR_EXC_4', title: 'ממתינות למידע' },
+          { id: 'MGR_EXC_5', title: 'לא סגרו יום' },
+          { id: 'MGR_EXC_6', title: 'חזרה' },
+        ],
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for mgr_exceptions_sub — falling back to text');
+    await sendTextMessage({ to: user.phone, text: renderMgrExceptionsSub() });
+  }
 }
 
 async function handleMgrExceptionsSubReply(user: ResolvedUser, trimmed: string): Promise<void> {
-  const idx = parseInt(trimmed, 10);
+  // Resolve MGR_EXC_N list-tap to digit.
+  const resolved = /^MGR_EXC_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^MGR_EXC_/i, '')
+    : trimmed;
+  const idx = parseInt(resolved, 10);
   if (idx === 6 || /^חזרה$/.test(trimmed)) {
     await showMenu(user);
     return;
@@ -3819,11 +3944,32 @@ function renderMgrLeadsSub(): string {
 
 async function showMgrLeadsSub(user: ResolvedUser): Promise<void> {
   await setContext(user.phone, { awaiting: 'mgr_leads_sub' });
-  await sendTextMessage({ to: user.phone, text: renderMgrLeadsSub() });
+  try {
+    await sendListMessage({
+      to: user.phone,
+      body: 'לידים ממתינים לטיפול — בחר:',
+      buttonLabel: 'בחר',
+      sections: [{
+        rows: [
+          { id: 'MGR_LEADS_1', title: 'לידים לא משויכים' },
+          { id: 'MGR_LEADS_2', title: 'לידים שעברו שעה ללא שיוך' },
+          { id: 'MGR_LEADS_3', title: 'שיוך ליד לעובד' },
+          { id: 'MGR_LEADS_4', title: 'חזרה' },
+        ],
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for mgr_leads_sub — falling back to text');
+    await sendTextMessage({ to: user.phone, text: renderMgrLeadsSub() });
+  }
 }
 
 async function handleMgrLeadsSubReply(user: ResolvedUser, trimmed: string): Promise<void> {
-  const idx = parseInt(trimmed, 10);
+  // Resolve MGR_LEADS_N list-tap to digit.
+  const resolved = /^MGR_LEADS_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^MGR_LEADS_/i, '')
+    : trimmed;
+  const idx = parseInt(resolved, 10);
   if (idx === 4 || /^חזרה$/.test(trimmed)) {
     await showMenu(user);
     return;
@@ -3940,7 +4086,23 @@ function renderMgrWorkersSub(): string {
 
 async function showMgrWorkersSub(user: ResolvedUser): Promise<void> {
   await setContext(user.phone, { awaiting: 'mgr_workers_sub' });
-  await sendTextMessage({ to: user.phone, text: renderMgrWorkersSub() });
+  try {
+    await sendListMessage({
+      to: user.phone,
+      body: 'עובדים וסיכומי יום — בחר:',
+      buttonLabel: 'בחר',
+      sections: [{
+        rows: [
+          { id: 'MGR_WRK_1', title: 'סיכום יום — כל העובדים' },
+          { id: 'MGR_WRK_2', title: 'בחר עובד לסיכום שלו' },
+          { id: 'MGR_WRK_3', title: 'חזרה' },
+        ],
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for mgr_workers_sub — falling back to text');
+    await sendTextMessage({ to: user.phone, text: renderMgrWorkersSub() });
+  }
 }
 
 async function handleMgrWorkersSubReply(
@@ -3948,7 +4110,11 @@ async function handleMgrWorkersSubReply(
   trimmed: string,
   _ctx: ConversationState,
 ): Promise<void> {
-  const idx = parseInt(trimmed, 10);
+  // Resolve MGR_WRK_N list-tap to digit.
+  const resolved = /^MGR_WRK_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^MGR_WRK_/i, '')
+    : trimmed;
+  const idx = parseInt(resolved, 10);
   if (idx === 3 || /^חזרה$/.test(trimmed)) {
     await showMenu(user);
     return;
@@ -4053,11 +4219,32 @@ function renderMgrSearchSub(): string {
 
 async function showMgrSearchSub(user: ResolvedUser): Promise<void> {
   await setContext(user.phone, { awaiting: 'mgr_search_sub' });
-  await sendTextMessage({ to: user.phone, text: renderMgrSearchSub() });
+  try {
+    await sendListMessage({
+      to: user.phone,
+      body: 'מה לחפש?',
+      buttonLabel: 'בחר',
+      sections: [{
+        rows: [
+          { id: 'MGR_SRC_1', title: 'לפי לקוח' },
+          { id: 'MGR_SRC_2', title: 'לפי עובד' },
+          { id: 'MGR_SRC_3', title: 'לפי מק"ט' },
+          { id: 'MGR_SRC_4', title: 'חזרה' },
+        ],
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for mgr_search_sub — falling back to text');
+    await sendTextMessage({ to: user.phone, text: renderMgrSearchSub() });
+  }
 }
 
 async function handleMgrSearchSubReply(user: ResolvedUser, trimmed: string): Promise<void> {
-  const idx = parseInt(trimmed, 10);
+  // Resolve MGR_SRC_N list-tap to digit.
+  const resolved = /^MGR_SRC_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^MGR_SRC_/i, '')
+    : trimmed;
+  const idx = parseInt(resolved, 10);
   if (idx === 4 || /^חזרה$/.test(trimmed)) {
     await showMenu(user);
     return;
@@ -4505,6 +4692,18 @@ async function handleMgrActionFreeText(
       lines.push(`סוג בדיקה → ${act.newInspectionTypeQuery ?? '(לא צוין)'}`);
     } else if (act.action === 'reassign') {
       lines.push(`עובד → ${act.newWorkerName ?? '(לא צוין)'}`);
+    } else if (act.action === 'reschedule') {
+      if (act.newScheduledStartAt) {
+        const d = new Date(act.newScheduledStartAt);
+        if (!isNaN(d.getTime())) {
+          const durNote = act.newDurationMinutes ? ` (${act.newDurationMinutes} דק')` : '';
+          lines.push(`תאריך ושעה → ${formatShortDateTimeIL(d)}${durNote}`);
+        } else {
+          lines.push(`תאריך ושעה → ${act.newScheduledStartAt}`);
+        }
+      } else {
+        lines.push('תאריך ושעה → (לא צוין)');
+      }
     }
   }
 
@@ -4733,6 +4932,69 @@ async function dispatchSingleAction(
     return;
   }
 
+  if (action === 'reschedule') {
+    // Auth: MANAGER/ADMIN only.
+    if (!user.isElevated) {
+      await setContext(user.phone, {
+        awaiting: ctx.awaiting,
+        mgrSelectedTaskFieldId: taskFieldId,
+        mgrSelectedTaskId: taskId,
+      });
+      await sendTextMessage({
+        to: user.phone,
+        text: 'אין הרשאה — רק מנהל יכול להזיז זמן בדיקה.\n\n' + MGR_TASK_INLINE_ACTIONS,
+      });
+      return;
+    }
+
+    const isoStr = item.newScheduledStartAt?.trim() ?? null;
+    if (!isoStr) {
+      await setContext(user.phone, {
+        awaiting: ctx.awaiting,
+        mgrSelectedTaskFieldId: taskFieldId,
+        mgrSelectedTaskId: taskId,
+      });
+      await sendTextMessage({
+        to: user.phone,
+        text: 'לא הצלחתי לזהות את התאריך והשעה. נסה שוב: "תזמן מחדש ל-11/7 בשעה 14:00".',
+      });
+      return;
+    }
+
+    const newStart = new Date(isoStr);
+    if (isNaN(newStart.getTime())) {
+      await setContext(user.phone, {
+        awaiting: ctx.awaiting,
+        mgrSelectedTaskFieldId: taskFieldId,
+        mgrSelectedTaskId: taskId,
+      });
+      await sendTextMessage({
+        to: user.phone,
+        text: `תאריך לא תקין: "${isoStr}". נסה שוב.`,
+      });
+      return;
+    }
+
+    try {
+      await updateTaskFieldSchedule(taskFieldId, user.id, {
+        scheduledStartAt: newStart,
+        durationMinutes: item.newDurationMinutes,
+      });
+      await clearContext(user.phone);
+      await sendTextMessage({
+        to: user.phone,
+        text: `עודכן — תאריך ושעה: ${formatShortDateTimeIL(newStart)}`,
+      });
+    } catch (err) {
+      const errMsg = err instanceof ClosedInspectionError
+        ? 'לא ניתן לקבוע מחדש בדיקה שהסתיימה או בוטלה.'
+        : 'שגיאה בעדכון תזמון. נסה שוב.';
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: errMsg });
+    }
+    return;
+  }
+
   // Unknown action — show the menu again.
   await setContext(user.phone, {
     awaiting: ctx.awaiting,
@@ -4855,6 +5117,36 @@ async function handleMgrMultiActionConfirmReply(
       } catch (err) {
         log.error({ err }, 'multi-action: reassignTask failed');
         results.push({ label, ok: false, note: 'שגיאה בשיוך מחדש' });
+      }
+
+    } else if (act.action === 'reschedule') {
+      const isoStr = act.newScheduledStartAt?.trim() ?? '';
+      const label = `תאריך ושעה${isoStr ? ': ' + isoStr : ''}`;
+      if (!user.isElevated) {
+        results.push({ label, ok: false, note: 'אין הרשאה — רק מנהל יכול להזיז זמן בדיקה' });
+        continue;
+      }
+      if (!isoStr) {
+        results.push({ label: 'תאריך ושעה', ok: false, note: 'לא צוין תאריך' });
+        continue;
+      }
+      const newStart = new Date(isoStr);
+      if (isNaN(newStart.getTime())) {
+        results.push({ label, ok: false, note: `תאריך לא תקין: "${isoStr}"` });
+        continue;
+      }
+      try {
+        await updateTaskFieldSchedule(taskFieldId, user.id, {
+          scheduledStartAt: newStart,
+          durationMinutes: act.newDurationMinutes,
+        });
+        results.push({ label: `תאריך ושעה: ${formatShortDateTimeIL(newStart)}`, ok: true });
+      } catch (err) {
+        const errMsg = err instanceof ClosedInspectionError
+          ? 'לא ניתן לקבוע מחדש בדיקה שהסתיימה או בוטלה'
+          : 'שגיאה בעדכון תזמון';
+        log.error({ err }, 'multi-action: updateTaskFieldSchedule failed');
+        results.push({ label, ok: false, note: errMsg });
       }
     }
     // back/cancel: already filtered out before storing

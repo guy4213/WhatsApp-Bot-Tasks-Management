@@ -115,6 +115,23 @@ export function formatHebrewDateTime(d: Date | string): string {
   return `${dow} ${dd}/${mm}/${yyyy}, ${hh}:${min}`;
 }
 
+/**
+ * Compact TZ-safe "DD/MM בשעה HH:MM" formatter in Asia/Jerusalem — used by the
+ * reschedule flow (single-action success, multi-action confirm body, and the
+ * preemptive worker WhatsApp text). Reads timezone-aware parts via Intl so a
+ * UTC server does not misreport hours.
+ */
+export function formatShortDateTimeIL(d: Date | string): string {
+  const date = new Date(d);
+  const parts = new Intl.DateTimeFormat('he-IL', {
+    timeZone: 'Asia/Jerusalem',
+    day: '2-digit', month: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('day')}/${get('month')} בשעה ${get('hour')}:${get('minute')}`;
+}
+
 /** Returns 0 (Sun)…6 (Sat) for a Date in Asia/Jerusalem. */
 function getDowJerusalem(d: Date): number {
   // Use en-CA (YYYY-MM-DD) to get the local date string, then compute DOW
