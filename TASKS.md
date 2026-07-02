@@ -727,6 +727,40 @@ A manager who is also a field inspector can now open item 7 from the manager men
 
 ---
 
+### X-T17a — Fix: employees with zero TaskFields today vanish from "עובדים וסיכומי יום" + falsely reported as nonexistent
+**Status:** DONE (local, uncommitted)
+
+**Bug report (user, 2026-07-02).** Manager reported that "גיא גבאי" (role=MANAGER, an active User) never appears in the "בחר עובד לסיכום שלו" worker picker, and asking free-text for his data ("תן לי דאטה על גיא גבאי") returned "לא מצאתי עובד בשם גיא גבאי" — a false claim, since he exists in `User` with `status='ACTIVE'`.
+
+**Root cause.** `getAllWorkersDayOverview` (`src/services/managerViews.ts`) started `FROM "TaskField" tf JOIN "Task" t JOIN "User" u` — an inner-join chain scoped to *today's* `scheduledStartAt` (per §6.1). Any active user with **zero** `TaskField` rows scheduled today (any role — confirmed via a full `User` table export: 6 generic system accounts and one real MANAGER all had 0 rows today) never produced a row at all, so they silently disappeared from both (a) the "בחר עובד" picker and (b) the free-text `workers_day_overview` worker-name match, which then fell through to a misleading "employee not found" message instead of "no field checks today."
+
+Confirmed NOT the cause: no role-based filter, no `LIMIT` truncation (only 9 of 16 users shown, well under any limit), no trailing-whitespace/exact-match issue in this code path (`ILIKE` substring match tolerates it).
+
+**Fix:**
+1. `src/services/managerViews.ts` — `getAllWorkersDayOverview` rewritten to start `FROM "User" u` (filtered `WHERE upper(u.status::text) = 'ACTIVE'`) with `LEFT JOIN "Task"` / `LEFT JOIN "TaskField"` (today's window moved into the `TaskField` `ON` clause, not `WHERE`, to preserve the outer join). `COUNT(*) AS total` → `COUNT(tf.id) AS total` so a worker with no TaskField rows gets `0`, not `1`. Every active user now gets a row (`0/0` when they have no field visit today) instead of disappearing.
+2. `src/ai/router.ts` (`workers_day_overview` intent, named-worker branch) — when the matched worker's `getWorkerDayDetail(...).total === 0`, send a clean "X — היום: אין בדיקות שטח מתוזמנות היום." instead of an empty-lines dump. The pre-existing "לא מצאתי עובד בשם X" fallback is now only reachable for a genuinely nonexistent name (since the roster is complete), which is correct.
+3. The `mgr_workers_pick_worker` reply handler (`handleMgrWorkersPickWorkerReply`, router.ts) already handled `detail.total === 0` gracefully ("אין בדיקות היום עבור X") — no change needed there; it now receives the full roster instead of a partial one.
+
+**Side effect (flagged to user, no action taken):** 6 generic system/placeholder `User` rows (Sales/Admin/Manager/Billing/Technician/Expert — `@galit.local` emails, no phone) now also appear in both the picker and the "כל העובדים" table with `0/0`, since they are `status='ACTIVE'` and there is no documented rule distinguishing them from real employees. Left un-filtered per YAGNI — no spec basis for guessing a filter (e.g. by email domain or phone presence). Revisit if the user asks to exclude them.
+
+**Files changed:**
+- `src/services/managerViews.ts` — `getAllWorkersDayOverview` query rewrite.
+- `src/ai/router.ts` — named-worker zero-total message in the `workers_day_overview` intent handler.
+
+**Files changed (tests):**
+- `src/__tests__/managerViews.test.ts` — added: query shape assertion (`FROM "User" u` + `LEFT JOIN "TaskField"` + `status = 'ACTIVE'`); a worker with 0 TaskFields today still appears in the result with `finished/total/exceptions` all `0`.
+- `src/__tests__/routerManagerIntents.test.ts` — added regression test: a matched worker with `total: 0` gets "אין בדיקות שטח מתוזמנות היום" and never "לא מצאתי עובד".
+
+**Tests run:** `npx vitest run` — full suite, 939 passed / 7 skipped / 0 failed (one unrelated pre-existing worker-pool OOM after all tests completed, on unrelated files — see X-T15a's known-risks note on the same OOM pattern). `npx tsc --noEmit` — clean.
+
+**Constraints satisfied:** read-only query change (no writes); no `Task.status` touched; no permission-gate change (`isManagerMenuUser` untouched); `TaskField.scheduledStartAt` remains the sole "today" date column (§6.1); no migration needed.
+
+**Known follow-ups:**
+- If the business wants the 6 generic system accounts hidden from these employee-facing lists, add an explicit, documented filter (e.g. exclude `email LIKE '%@galit.local'` or require `phone IS NOT NULL`) — not done here, no spec basis.
+- Not independently verified against the live CRM DB (no `DATABASE_URL` in this environment) — verified via the user's exported `User` table snapshot + code/query-logic review + full test suite.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:

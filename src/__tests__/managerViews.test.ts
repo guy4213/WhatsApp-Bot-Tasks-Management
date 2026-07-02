@@ -263,6 +263,30 @@ describe('getAllWorkersDayOverview', () => {
     expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
     expect(params).toContain(LOCAL_DATE);
   });
+
+  it('starts FROM "User" with a LEFT JOIN to TaskField, not an inner join', async () => {
+    // Regression guard: an active user with zero TaskField rows today must
+    // still produce a row (0/0), not disappear from the result entirely.
+    poolQuery.mockResolvedValueOnce({ rows: [] });
+    await getAllWorkersDayOverview(LOCAL_DATE);
+    const [sql] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/FROM\s+"User"\s+u/i);
+    expect(sql).toMatch(/LEFT JOIN\s+"TaskField"/i);
+    expect(sql).toMatch(/upper\(u\."?status"?::text\)\s*=\s*'ACTIVE'/i);
+  });
+
+  it('includes an active worker with zero TaskField rows today (finished/total/exceptions all 0)', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [
+        { workerId: 'u1', workerName: 'דני', finished: '2', total: '3', exceptions: '1' },
+        { workerId: 'u3', workerName: 'גיא גבאי', finished: '0', total: '0', exceptions: '0' },
+      ],
+    });
+    const rows = await getAllWorkersDayOverview(LOCAL_DATE);
+    const guy = rows.find((r) => r.workerName === 'גיא גבאי');
+    expect(guy).toBeDefined();
+    expect(guy).toMatchObject({ finished: 0, total: 0, exceptions: 0 });
+  });
 });
 
 // ── getWorkerDayDetail ────────────────────────────────────────────────────────

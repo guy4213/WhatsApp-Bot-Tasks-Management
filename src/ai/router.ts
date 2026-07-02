@@ -1049,6 +1049,14 @@ async function executeIntent(
         }
         // Show detail for the matched worker.
         const detail = await getWorkerDayDetail(matched.workerId, localDateW);
+        await clearContext(user.phone);
+        if (detail.total === 0) {
+          await sendTextMessage({
+            to: user.phone,
+            text: `${matched.workerName} — היום (${fmtDDMM(localDateW)}):\n\nאין בדיקות שטח מתוזמנות היום.`,
+          });
+          return;
+        }
         const lines = detail.inspections.map((r, i) => {
           const rowData: InspectionListRowData = {
             taskTitle: r.taskTitle,
@@ -1061,7 +1069,6 @@ async function executeIntent(
           return `${i + 1}. ${formatInspectionListRow(rowData)}`;
         });
         const summary = `סיכום: ${detail.finished}/${detail.total} בוצעו, חריגים פתוחים: ${detail.openExceptions}`;
-        await clearContext(user.phone);
         await sendChunked(user.phone, `${matched.workerName} — היום (${fmtDDMM(localDateW)}):\n\n${lines.join('\n\n')}\n\n${summary}`);
       } else {
         // All workers table view.

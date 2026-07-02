@@ -524,6 +524,23 @@ describe('intent: workers_day_overview', () => {
     expect(lastMsg()).toMatch(/אין עובדים/);
   });
 
+  it('shows "no field checks today" (not "employee not found") for a matched worker with zero TaskFields today', async () => {
+    // Regression: a MANAGER/ADMIN user with no TaskField today must still be
+    // found in the roster (0/0), never reported as a nonexistent employee.
+    getAllWorkersDayOverview.mockResolvedValue([
+      ...mockWorkers,
+      { workerId: 'w3', workerName: 'גיא גבאי', finished: 0, total: 0, exceptions: 0 },
+    ]);
+    getWorkerDayDetail.mockResolvedValue({ inspections: [], finished: 0, total: 0, openExceptions: 0 });
+    mockParseIntent(makeIntent('workers_day_overview', { params: { workerName: 'גיא גבאי' } }));
+    await handleAIMessage(admin, 'תן לי דאטה על גיא גבאי');
+    expect(getWorkerDayDetail).toHaveBeenCalledWith('w3', expect.any(String));
+    const msg = lastMsg();
+    expect(msg).toContain('גיא גבאי');
+    expect(msg).toContain('אין בדיקות שטח מתוזמנות היום');
+    expect(msg).not.toContain('לא מצאתי עובד');
+  });
+
   it('rejects non-manager with "אין הרשאה"', async () => {
     mockParseIntent(makeIntent('workers_day_overview', { params: {} }));
     await handleAIMessage(worker, 'סיכום עובדים');

@@ -401,7 +401,11 @@ export interface WorkerDayOverviewRow {
 
 /**
  * Per-worker day counts for "עובדים וסיכומי יום" option 1.
- * Returns one row per active inspector who has at least one TaskField today.
+ * Returns one row per active user — including users with zero TaskFields
+ * today (finished/total/exceptions all 0). Starting FROM "User" (rather than
+ * FROM "TaskField") is deliberate: a manager/admin with no field visit today
+ * must still appear (and be pickable) instead of silently disappearing from
+ * the list, which previously read as "this employee doesn't exist".
  */
 export async function getAllWorkersDayOverview(
   localDate: string,
@@ -417,16 +421,17 @@ export async function getAllWorkersDayOverview(
        u.id                                                              AS "workerId",
        u.name                                                            AS "workerName",
        COUNT(*) FILTER (WHERE tf."fieldStatus" = 'FINISHED_FIELD')      AS finished,
-       COUNT(*)                                                          AS total,
+       COUNT(tf.id)                                                       AS total,
        COUNT(*) FILTER (
          WHERE tf."hasOpenProblem" = true
             OR (tf."missingReportInfo" = true AND tf."fieldStatus" = 'WAITING_FOR_INFO')
        )                                                                 AS exceptions
-     FROM "TaskField" tf
-     JOIN "Task" t     ON t.id  = tf."taskId"
-     JOIN "User" u     ON u.id  = t."ownerId"
-     WHERE tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
+     FROM "User" u
+     LEFT JOIN "Task" t       ON t."ownerId" = u.id
+     LEFT JOIN "TaskField" tf ON tf."taskId" = t.id
+       AND tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
        AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+     WHERE upper(u.status::text) = 'ACTIVE'
      GROUP BY u.id, u.name
      ORDER BY u.name ASC`,
     [localDate],
