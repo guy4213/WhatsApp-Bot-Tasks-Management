@@ -554,6 +554,27 @@ describe('free-text — "חזרה" as free text', () => {
     expect(extractFromContextMock).not.toHaveBeenCalled();
     expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
   });
+
+  it('"תפריט" in detail-view context returns to main menu (no AI call)', async () => {
+    seedActionCtx('mgr_today_action');
+    await handleAIMessage(manager, 'תפריט');
+    expect(extractInspectionActionsMock).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+  });
+
+  it('"menu" (English) in detail-view returns to main menu', async () => {
+    seedActionCtx('mgr_today_action');
+    await handleAIMessage(manager, 'menu');
+    expect(extractInspectionActionsMock).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+  });
+
+  it('"אחורה" in detail-view returns to main menu', async () => {
+    seedActionCtx('mgr_today_action');
+    await handleAIMessage(manager, 'אחורה');
+    expect(extractInspectionActionsMock).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+  });
 });
 
 // ── Medium confidence ─────────────────────────────────────────────────────────

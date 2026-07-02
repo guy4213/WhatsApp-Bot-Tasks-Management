@@ -4414,6 +4414,20 @@ async function handleMgrActionFreeText(
   taskFieldId: string,
   taskId: string,
 ): Promise<void> {
+  // Nav-word fast path — before hitting the AI. The user might type "תפריט" /
+  // "menu" / "היי" / "שלום" while browsing details expecting to jump back to
+  // the main menu; and "חזרה" / "אחורה" to step back. Handle these locally so
+  // we never bother the LLM with them.
+  const trimmedNav = text.trim();
+  if (MENU_TRIGGER_RE.test(trimmedNav)) {
+    await showMenu(user);
+    return;
+  }
+  if (/^(חזרה|אחורה|back|למעלה)$/i.test(trimmedNav)) {
+    await showMenu(user);
+    return;
+  }
+
   // Load current TaskField values for the extractor context.
   const snapshot = await getTaskFieldValuesForContext(taskFieldId);
   const ctxValues = snapshot
