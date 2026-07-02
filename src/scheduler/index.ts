@@ -10,6 +10,7 @@ import { runCompletionNotifier }        from './jobs/completionNotifier';
 import { runDigestDispatcher }          from './jobs/digestDispatcher';
 import { runAssignmentCardNotifier }    from './jobs/assignmentCardNotifier';
 import { runLeadAssignmentNotifier }    from './jobs/leadAssignmentNotifier';
+import { runPreInspectionReminderJob }  from './jobs/preInspectionReminder';
 import { recoverInboundQueue }          from '../routes/webhook';
 
 const log = moduleLogger('scheduler');
@@ -28,8 +29,9 @@ const JOB_LOCK_IDS = {
   completionNotifier:     1006,
   queueRecovery:          1007,
   digestDispatcher:       1008,
-  assignmentCardNotifier: 1009,
-  leadAssignmentNotifier: 1010,
+  assignmentCardNotifier:  1009,
+  leadAssignmentNotifier:  1010,
+  preInspectionReminder:   1011,
 } as const;
 
 async function withJobLock(lockId: number, name: string, fn: () => Promise<void>): Promise<void> {
@@ -96,6 +98,12 @@ export function startScheduler(): void {
   // Dedup via WhatsappLeadNotification (migration 010). Advisory lock prevents
   // concurrent double-sends across instances.
   cron.schedule('*/2 * * * *', safe('leadAssignmentNotifier', JOB_LOCK_IDS.leadAssignmentNotifier, runLeadAssignmentNotifier), { timezone: TZ });
+
+  // D2-T15: every 2 minutes, poll for TaskField rows with scheduledStartAt in
+  // the next 60 minutes and preReminderSentAt IS NULL. Send the pre-inspection
+  // reminder card (3 reply buttons: יוצא בזמן / צריך פרטים / יש בעיה) and
+  // stamp preReminderSentAt. Advisory lock prevents duplicate sends.
+  cron.schedule('*/2 * * * *', safe('preInspectionReminder', JOB_LOCK_IDS.preInspectionReminder, runPreInspectionReminderJob), { timezone: TZ });
 
   // Legacy fixed 17:00 daily summary — OFF by default. Its replacement is the
   // evening digest above. Re-enable only via LEGACY_DAILY_SUMMARY_ENABLED=true.

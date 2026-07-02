@@ -36,6 +36,9 @@ export type AwaitingKind =
   // `_note` follows the NEED_INFO button (free-text follow-up).
   | 'inspection_decline_reason'
   | 'inspection_need_info_note'
+  // D2-T15: worker tapped the PREREMIND_NEED_INFO_* button on the 60-min
+  // pre-reminder card → next inbound text is the free-text missing-info note.
+  | 'pre_reminder_need_info_note'
   // D2-T12: correct site metadata on a TaskField (address/city/contact).
   | 'correct_site_pick_task'    // manager picks which Task
   | 'correct_site_pick_field'   // manager picks which TaskField (when >1 per Task)
@@ -64,13 +67,13 @@ export type AwaitingKind =
   | 'schedule_await_time'          // waiting for date/time (Hebrew → ISO 8601)
   | 'schedule_await_duration'      // waiting for duration in minutes or "אישור" (default 60)
   | 'schedule_confirm'             // waiting for 1 (confirm) / 2 (cancel)
-  // Manager menu: unified 6-item manager menu states.
-  | 'mgr_menu_root'                // waiting for 1-6 pick from top-level manager menu
+  // Manager menu: unified 7-item manager menu states.
+  | 'mgr_menu_root'                // waiting for 1-7 pick from top-level manager menu
   | 'mgr_exceptions_sub'           // waiting for 1-6 pick from exceptions sub-menu
   | 'mgr_leads_sub'                // waiting for 1-4 pick from leads sub-menu
   | 'mgr_workers_sub'              // waiting for 1-3 pick from workers sub-menu
   | 'mgr_search_sub'               // waiting for 1-4 pick from search sub-menu
-  | 'mgr_today_pick_task'          // waiting for user to pick from today's inspections list
+  | 'mgr_today_pick_task'          // waiting for user to pick from today's inspections list (org-wide)
   | 'mgr_today_action'             // waiting for inline action (correct site / type / reassign / back)
   | 'mgr_exceptions_pick_row'      // waiting for user to pick from exceptions list
   | 'mgr_exceptions_action'        // waiting for inline action after picking an exception row
@@ -79,6 +82,8 @@ export type AwaitingKind =
   | 'mgr_search_await_query'       // waiting for free-text search query
   | 'mgr_search_pick_task'         // waiting for user to pick from search results
   | 'mgr_search_action'            // waiting for inline action after picking a search result
+  // D2-T16: item 7 — manager's own personal inspections today.
+  | 'mgr_my_today_pick_task'       // waiting for user to pick from their own today's inspections list
   // Multi-action confirmation: manager sent a voice/free-text message with several
   // changes in one shot. Bot shows a consolidated confirm message; this state
   // awaits the CONFIRM_YES_MULTI_ACTION / CONFIRM_NO_MULTI_ACTION reply.

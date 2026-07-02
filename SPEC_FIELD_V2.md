@@ -88,7 +88,63 @@ MANAGER and ADMIN inherit the same correction ability for any task, subject to
 the same "not allowed" list — they cannot use this flow to bypass the office
 on price/status/owner/etc.
 
-Extensions 1-5 are additive; nothing in §5-§13 changes. The out-of-scope list
+**6. Manager menu item 7 — personal field inspections today.**
+The unified manager menu (6 items as of extensions 1-5) gains a 7th item:
+"הבדיקות שלי להיום". This shows only `TaskField` rows where `Task.ownerId`
+equals the requesting user's ID AND `scheduledStartAt` falls inside today's
+Asia/Jerusalem day.
+
+Distinction from item 2:
+- **Item 2** ("בדיקות שטח להיום") — org-wide list of ALL today's field
+  inspections across the whole company. Shows the worker name per row
+  (`showWorker=true`). Intended for Yoram's morning oversight.
+- **Item 7** ("הבדיקות שלי להיום") — personal list of the requesting
+  manager's OWN assigned inspections today. Worker name suppressed
+  (`showWorker=false` — redundant since every row belongs to the caller).
+  Intended for a manager who is also a field worker and wants to see their
+  own day without wading through the full org-wide list.
+
+Auth: any manager-menu user (`isManagerMenuUser`) may open item 7. The query
+itself enforces the personal filter (`Task.ownerId = user.id`) — no additional
+MANAGER/ADMIN gate is added at the entry point. Detail-view actions (reassign,
+correct type) enforce their own auth downstream via `dispatchSingleAction`.
+
+This extension is additive (new menu item + new query + new router states).
+No existing items 1-6 or the worker menu are changed.
+
+**7. Pre-inspection reminder — 60 minutes before `scheduledStartAt`.**
+The scheduler polls every 2 minutes for `TaskField` rows where
+`preReminderSentAt IS NULL` AND `scheduledStartAt <= now() + 60 minutes`
+AND `fieldStatus IN ('ASSIGNED', 'CONFIRMED', 'NEEDS_MORE_INFO')`.
+When a row qualifies, the worker assigned via `Task.ownerId` receives one
+WhatsApp button-message reminder. After a successful send, `preReminderSentAt`
+is stamped so subsequent polls skip the row.
+
+Reminder body format:
+```
+תזכורת בדיקה קרובה
+
+בעוד שעה יש לך בדיקה:
+סוג בדיקה: <typeLabelHe>
+לקוח: <customerName or "לקוח לא ידוע">
+כתובת: <siteAddress>, <siteCity>
+שעה: <HH:MM in Asia/Jerusalem>
+איש קשר: <name>, <phone>
+```
+
+Three reply buttons (deterministic payload IDs contain `taskFieldId`):
+- **יוצא בזמן** (`PREREMIND_DEPART_<taskFieldId>`) — advances `fieldStatus` to
+  `EN_ROUTE` (no-op + friendly message if already EN_ROUTE / ARRIVED /
+  FINISHED_FIELD).
+- **צריך פרטים** (`PREREMIND_NEED_INFO_<taskFieldId>`) — opens the missing-info
+  note flow (reuses `requestMoreInfo` + office alert, same as D2-T7).
+- **יש בעיה** (`PREREMIND_PROBLEM_<taskFieldId>`) — routes to the 7-item
+  problem-type sub-menu (reuses the `problem_type_choice` flow, same as D2-T8).
+
+Schema change: `ALTER TABLE "TaskField" ADD COLUMN IF NOT EXISTS "preReminderSentAt" timestamptz NULL` (migration 011).
+Dedup: `preReminderSentAt IS NULL` primary filter; UPDATE guarded by `AND "preReminderSentAt" IS NULL` to make concurrent stamps a no-op.
+
+Extensions 1-7 are additive; nothing in §5-§13 changes. The out-of-scope list
 in §14 is unchanged (photos, Outlook, and the other deferred items stay
 deferred). Editing scheduling time / duration on an existing `TaskField`,
 editing special instructions, and creating a new `Task` / `Customer` all stay

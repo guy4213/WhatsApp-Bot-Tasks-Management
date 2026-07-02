@@ -11,6 +11,7 @@ import type {
   ResolvedUser, TaskFilter, TaskListItem,
 } from '../types';
 import { TASK_TYPE_LABELS } from '../types';
+import { pool } from '../db/connection';
 import { getProvider } from './provider';
 import { parseIntent } from './intentParser';
 import { resolveTask } from './taskResolver';
@@ -66,10 +67,11 @@ import { getEmployeeEndOfDay, getCompanyEndOfDay } from '../services/tasks';
 import { formatEmployeeEndOfDay, formatManagerEndOfDay } from '../whatsapp/digestContent';
 // D3-T6: Sasha lead-assignment via WhatsApp.
 import { isLeadsViewer } from '../services/specialUsers';
-// Manager menu: unified 6-item manager menu view queries.
+// Manager menu: unified 7-item manager menu view queries.
 import {
   getManagementSnapshot,
   getTodayFieldInspections,
+  getMyFieldInspectionsToday,
   getFieldExceptionRows,
   getAllWorkersDayOverview,
   getWorkerDayDetail,
@@ -126,6 +128,12 @@ import {
   scheduleTaskField,
   type TaskCandidate,
 } from '../services/taskFieldScheduling';
+// D2-T15: pre-inspection reminder payload IDs (source-of-truth helpers).
+import {
+  preReminderDepartPayloadId,
+  preReminderNeedInfoPayloadId,
+  preReminderProblemPayloadId,
+} from '../services/preInspectionReminder';
 
 const log = moduleLogger('ai-router');
 
@@ -163,6 +171,7 @@ const NUMERIC_PICKER_AWAITING: Set<AwaitingKind> = new Set<AwaitingKind>([
   'mgr_menu_root',
   'mgr_exceptions_sub', 'mgr_leads_sub', 'mgr_workers_sub', 'mgr_search_sub',
   'mgr_today_pick_task',
+  'mgr_my_today_pick_task',   // D2-T16: manager's own personal inspections today (item 7)
   'mgr_exceptions_pick_row',
   'mgr_leads_pick_row',
   'mgr_workers_pick_worker',
@@ -172,7 +181,7 @@ const NUMERIC_PICKER_AWAITING: Set<AwaitingKind> = new Set<AwaitingKind>([
 // Nav words a numeric picker will accept without escaping to AI: pure digits,
 // Hebrew/English navigation vocabulary, or interactive button/list payload IDs
 // (CONFIRM_*, MGR_MENU_*, ACTION_*) that arrive from tapped WhatsApp buttons.
-const NUMERIC_PICKER_NAV_RE = /^(?:\d+|חזרה|ביטול|עצור|אישור|כן|לא|חיפוש|yes|no|cancel|ok|CONFIRM_(?:YES|NO|EDIT)_\w+|MGR_MENU_\d+|ACTION_(?:CORRECT_SITE|CORRECT_TYPE|REASSIGN|BACK)|MGR_LEADS_\d+|MGR_EXC_\d+|MGR_WRK_\d+|MGR_SRC_\d+|EMP_MENU_\d+|PROBLEM_TYPE_\d+|FIN_FUP_\d+|DAY_FUP_\d+|SITE_FIELD_\d+)$/i;
+const NUMERIC_PICKER_NAV_RE = /^(?:\d+|חזרה|ביטול|עצור|אישור|כן|לא|חיפוש|yes|no|cancel|ok|CONFIRM_(?:YES|NO|EDIT)_\w+|MGR_MENU_\d+|ACTION_(?:CORRECT_SITE|CORRECT_TYPE|REASSIGN|BACK)|MGR_LEADS_\d+|MGR_EXC_\d+|MGR_WRK_\d+|MGR_SRC_\d+|EMP_MENU_\d+|PROBLEM_TYPE_\d+|FIN_FUP_\d+|DAY_FUP_\d+|SITE_FIELD_\d+|STATUS_UPD_\d+)$/i;
 
 // Payload IDs for the multi-action confirmation buttons.
 const CONFIRM_YES_MULTI = 'CONFIRM_YES_MULTI_ACTION';
@@ -262,6 +271,15 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   const inspTap = matchInspectionCardTap(text);
   if (inspTap) {
     await handleInspectionCardTap(user, inspTap.kind, inspTap.taskFieldId);
+    return;
+  }
+
+  // D2-T15 pre-reminder button taps. PREREMIND_DEPART / NEED_INFO / PROBLEM.
+  // Pattern: PREREMIND_<KIND>_<uuid>. Parsed before the AI/NLU path so the
+  // worker's tap always routes here regardless of conversation context.
+  const preReminderTap = matchPreReminderTap(text);
+  if (preReminderTap) {
+    await handlePreReminderTap(user, preReminderTap.kind, preReminderTap.taskFieldId);
     return;
   }
 
@@ -513,6 +531,11 @@ async function continueConversation(
     await handleInspectionNeedInfoNoteReply(user, text, ctx);
     return;
   }
+  // D2-T15: pre-reminder NEED_INFO note capture.
+  if (ctx.awaiting === 'pre_reminder_need_info_note') {
+    await handlePreReminderNeedInfoNoteReply(user, text, ctx);
+    return;
+  }
 
   // D3-T6: Sasha lead-assignment multi-step flow.
   if (ctx.awaiting === 'assign_lead_pick_lead') {
@@ -626,6 +649,11 @@ async function continueConversation(
   }
   if (ctx.awaiting === 'mgr_today_action') {
     await handleMgrTaskActionReply(user, trimmed, ctx);
+    return;
+  }
+  // D2-T16: item 7 — manager's own personal inspections today.
+  if (ctx.awaiting === 'mgr_my_today_pick_task') {
+    await handleMgrMyTodayPickTaskReply(user, trimmed, ctx);
     return;
   }
   if (ctx.awaiting === 'mgr_exceptions_pick_row') {
@@ -1420,6 +1448,10 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
     case 'mgr_search_sub':
       await showMgrSearchSub(user);
       return;
+    // D2-T16: item 7 — manager's own personal inspections today.
+    case 'mgr_my_inspections_today':
+      await showMyFieldInspectionsToday(user);
+      return;
   }
 }
 
@@ -1521,6 +1553,25 @@ async function startReportProblemFlow(user: ResolvedUser): Promise<void> {
     taskFieldId: found.taskFieldId,
   });
   await sendProblemTypeMenu(user.phone);
+}
+
+/** Send the status-update sub-menu as a List Message (fallback: numbered text).
+ *  Worker menu item 3 → 3 transitions (יצאתי / הגעתי / סיימתי). */
+async function sendStatusUpdateMenu(phone: string): Promise<void> {
+  const items = statusUpdateMenu();
+  try {
+    await sendListMessage({
+      to: phone,
+      body: 'עדכון סטטוס בדיקה:',
+      buttonLabel: 'בחר סטטוס',
+      sections: [{
+        rows: items.map((i) => ({ id: `STATUS_UPD_${i.n}`, title: i.label })),
+      }],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for status_choice menu — falling back to text');
+    await sendTextMessage({ to: phone, text: renderStatusUpdateMenu() });
+  }
 }
 
 /** Send the problem-type sub-menu as a List Message (fallback: numbered text). */
@@ -1674,7 +1725,7 @@ async function startStatusUpdateFlow(user: ResolvedUser): Promise<void> {
     return;
   }
   await setContext(user.phone, { awaiting: 'status_choice', taskFieldId: found.taskFieldId });
-  await sendTextMessage({ to: user.phone, text: renderStatusUpdateMenu() });
+  await sendStatusUpdateMenu(user.phone);
 }
 
 async function handleStatusChoiceReply(
@@ -1687,13 +1738,14 @@ async function handleStatusChoiceReply(
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
+  // Resolve STATUS_UPD_N list-tap payload to digit.
+  const resolved = /^STATUS_UPD_(\d+)$/i.test(trimmed)
+    ? trimmed.replace(/^STATUS_UPD_/i, '')
+    : trimmed;
   const items = statusUpdateMenu();
-  const idx = parseInt(trimmed, 10);
+  const idx = parseInt(resolved, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
-    await sendTextMessage({
-      to: user.phone,
-      text: `בחר מספר תקין:\n${renderStatusUpdateMenu()}`,
-    });
+    await sendStatusUpdateMenu(user.phone);
     return;
   }
   const chosen = items[idx - 1];
@@ -1891,7 +1943,7 @@ async function handleDisambigReply(
       return;
     }
     await setContext(user.phone, { awaiting: 'status_choice', taskFieldId });
-    await sendTextMessage({ to: user.phone, text: renderStatusUpdateMenu() });
+    await sendStatusUpdateMenu(user.phone);
     return;
   }
   if (flow === 'missing_info') {
@@ -2080,6 +2132,106 @@ async function handleInspectionNeedInfoNoteReply(
     return;
   }
   // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
+  const extracted = await extractNote(rawTrimmed, 'missing_info_note');
+  const note = extracted ?? rawTrimmed;
+  await requestMoreInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
+  await notifyOfficeNeedsMoreInfo(ctx.taskFieldId, note);
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+}
+
+// ── D2-T15: pre-inspection 60-minute reminder button taps ──────────────────
+// PREREMIND_DEPART_<taskFieldId>    → advance fieldStatus to EN_ROUTE
+// PREREMIND_NEED_INFO_<taskFieldId> → set awaiting pre_reminder_need_info_note
+// PREREMIND_PROBLEM_<taskFieldId>   → route to the problem-reporting flow
+
+type PreReminderTapKind = 'DEPART' | 'NEED_INFO' | 'PROBLEM';
+
+/** Parse an inbound message that IS a pre-reminder tap payload. Returns null
+ *  for anything else so the caller falls through untouched. */
+function matchPreReminderTap(
+  raw: string,
+): { kind: PreReminderTapKind; taskFieldId: string } | null {
+  const m = raw.trim().match(
+    /^PREREMIND_(DEPART|NEED_INFO|PROBLEM)_([0-9a-f-]{36})$/i,
+  );
+  if (!m) return null;
+  const token = m[1].toUpperCase() as PreReminderTapKind;
+  return { kind: token, taskFieldId: m[2] };
+}
+
+/** Hebrew status labels used in the DEPART guard message. */
+const STATUS_HE_LABEL_PRE: Record<string, string> = {
+  EN_ROUTE:       'בדרך',
+  ARRIVED:        'הגיע לאתר',
+  FINISHED_FIELD: 'סיים שטח',
+};
+
+async function handlePreReminderTap(
+  user: ResolvedUser,
+  kind: PreReminderTapKind,
+  taskFieldId: string,
+): Promise<void> {
+  switch (kind) {
+    case 'DEPART': {
+      // Guard: do NOT advance if the worker is already EN_ROUTE, ARRIVED, or
+      // FINISHED_FIELD. A prior tap, a voice update, or the menu may have already
+      // advanced the status; silently advancing again would corrupt the timeline.
+      const { rows } = await pool.query<{ fieldStatus: string }>(
+        `SELECT "fieldStatus" FROM "TaskField" WHERE id = $1`,
+        [taskFieldId],
+      );
+      if (rows.length === 0) {
+        await clearContext(user.phone);
+        await sendTextMessage({ to: user.phone, text: 'לא נמצאה הבדיקה. נסה שוב.' });
+        return;
+      }
+      const current = rows[0].fieldStatus;
+      if (current === 'EN_ROUTE' || current === 'ARRIVED' || current === 'FINISHED_FIELD') {
+        await clearContext(user.phone);
+        await sendTextMessage({
+          to: user.phone,
+          text: `הסטטוס כבר מתקדם (${STATUS_HE_LABEL_PRE[current] ?? current}). אין צורך לעדכן שוב.`,
+        });
+        return;
+      }
+      await advanceFieldStatus({ taskFieldId, transition: 'DEPARTED', updatedBy: user.id });
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'עדכנתי — יצאת לבדיקה. בהצלחה!' });
+      return;
+    }
+    case 'NEED_INFO':
+      await setContext(user.phone, {
+        awaiting: 'pre_reminder_need_info_note',
+        taskFieldId,
+      });
+      await sendTextMessage({ to: user.phone, text: 'אילו פרטים חסרים? כתוב מה צריך.' });
+      return;
+    case 'PROBLEM':
+      // Route to the existing problem-reporting flow — same entry point as
+      // menu item 4 and the D2-T8 finished follow-up option 3 (reuses
+      // problem_type_choice state + sendProblemTypeMenu).
+      await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
+      await sendProblemTypeMenu(user.phone);
+      return;
+  }
+}
+
+async function handlePreReminderNeedInfoNoteReply(
+  user: ResolvedUser,
+  raw: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
+    await sendTextMessage({ to: user.phone, text: 'אילו פרטים חסרים? כתוב מה צריך.' });
+    return;
+  }
   const extracted = await extractNote(rawTrimmed, 'missing_info_note');
   const note = extracted ?? rawTrimmed;
   await requestMoreInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
@@ -3808,6 +3960,73 @@ async function handleMgrTodayPickTaskReply(
   }
   const taskFieldId = ids[idx - 1];
   const taskId = taskIds[idx - 1];
+  await showMgrTaskFieldDetail(user, taskFieldId, taskId, 'mgr_today_action');
+}
+
+// ── 7. My field inspections today (D2-T16) ───────────────────────────────────
+//
+// Personal counterpart of item 2 (org-wide). Shows only TaskFields where
+// Task.ownerId = current user AND scheduledStartAt is today (Asia/Jerusalem).
+// Uses formatInspectionListRow(row, false) — worker column suppressed because
+// every row belongs to the requesting user.
+
+async function showMyFieldInspectionsToday(user: ResolvedUser): Promise<void> {
+  const localDate = localJerusalemDate();
+  const rows = await getMyFieldInspectionsToday(user.id, localDate);
+
+  if (rows.length === 0) {
+    await sendTextMessage({ to: user.phone, text: 'אין לך בדיקות שטח להיום.' });
+    // Return to menu context so the user can pick another item without re-opening.
+    await setContext(user.phone, { awaiting: 'mgr_menu_root' });
+    return;
+  }
+
+  const ddmm = fmtDDMM(localDate);
+  const lines = rows.map((r, i) => {
+    const rowData: InspectionListRowData = {
+      taskTitle: r.taskTitle,
+      typeLabelHe: r.typeLabelHe,
+      timeHm: r.timeHm,
+      siteCity: r.siteCity,
+      fieldStatus: r.fieldStatus,
+      workerName: r.workerName,
+      dateStr: localDate,
+    };
+    // showWorker=false: every row belongs to the requesting user, no need to repeat the name.
+    return `${i + 1}. ${formatInspectionListRow(rowData, false)}`;
+  });
+
+  await setContext(user.phone, {
+    awaiting: 'mgr_my_today_pick_task',
+    mgrTaskFieldIds: rows.map((r) => r.taskFieldId),
+    mgrTaskIds: rows.map((r) => r.taskId),
+  });
+
+  await sendChunked(user.phone,
+    `הבדיקות שלי להיום — ${ddmm} (${rows.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים ופעולות, או "חזרה" לתפריט.`,
+  );
+}
+
+async function handleMgrMyTodayPickTaskReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (/^חזרה$/.test(trimmed)) {
+    await showMenu(user);
+    return;
+  }
+  const ids = ctx.mgrTaskFieldIds ?? [];
+  const taskIds = ctx.mgrTaskIds ?? [];
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > ids.length) {
+    await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${ids.length} או "חזרה".` });
+    return;
+  }
+  const taskFieldId = ids[idx - 1];
+  const taskId = taskIds[idx - 1];
+  // Reuse the same detail view and action handler as item 2 (mgr_today_action).
+  // The detail formatter and action dispatcher are identical — no duplication.
   await showMgrTaskFieldDetail(user, taskFieldId, taskId, 'mgr_today_action');
 }
 

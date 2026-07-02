@@ -427,16 +427,18 @@ describe('D5-T3 free-text intent dispatch (skips sub-menus)', () => {
 // ── D2-T5 status update flow (menu item 3) ───────────────────────────────────
 
 describe('D2-T5 — status update flow via menu item 3', () => {
-  it('shows the 3-item status sub-menu, sets awaiting=status_choice', async () => {
+  it('shows the 3-item status sub-menu as a List Message, sets awaiting=status_choice', async () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 3);
-    expect(sendTextMessage).toHaveBeenCalledTimes(1);
-    const menuText = sendTextMessage.mock.calls[0][0].text;
-    expect(menuText).toContain('עדכון סטטוס בדיקה:');
-    expect(menuText).toContain('1. יצאתי (בדרך)');
-    expect(menuText).toContain('2. הגעתי');
-    expect(menuText).toContain('3. סיימתי');
+    // Now sent as a List Message (hamburger), not numbered text.
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    const listArg = sendListMessage.mock.calls[0][0];
+    expect(listArg.body).toContain('עדכון סטטוס בדיקה:');
+    const rows = listArg.sections[0].rows;
+    expect(rows.some((r: { id: string; title: string }) => r.id === 'STATUS_UPD_1' && r.title === 'יצאתי (בדרך)')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.id === 'STATUS_UPD_2' && r.title === 'הגעתי')).toBe(true);
+    expect(rows.some((r: { id: string; title: string }) => r.id === 'STATUS_UPD_3' && r.title === 'סיימתי')).toBe(true);
     expect(ctxStore).toMatchObject({ awaiting: 'status_choice', taskFieldId: 'tf-1' });
   });
 
@@ -506,14 +508,16 @@ describe('D2-T5 — status update flow via menu item 3', () => {
     await pressMenu(user, 3);
     sendTextMessage.mockClear();
 
+    sendListMessage.mockClear();
     const { handleAIMessage } = await loadRouter();
     // "9" is a digit → passes the escape hatch, hits the out-of-range branch.
-    // Free-text inputs are routed to AI parser at the top of the router now.
+    // The list-message handler re-sends the same List Message (no separate
+    // "בחר מספר תקין:" text — the UX for a hamburger is to just reprompt).
     await handleAIMessage(user, '9');
 
     expect(advanceFieldStatus).not.toHaveBeenCalled();
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('בחר מספר תקין:');
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('עדכון סטטוס בדיקה:');
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls[0][0].body).toContain('עדכון סטטוס בדיקה:');
     expect(ctxStore).toMatchObject({ awaiting: 'status_choice', taskFieldId: 'tf-1' });
   });
 
@@ -770,13 +774,15 @@ describe('D2-T5 — free-text hint resolves ambiguous open TaskField', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'problem_type_choice', taskFieldId: 'tf-9' });
   });
 
-  it('status_disambig (no pendingTransition) → hint resolves → shows status sub-menu', async () => {
+  it('status_disambig (no pendingTransition) → hint resolves → shows status sub-menu as List Message', async () => {
     const user = makeUser();
     ctxStore = { awaiting: 'status_disambig' };
     resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-9', customerName: null });
+    sendListMessage.mockClear();
     const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, 'רעננה');
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('עדכון סטטוס בדיקה:');
+    expect(sendListMessage).toHaveBeenCalledTimes(1);
+    expect(sendListMessage.mock.calls.at(-1)?.[0].body).toContain('עדכון סטטוס בדיקה:');
     expect(ctxStore).toMatchObject({ awaiting: 'status_choice', taskFieldId: 'tf-9' });
   });
 

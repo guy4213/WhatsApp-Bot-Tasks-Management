@@ -582,6 +582,35 @@ Addendum. See `SPEC_FIELD_V2.md` § "Addendum — 2026-07-01".
 - **Dependencies:** D1-T2, D1-T5, D1-T7 (need catalog seeded so lookups have data). No new migration.
 - **Blocked:** no.
 
+### D2-T15 — Pre-inspection 60-minute reminder
+**Status:** DONE (local, uncommitted)
+
+A field worker receives a WhatsApp reminder ~60 min before their scheduled inspection (when `scheduledStartAt <= now() + 60 min`) so they can prepare and leave on time.
+
+**Files created:**
+- `src/db/migrations/011_pre_reminder.sql` — idempotent `ALTER TABLE "TaskField" ADD COLUMN IF NOT EXISTS "preReminderSentAt" timestamptz NULL`
+- `src/services/preInspectionReminder.ts` — `findDuePreReminders`, `formatPreReminderCard`, `sendAndStampPreReminder`, `runPreInspectionReminderPoll`, payload-ID helpers
+- `src/scheduler/jobs/preInspectionReminder.ts` — thin wrapper (`runPreInspectionReminderJob`)
+- `src/__tests__/preInspectionReminder.test.ts` — 19 tests (query shape, formatter, send+stamp, poll isolation)
+- `src/__tests__/routerPreReminderTap.test.ts` — 12 tests (regex, DEPART guard, NEED_INFO state, PROBLEM flow)
+
+**Files modified:**
+- `src/scheduler/index.ts` — new advisory lock id 1011 (`preInspectionReminder`); registered `*/2 * * * *` cron
+- `src/services/conversationContext.ts` — new `AwaitingKind`: `pre_reminder_need_info_note`
+- `src/ai/router.ts` — added `pool` import; added `matchPreReminderTap` / `handlePreReminderTap` / `handlePreReminderNeedInfoNoteReply`; wired in `handleAIMessage` (after INSP_ tap) and `continueConversation`
+- `SPEC_FIELD_V2.md` — Addendum item 7 added
+- `TASKS.md` — this entry
+
+**Buttons:**
+- `PREREMIND_DEPART_<taskFieldId>` → "יוצא בזמן" → advances to `EN_ROUTE` (guarded: no-op if already EN_ROUTE/ARRIVED/FINISHED_FIELD)
+- `PREREMIND_NEED_INFO_<taskFieldId>` → "צריך פרטים" → `pre_reminder_need_info_note` → `requestMoreInfo` + office alert
+- `PREREMIND_PROBLEM_<taskFieldId>` → "יש בעיה" → reuses `problem_type_choice` flow
+
+**Tests run:** 19 new service tests + 12 new router tests = 31 new tests, all pass. `npx tsc --noEmit` clean. Zero regressions.
+**Constraints satisfied:** Task.status never written; lead code untouched; migration is idempotent (ADD COLUMN IF NOT EXISTS).
+
+---
+
 ### D2-T11 — Schedule a `TaskField` for an existing `Task` from WhatsApp
 - **Status:** DONE (local, uncommitted). Full design was in `HANDOFF.md` — implementation matches. New service file `src/services/taskFieldScheduling.ts` exports `findOpenTasksForOwner`, `findOpenTasksForAdmin`, `findCustomersByName`, `findOpenTasksForCustomer`, `scheduleTaskField`. Router state machine covers pick-task → search-customer fallback → time → duration → confirm → INSERT (with `workerNotifiedAt=NULL` so the D5-T6 poller sends the §6 card automatically). Auth: WORKER on own Task only, MANAGER+ADMIN any. Tests: `taskFieldScheduling.test.ts` + `routerScheduleTaskField.test.ts` — 49 new tests pass. tsc clean; full suite 442/449 (7 pre-existing skips).
 - **What to do:** new intent `schedule_task_field` + router state machine + `scheduleTaskField(taskId, actorId, {scheduledStartAt, durationMinutes, specialInstructions?})` service. Flow: user types trigger → bot lists user's open tasks (own only for WORKER; any for MANAGER/ADMIN) → user picks → bot asks for date/time (Hebrew parser: "ראשון בעשר") → duration (default 60) → confirmation with all static fields pre-filled from the picked `Task` → `INSERT` into `TaskField` with `workerNotifiedAt = NULL`. The existing D5-T6 poller sends the §6 card automatically. Bot NEVER writes `Task` or `Customer`.
@@ -589,6 +618,25 @@ Addendum. See `SPEC_FIELD_V2.md` § "Addendum — 2026-07-01".
 - **Auth:** WORKER can only schedule for `Task.ownerId = self`. MANAGER + ADMIN can schedule for any `Task`.
 - **Dependencies:** D1-T5, D1-T7 (need catalog seeded), D2-T2 (card pipeline). No new migration.
 - **Blocked:** no.
+
+### D2-T16 — Manager menu item 7 ("הבדיקות שלי להיום")
+**Status:** DONE (local, uncommitted)
+
+A manager who is also a field inspector can now open item 7 from the manager menu to see only their own TaskField rows for today — without opening the org-wide list (item 2). Business rationale: Yoram (and any other manager) still gets §13 exceptions digests org-wide, but if they also have inspections assigned to themselves, item 7 lets them check their own day in one tap.
+
+**Files changed:**
+- `src/ai/menu.ts` — added `mgr_my_inspections_today` to the `MenuAction` union; extended `managerMenu()` from 6 to 7 items (item 7 label: `הבדיקות שלי להיום`); updated `managerMenu()` JSDoc.
+- `src/services/managerViews.ts` — added `getMyFieldInspectionsToday(userId, localDate)` next to `getTodayFieldInspections`. SQL shape is identical plus `AND t."ownerId" = $2`. Does NOT use `assignedAt` or `finishedAt` — day window is always `scheduledStartAt` in Asia/Jerusalem.
+- `src/services/conversationContext.ts` — added `mgr_my_today_pick_task` to `AwaitingKind`; updated comment on `mgr_menu_root` to say 1-7.
+- `src/ai/router.ts` — imported `getMyFieldInspectionsToday`; added `mgr_my_today_pick_task` to `NUMERIC_PICKER_AWAITING`; added `case 'mgr_my_inspections_today'` to `handleMenuRoute`; added dispatch branch in `continueConversation`; added `showMyFieldInspectionsToday(user)` and `handleMgrMyTodayPickTaskReply(user, trimmed, ctx)` handlers. Detail view reuses `showMgrTaskFieldDetail(..., 'mgr_today_action')` — no duplication; list row uses `formatInspectionListRow(row, false)` (worker column suppressed).
+- `src/__tests__/routerManagerMenu.test.ts` — added `getMyFieldInspectionsToday` mock; updated "admin sees manager menu" test to assert 7-item presence; added 9 new test cases under `describe('item 7 — הבדיקות שלי להיום')`.
+- `src/__tests__/managerViews.test.ts` — imported `getMyFieldInspectionsToday`; added 5 new test cases under `describe('getMyFieldInspectionsToday')`.
+- `TASKS.md` — this entry.
+- `SPEC_FIELD_V2.md` — addendum item 6 added.
+
+**Tests run:** `npx vitest run` — all new tests pass; zero regressions against pre-existing suite; `npx tsc --noEmit` clean (pre-existing TS errors in this worktree are unrelated to this task).
+
+**Deviations from spec:** none. Reused `showMgrTaskFieldDetail` (detail formatter) and `formatInspectionListRow` (list row). `Task.status` not written. Lead code not touched.
 
 ---
 

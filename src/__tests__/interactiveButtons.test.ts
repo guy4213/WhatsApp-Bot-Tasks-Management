@@ -251,10 +251,10 @@ describe('Group B: manager menu → sendListMessage', () => {
     expect(call.sections).toHaveLength(1);
 
     const rows = call.sections[0].rows;
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(7);
     expect(rows.map((r) => r.id)).toEqual([
       'MGR_MENU_1', 'MGR_MENU_2', 'MGR_MENU_3',
-      'MGR_MENU_4', 'MGR_MENU_5', 'MGR_MENU_6',
+      'MGR_MENU_4', 'MGR_MENU_5', 'MGR_MENU_6', 'MGR_MENU_7',
     ]);
 
     // All row titles are ≤ 24 chars

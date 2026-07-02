@@ -79,15 +79,16 @@ describe('menuItemsFor', () => {
     expect(managerItems.map((i) => i.action.kind)).toEqual(adminItems.map((i) => i.action.kind));
   });
 
-  it('ADMIN gets the new unified 6-item manager menu (mgr_ action kinds)', () => {
+  it('ADMIN gets the new unified 7-item manager menu (mgr_ action kinds)', () => {
     const items = menuItemsFor(admin);
-    expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(items[0].action.kind).toBe('mgr_snapshot');
     expect(items[1].action.kind).toBe('mgr_today_inspections');
     expect(items[2].action.kind).toBe('mgr_exceptions_sub');
     expect(items[3].action.kind).toBe('mgr_leads_sub');
     expect(items[4].action.kind).toBe('mgr_workers_sub');
     expect(items[5].action.kind).toBe('mgr_search_sub');
+    expect(items[6].action.kind).toBe('mgr_my_inspections_today');
     // No legacy list_tasks / guide / free_text / digest_settings in the new manager menu.
     const kinds = items.map((i) => i.action.kind);
     expect(kinds).not.toContain('guide');

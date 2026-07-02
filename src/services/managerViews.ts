@@ -205,6 +205,75 @@ export async function getTodayFieldInspections(
   return rows;
 }
 
+// ── My field inspections today (D2-T16 — manager item 7) ────────────────────
+
+/**
+ * TaskField rows today (Asia/Jerusalem) where Task.ownerId = the given user.
+ *
+ * This is the personal counterpart of getTodayFieldInspections (which is
+ * org-wide). It is used by manager menu item 7 ("הבדיקות שלי להיום") so a
+ * manager who is also a field worker can see only their own day without
+ * wading through the full org-wide list from item 2.
+ *
+ * SQL shape: identical to getTodayFieldInspections plus `AND t."ownerId" = $2`.
+ * The localDate param ($1) drives the Asia/Jerusalem day window; userId ($2)
+ * filters to the requesting user. Does NOT use assignedAt or finishedAt.
+ */
+export async function getMyFieldInspectionsToday(
+  userId: string,
+  localDate: string,
+): Promise<TodayFieldInspectionRow[]> {
+  const { rows } = await pool.query<{
+    taskFieldId: string;
+    taskId: string;
+    workerName: string | null;
+    customerName: string | null;
+    taskTitle: string | null;
+    timeHm: string | null;
+    siteCity: string | null;
+    fieldStatus: string;
+    family: string;
+    typeLabelHe: string;
+  }>(
+    `SELECT
+       tf.id                                                           AS "taskFieldId",
+       tf."taskId"                                                     AS "taskId",
+       u.name                                                          AS "workerName",
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                                                               AS "customerName",
+       t.title                                                         AS "taskTitle",
+       to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
+                                                                      AS "timeHm",
+       tf."siteCity"                                                   AS "siteCity",
+       tf."fieldStatus"                                                AS "fieldStatus",
+       tf.family                                                       AS family,
+       it."labelHe"                                                    AS "typeLabelHe"
+     FROM "TaskField" tf
+     JOIN "Task" t             ON t.id  = tf."taskId"
+     JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     LEFT JOIN "User" u          ON u.id  = t."ownerId"
+     WHERE tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+       AND t."ownerId" = $2
+     ORDER BY tf."scheduledStartAt" ASC`,
+    [localDate, userId],
+  );
+
+  log.info({ userId, localDate, count: rows.length }, 'Loaded my field inspections today (per-user)');
+  return rows;
+}
+
 // ── Field exception rows ──────────────────────────────────────────────────────
 
 // All 5 filters are DAILY (manager daily menu context) and scope by

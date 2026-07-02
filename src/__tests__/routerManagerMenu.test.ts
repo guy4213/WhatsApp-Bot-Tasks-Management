@@ -26,10 +26,12 @@ const getWorkerDayDetail = vi.fn();
 const searchTasksByWorkerName = vi.fn();
 const searchTasksByProductCode = vi.fn();
 const getTaskFieldDetail = vi.fn();
+const getMyFieldInspectionsToday = vi.fn();
 
 vi.mock('../services/managerViews', () => ({
   getManagementSnapshot: (...a: unknown[]) => getManagementSnapshot(...a),
   getTodayFieldInspections: (...a: unknown[]) => getTodayFieldInspections(...a),
+  getMyFieldInspectionsToday: (...a: unknown[]) => getMyFieldInspectionsToday(...a),
   getFieldExceptionRows: (...a: unknown[]) => getFieldExceptionRows(...a),
   getAllWorkersDayOverview: (...a: unknown[]) => getAllWorkersDayOverview(...a),
   getWorkerDayDetail: (...a: unknown[]) => getWorkerDayDetail(...a),
@@ -238,6 +240,7 @@ beforeEach(() => {
   ctxStore = null;
   getManagementSnapshot.mockReset();
   getTodayFieldInspections.mockReset();
+  getMyFieldInspectionsToday.mockReset();
   getFieldExceptionRows.mockReset();
   getAllWorkersDayOverview.mockReset();
   getWorkerDayDetail.mockReset();
@@ -251,11 +254,12 @@ afterEach(() => { vi.restoreAllMocks(); });
 // ── Menu trigger ──────────────────────────────────────────────────────────────
 
 describe('menu trigger', () => {
-  it('admin sees the 6-item manager menu header', async () => {
+  it('admin sees the 7-item manager menu with item 7 "הבדיקות שלי להיום"', async () => {
     await handleAIMessage(admin, 'תפריט');
     expect(lastMsg()).toContain('שלום, מה תרצה לעשות?');
     expect(lastMsg()).toContain('תמונת מצב ניהולית');
     expect(lastMsg()).toContain('בדיקות שטח להיום');
+    expect(lastMsg()).toContain('הבדיקות שלי להיום');
     // awaiting state should be mgr_menu_root
     expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
   });
@@ -774,5 +778,143 @@ describe('inline actions from task detail view', () => {
 
     await handleAIMessage(admin, '4');
     expect(lastMsg()).toContain('שלום, מה תרצה לעשות?');
+  });
+});
+
+// ── Item 7: my field inspections today (D2-T16) ───────────────────────────────
+
+describe('item 7 — הבדיקות שלי להיום (D2-T16)', () => {
+  const myInspectionRows = [
+    {
+      taskFieldId: 'my-tf1', taskId: 'my-t1', workerName: 'מנהל',
+      customerName: 'לקוח שלי א', taskTitle: 'בדיקת רעש מרכזייה', timeHm: '09:00',
+      siteCity: 'תל אביב', fieldStatus: 'CONFIRMED', family: 'noise', typeLabelHe: 'רעש',
+    },
+    {
+      taskFieldId: 'my-tf2', taskId: 'my-t2', workerName: 'מנהל',
+      customerName: 'לקוח שלי ב', taskTitle: null, timeHm: '11:30',
+      siteCity: 'חיפה', fieldStatus: 'EN_ROUTE', family: 'radiation', typeLabelHe: 'קרינה',
+    },
+  ];
+
+  it('manager menu has 7 items; item 7 label is "הבדיקות שלי להיום"', async () => {
+    await handleAIMessage(admin, 'תפריט');
+    const msg = lastMsg();
+    // The list message rows include the title of every menu item
+    expect(msg).toContain('הבדיקות שלי להיום');
+    // Should also contain earlier items — just a spot check
+    expect(msg).toContain('תמונת מצב ניהולית');
+    expect(msg).toContain('חיפוש משימה / בדיקה');
+  });
+
+  it('typing "7" in mgr_menu_root calls getMyFieldInspectionsToday with user.id', async () => {
+    getMyFieldInspectionsToday.mockResolvedValue(myInspectionRows);
+    ctxStore = { awaiting: 'mgr_menu_root' };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, '7');
+    expect(getMyFieldInspectionsToday).toHaveBeenCalledWith('u-admin', expect.any(String));
+  });
+
+  it('tapping MGR_MENU_7 in mgr_menu_root calls getMyFieldInspectionsToday', async () => {
+    getMyFieldInspectionsToday.mockResolvedValue(myInspectionRows);
+    ctxStore = { awaiting: 'mgr_menu_root' };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, 'MGR_MENU_7');
+    expect(getMyFieldInspectionsToday).toHaveBeenCalledWith('u-admin', expect.any(String));
+  });
+
+  it('empty result → sends "אין לך בדיקות שטח להיום." and restores mgr_menu_root', async () => {
+    getMyFieldInspectionsToday.mockResolvedValue([]);
+    ctxStore = { awaiting: 'mgr_menu_root' };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, '7');
+    expect(lastMsg()).toContain('אין לך בדיקות שטח להיום.');
+    // Context should be mgr_menu_root so next digit still picks a menu item
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+  });
+
+  it('non-empty result → renders numbered list with DD/MM header and formatInspectionListRow output (no worker column)', async () => {
+    getMyFieldInspectionsToday.mockResolvedValue(myInspectionRows);
+    ctxStore = { awaiting: 'mgr_menu_root' };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, '7');
+    const msg = lastMsg();
+
+    // Header should contain DD/MM and count
+    expect(msg).toMatch(/הבדיקות שלי להיום.*\(\d+\)/);
+    // formatInspectionListRow output lines (no worker)
+    expect(msg).toContain('סוג בדיקה:');
+    expect(msg).toContain('שעה: 09:00');
+    expect(msg).toContain('עיר: תל אביב');
+    expect(msg).toContain('סטטוס: אושרה');
+    // Worker name must NOT appear (showWorker=false)
+    expect(msg).not.toContain('שם עובד:');
+    // Navigation hint
+    expect(msg).toContain('בחר מספר לפרטים ופעולות');
+  });
+
+  it('non-empty result → sets awaiting to mgr_my_today_pick_task with correct ids', async () => {
+    getMyFieldInspectionsToday.mockResolvedValue(myInspectionRows);
+    ctxStore = { awaiting: 'mgr_menu_root' };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, '7');
+    expect(ctxStore).toMatchObject({
+      awaiting: 'mgr_my_today_pick_task',
+      mgrTaskFieldIds: ['my-tf1', 'my-tf2'],
+      mgrTaskIds: ['my-t1', 'my-t2'],
+    });
+  });
+
+  it('picking a number in mgr_my_today_pick_task dispatches to showMgrTaskFieldDetail (same detail handler as item 2)', async () => {
+    getTaskFieldDetail.mockResolvedValue({
+      taskFieldId: 'my-tf1', taskId: 'my-t1', workerName: 'מנהל', customerName: 'לקוח שלי א',
+      siteAddress: 'רחוב 3', siteCity: 'תל אביב', fieldContactName: null, fieldContactPhone: null,
+      fieldStatus: 'CONFIRMED', scheduledStartAt: new Date(), family: 'noise',
+      typeLabelHe: 'רעש', specialInstructions: null, problemNote: null,
+      problemType: null, missingReportInfoNote: null, hasOpenProblem: false, missingReportInfo: false,
+    });
+    ctxStore = {
+      awaiting: 'mgr_my_today_pick_task',
+      mgrTaskFieldIds: ['my-tf1'],
+      mgrTaskIds: ['my-t1'],
+    };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, '1');
+    const msg = lastMsg();
+    // Detail view includes the action prompt items
+    expect(msg).toContain('תיקון פרטי ביקור');
+    expect(msg).toContain('תיקון סוג בדיקה');
+    // State transitions to mgr_today_action (same as item 2 — reuses existing handler)
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_today_action', mgrSelectedTaskFieldId: 'my-tf1' });
+  });
+
+  it('"חזרה" from mgr_my_today_pick_task returns to menu', async () => {
+    ctxStore = {
+      awaiting: 'mgr_my_today_pick_task',
+      mgrTaskFieldIds: ['my-tf1'],
+      mgrTaskIds: ['my-t1'],
+    };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, 'חזרה');
+    expect(lastMsg()).toContain('שלום, מה תרצה לעשות?');
+  });
+
+  it('worker (non-manager-menu user) does NOT see item 7 in employeeMenu', async () => {
+    // Worker has 7 employee menu items; none should be "הבדיקות שלי להיום" for the manager-only flow
+    // (worker already has item 1 = "הבדיקות שלי להיום" via the employee menu, but with different action kind)
+    await handleAIMessage(worker, 'תפריט');
+    const msg = lastMsg();
+    // Worker should see the employee menu, not the manager menu
+    expect(msg).not.toContain('שלום, מה תרצה לעשות?');
+    expect(msg).not.toContain('mgr_my_inspections_today');
+    // Worker context must be 'menu', NOT 'mgr_menu_root'
+    expect(ctxStore).toMatchObject({ awaiting: 'menu' });
   });
 });

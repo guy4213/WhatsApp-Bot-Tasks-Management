@@ -34,13 +34,14 @@ export type MenuAction =
   | { kind: 'missing_equipment' }
   | { kind: 'missing_report_info' }
   | { kind: 'day_summary' }
-  // Unified 6-item manager menu actions.
+  // Unified manager menu actions (items 1-6 org-wide, item 7 personal).
   | { kind: 'mgr_snapshot' }
   | { kind: 'mgr_today_inspections' }
   | { kind: 'mgr_exceptions_sub' }
   | { kind: 'mgr_leads_sub' }
   | { kind: 'mgr_workers_sub' }
-  | { kind: 'mgr_search_sub' };
+  | { kind: 'mgr_search_sub' }
+  | { kind: 'mgr_my_inspections_today' };
 
 export interface MenuRoute {
   n: number;       // displayed number (1-based)
@@ -75,8 +76,13 @@ function employeeMenu(): MenuRoute[] {
 }
 
 /**
- * Unified 6-item manager menu (new implementation).
+ * Unified 7-item manager menu (new implementation).
  * Shown to: ADMIN, MANAGER, exceptions viewers (יורם etc.), leads viewers (סשה etc.).
+ *
+ * Items 1-6 are org-wide views. Item 7 ("הבדיקות שלי להיום") is a personal
+ * view — it shows only the TaskFields where Task.ownerId = current user. This
+ * lets a manager who is also a field worker see their own day without wading
+ * through the full org-wide list (item 2).
  */
 function managerMenu(): MenuRoute[] {
   return [
@@ -86,6 +92,7 @@ function managerMenu(): MenuRoute[] {
     { n: 4, label: 'לידים ממתינים לטיפול',          action: { kind: 'mgr_leads_sub' } },
     { n: 5, label: 'עובדים וסיכומי יום',            action: { kind: 'mgr_workers_sub' } },
     { n: 6, label: 'חיפוש משימה / בדיקה',          action: { kind: 'mgr_search_sub' } },
+    { n: 7, label: 'הבדיקות שלי להיום',            action: { kind: 'mgr_my_inspections_today' } },
   ];
 }
 

@@ -76,6 +76,7 @@ describe('menuItemsFor — manager-menu users', () => {
     'לידים ממתינים לטיפול',
     'עובדים וסיכומי יום',
     'חיפוש משימה / בדיקה',
+    'הבדיקות שלי להיום',
   ];
 
   const EXPECTED_ACTION_KINDS = [
@@ -85,13 +86,14 @@ describe('menuItemsFor — manager-menu users', () => {
     'mgr_leads_sub',
     'mgr_workers_sub',
     'mgr_search_sub',
+    'mgr_my_inspections_today',
   ];
 
   for (const user of [adminUser, managerUser, yoram, guyFranses, guyGabai, yair, sasha]) {
-    it(`shows 6-item manager menu for ${user.name} (${user.role})`, () => {
+    it(`shows 7-item manager menu for ${user.name} (${user.role})`, () => {
       const items = menuItemsFor(user);
-      expect(items).toHaveLength(6);
-      expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(items).toHaveLength(7);
+      expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6, 7]);
       expect(items.map((i) => i.label)).toEqual(EXPECTED_LABELS);
       expect(items.map((i) => i.action.kind)).toEqual(EXPECTED_ACTION_KINDS);
     });
@@ -145,7 +147,7 @@ describe('renderMenu', () => {
     expect(text).not.toContain('📋');
   });
 
-  it('manager menu contains all 6 item labels', () => {
+  it('manager menu contains all 7 item labels', () => {
     const text = renderMenu(adminUser);
     expect(text).toContain('תמונת מצב ניהולית');
     expect(text).toContain('בדיקות שטח להיום');
@@ -153,6 +155,7 @@ describe('renderMenu', () => {
     expect(text).toContain('לידים ממתינים לטיפול');
     expect(text).toContain('עובדים וסיכומי יום');
     expect(text).toContain('חיפוש משימה / בדיקה');
+    expect(text).toContain('הבדיקות שלי להיום');
   });
 
   it('employee gets emoji-prefixed header', () => {

@@ -15,6 +15,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 import {
   getManagementSnapshot,
   getTodayFieldInspections,
+  getMyFieldInspectionsToday,
   getFieldExceptionRows,
   getAllWorkersDayOverview,
   getWorkerDayDetail,
@@ -364,5 +365,71 @@ describe('getTaskFieldDetail', () => {
     poolQuery.mockResolvedValueOnce({ rows: [] });
     const detail = await getTaskFieldDetail('nonexistent');
     expect(detail).toBeNull();
+  });
+});
+
+// ── getMyFieldInspectionsToday (D2-T16) ──────────────────────────────────────
+
+describe('getMyFieldInspectionsToday', () => {
+  const USER_ID = 'user-uuid-123';
+
+  it('SQL contains the ownerId = $2 filter (per-user scope)', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await getMyFieldInspectionsToday(USER_ID, LOCAL_DATE);
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/t\."ownerId"\s*=\s*\$2/);
+    expect(params[1]).toBe(USER_ID);
+  });
+
+  it('uses scheduledStartAt for the day window (NOT assignedAt or finishedAt)', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await getMyFieldInspectionsToday(USER_ID, LOCAL_DATE);
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/tf\."scheduledStartAt"/);
+    expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
+    expect(params[0]).toBe(LOCAL_DATE);
+    // Must NOT use assignedAt or finishedAt as day-scoping column
+    expect(sql).not.toMatch(/tf\."assignedAt"\s*(>=|<)/);
+    expect(sql).not.toMatch(/tf\."finishedAt"\s*(>=|<)/);
+  });
+
+  it('$1 is localDate and $2 is userId (param order matters)', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await getMyFieldInspectionsToday(USER_ID, LOCAL_DATE);
+    const [, params] = poolQuery.mock.calls[0];
+    expect(params[0]).toBe(LOCAL_DATE);
+    expect(params[1]).toBe(USER_ID);
+  });
+
+  it('joins the same tables as getTodayFieldInspections (User, InspectionType, Customer, etc.)', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await getMyFieldInspectionsToday(USER_ID, LOCAL_DATE);
+    const [sql] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/JOIN "Task"/);
+    expect(sql).toMatch(/JOIN "InspectionType"/);
+    expect(sql).toMatch(/LEFT JOIN "Customer"/i);
+  });
+
+  it('returns rows with TodayFieldInspectionRow shape', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [{
+        taskFieldId: 'my-tf1', taskId: 'my-t1', workerName: 'יורם',
+        customerName: 'לקוח בדיקה', taskTitle: 'בדיקת רעש ממעלית',
+        timeHm: '09:00', siteCity: 'תל אביב',
+        fieldStatus: 'CONFIRMED', family: 'noise', typeLabelHe: 'רעש מאוורר',
+      }],
+    });
+    const rows = await getMyFieldInspectionsToday(USER_ID, LOCAL_DATE);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].taskFieldId).toBe('my-tf1');
+    expect(rows[0].workerName).toBe('יורם');
+    expect(rows[0].customerName).toBe('לקוח בדיקה');
+    expect(rows[0].fieldStatus).toBe('CONFIRMED');
+  });
+
+  it('returns empty array when no rows match', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [] });
+    const rows = await getMyFieldInspectionsToday(USER_ID, LOCAL_DATE);
+    expect(rows).toHaveLength(0);
   });
 });
