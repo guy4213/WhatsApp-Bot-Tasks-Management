@@ -305,17 +305,24 @@ function formatCountsBlock(c: FieldExceptionCounts): string {
 }
 
 /**
- * Labeled multi-line leads block per product-owner UX update.
+ * Labeled leads block per product-owner UX update (2026-07-02).
  *
  * לידים:
- * - מהלילה: X
- * - לא שויכו: Y
+ * - ממתינים מהלילה: N
+ *
+ * Product decision: the CEO-facing digest must show only ACTIONABLE overnight
+ * leads (received overnight AND still unassigned). A raw arrival count would
+ * mislead the reader into thinking work exists when the leads may already be
+ * assigned. `lc.overnight` is now the shared source of truth with Sasha's
+ * pending queue (`findOvernightUnassignedLeads`) — same predicate, same number.
+ *
+ * `lc.unassigned` (legacy total-open-queue snapshot) is intentionally NOT
+ * rendered; kept as a `YoramLeadCounts` field only for `params` slot stability.
  */
 function formatLeadsBlock(lc: YoramLeadCounts): string {
   return (
     `לידים:\n` +
-    `- מהלילה: ${lc.overnight}\n` +
-    `- לא שויכו: ${lc.unassigned}`
+    `- ממתינים מהלילה: ${lc.overnight}`
   );
 }
 
@@ -576,7 +583,11 @@ export function formatSashaLeadsMorning(
 
   if (leads.length === 0) {
     return {
-      text: `${header}\n\nלא התקבלו לידים ממתינים מהלילה.`,
+      // "אין לידים לשיבוץ מהלילה" is more precise than the old
+      // "לא התקבלו לידים ממתינים מהלילה" — it signals that the
+      // ASSIGNMENT QUEUE is empty, not that no leads arrived (which could
+      // have happened but were already assigned before 09:30).
+      text: `${header}\n\nאין לידים לשיבוץ מהלילה.`,
       params,
       buttons: [],
     };

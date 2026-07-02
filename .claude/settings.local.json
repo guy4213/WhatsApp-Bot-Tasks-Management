@@ -28,7 +28,18 @@
       "Bash(git show *)",
       "Bash(git merge-file *)",
       "Bash(echo \"exit: $?\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(awk '/handleMgrLeadsSubReply/,/async function handleMgrLeadsPickRow/')",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a5808de1747963c4a/src/services/managerViews.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/services/managerViews.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a5808de1747963c4a/src/scheduler/jobs/digestDispatcher.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/scheduler/jobs/digestDispatcher.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a5808de1747963c4a/src/whatsapp/digestContent.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/whatsapp/digestContent.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a5808de1747963c4a/src/__tests__/galitManagerDigest.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/galitManagerDigest.test.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a5808de1747963c4a/src/__tests__/galitManagerDispatcher.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/galitManagerDispatcher.test.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/services/leadCategorizer.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/services/leadCategorizer.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/whatsapp/leadDisplay.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/whatsapp/leadDisplay.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/__tests__/leadCategorizer.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/leadCategorizer.test.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/__tests__/leadDisplay.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/leadDisplay.test.ts)",
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/__tests__/routerLeadsDisplay.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/routerLeadsDisplay.test.ts)"
     ]
   }
 }

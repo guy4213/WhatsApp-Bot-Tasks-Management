@@ -47,10 +47,13 @@ vi.mock('../whatsapp/digestContent', async (importOriginal) => {
   };
 });
 
-// Stub AI and incomingLeads so Sasha dispatch doesn't require real DB
+// Stub AI and incomingLeads so Sasha dispatch doesn't require real DB.
+// getYoramLeadCounts is also mocked so ExceptionsViewer rows (גיא פרנסס, יאיר)
+// can reach formatGalitManagerMorning without a real DB call.
 vi.mock('../services/incomingLeads', () => ({
   findOvernightUnassignedLeads: vi.fn().mockResolvedValue([]),
   findActiveInspectors:         vi.fn().mockResolvedValue([]),
+  getYoramLeadCounts:           vi.fn().mockResolvedValue({ overnight: 0, unassigned: 0 }),
 }));
 vi.mock('../ai/leadSuggester', () => ({
   suggestWorkerForLead: vi.fn().mockResolvedValue({ userId: null, reason: 'לא נמצאה התאמה' }),
@@ -162,5 +165,67 @@ describe('Sasha leads morning dispatcher', () => {
     // Normal path uses notify(), not sendTextMessage
     expect(notify).toHaveBeenCalled();
     expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  // ── Fix B: dev observer in both LEADS_VIEWER_NAMES + EXCEPTIONS_VIEWER_NAMES ──
+  //
+  // Before the fix: גיא פרנסס at 09:30 received BOTH dispatchSashaLeadsMorning
+  // (sendTextMessage) AND dispatchOne→formatGalitManagerMorning (notify).
+  // After the fix: only the Galit digest fires (ExceptionsViewer takes priority).
+
+  it('at 09:30 — "גיא פרנסס" (LeadsViewer AND ExceptionsViewer) does NOT receive Sasha leads morning', async () => {
+    // גיא is in BOTH LEADS_VIEWER_NAMES and EXCEPTIONS_VIEWER_NAMES.
+    // With morning_time = '09:30' the MORNING digest is due and will dispatch
+    // the Galit digest (ExceptionsViewer path). The LeadsViewer branch must
+    // be skipped because isExceptionsViewer is also true.
+    const guyRow = makeRow({
+      user_id: 'u-guy',
+      user_name: 'גיא פרנסס',
+      user_phone: OTHER_PHONE,
+      role: 'ADMIN',
+      morning_time: '09:30', // MORNING due at 09:30 (same window as local_hm)
+    });
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [guyRow] }) // selectDigestCandidates
+      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend MORNING (Galit path)
+
+    await runDigestDispatcher();
+
+    // Sasha leads path must NOT have fired.
+    expect(sendTextMessage).not.toHaveBeenCalled();
+    // Galit digest fires via notify().
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('at 09:30 — "יאיר" (LeadsViewer AND ExceptionsViewer) does NOT receive Sasha leads morning', async () => {
+    const yairRow = makeRow({
+      user_id: 'u-yair',
+      user_name: 'יאיר',
+      user_phone: OTHER_PHONE,
+      role: 'ADMIN',
+      morning_time: '09:30', // Galit digest fires at 09:30
+    });
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [yairRow] }) // selectDigestCandidates
+      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend MORNING
+
+    await runDigestDispatcher();
+
+    expect(sendTextMessage).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('at 09:30 — pure "סשה" (LeadsViewer only, NOT ExceptionsViewer) still receives Sasha leads morning', async () => {
+    // Sasha IS in LEADS_VIEWER_NAMES but NOT in EXCEPTIONS_VIEWER_NAMES.
+    // She should still receive dispatchSashaLeadsMorning (sendTextMessage path)
+    // and nothing else (the continue after her branch skips MORNING/EVENING).
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // selectDigestCandidates
+      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend LEADS_MORNING
+
+    await runDigestDispatcher();
+
+    expect(sendTextMessage).toHaveBeenCalledOnce();
+    expect(notify).not.toHaveBeenCalled(); // no MORNING/EVENING for Sasha
   });
 });

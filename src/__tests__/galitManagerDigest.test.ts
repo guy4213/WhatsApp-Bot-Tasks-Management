@@ -74,10 +74,10 @@ describe('formatGalitManagerMorning', () => {
     expect(text).toContain('- עם בעיה: 0');
     expect(text).toContain('- ממתין למידע: 0');
     expect(text).toContain('- לא סגרו יום: 0');
-    // Leads block with real counts (no longer a B2 placeholder).
+    // Leads block — single combined line so overnight KPI and unassigned queue
+    // cannot be misread as the same number.
     expect(text).toContain('לידים:');
-    expect(text).toContain('- מהלילה: 0');
-    expect(text).toContain('- לא שויכו: 0');
+    expect(text).toContain('- ממתינים מהלילה: 0');
     // No legacy B2 placeholder.
     expect(text).not.toContain('B2');
     // Empty state.
@@ -98,8 +98,8 @@ describe('formatGalitManagerMorning', () => {
       leadCounts: SAMPLE_LEADS,
     });
     expect(text).toContain('לידים:');
-    expect(text).toContain('- מהלילה: 5');
-    expect(text).toContain('- לא שויכו: 3');
+    // Single combined line: overnight (raw KPI) + unassigned (actionable queue).
+    expect(text).toContain('- ממתינים מהלילה: 5');
     // Params include the lead counts at positions 6 and 7.
     expect(params[6]).toBe('5');
     expect(params[7]).toBe('3');
@@ -136,8 +136,7 @@ describe('formatGalitManagerMorning', () => {
     expect(text).toContain('- ממתין למידע: 3');
     expect(text).toContain('- לא סגרו יום: 1');
     expect(text).toContain('לידים:');
-    expect(text).toContain('- מהלילה: 5');
-    expect(text).toContain('- לא שויכו: 3');
+    expect(text).toContain('- ממתינים מהלילה: 5');
     // Numbered list body.
     expect(text).toContain('פתוחים:');
     expect(text).toContain('1. דני — קוקה קולה: לקוח לא היה במקום');
@@ -228,8 +227,7 @@ describe('formatGalitManagerEndOfDay', () => {
     expect(text).toContain('שטח:');
     expect(text).toContain('- בוצעו: 0');
     expect(text).toContain('לידים:');
-    expect(text).toContain('- מהלילה: 0');
-    expect(text).toContain('- לא שויכו: 0');
+    expect(text).toContain('- ממתינים מהלילה: 0');
     expect(text).not.toContain('B2');
     expect(text).toContain('אין חריגים פתוחים');
     expect(params).toEqual(['יורם', '0', '0', '0', '0', '0', '0', '0']);
@@ -244,8 +242,7 @@ describe('formatGalitManagerEndOfDay', () => {
       leadCounts: SAMPLE_LEADS,
     });
     expect(text).toContain('לידים:');
-    expect(text).toContain('- מהלילה: 5');
-    expect(text).toContain('- לא שויכו: 3');
+    expect(text).toContain('- ממתינים מהלילה: 5');
     expect(params[6]).toBe('5');
     expect(params[7]).toBe('3');
   });
@@ -265,8 +262,7 @@ describe('formatGalitManagerEndOfDay', () => {
     expect(text).toContain('שטח:');
     expect(text).toContain('- בוצעו: 8');
     expect(text).toContain('לידים:');
-    expect(text).toContain('- מהלילה: 5');
-    expect(text).toContain('- לא שויכו: 3');
+    expect(text).toContain('- ממתינים מהלילה: 5');
     expect(text).toContain('1. דני — ק: ל לא היה');
     expect(text).toContain('2. חיים — י: חסר טופס');
     expect(params).toEqual(['יורם', '8', '1', '2', '3', '1', '5', '3']);

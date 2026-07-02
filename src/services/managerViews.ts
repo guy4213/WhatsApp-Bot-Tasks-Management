@@ -84,10 +84,15 @@ export async function getManagementSnapshot(localDate: string): Promise<Manageme
     overnight: string;
     escalated: string;
   }>(
+    // `overnight` follows the same product rule as `getYoramLeadCounts.overnight`:
+    // "overnight" = received in the overnight window AND still unassigned.
+    // Raw arrival counts are hidden from the CEO snapshot for the same reason —
+    // a lead that already has an ownerId is not actionable.
     `SELECT
        COUNT(*) FILTER (WHERE "ownerId" IS NULL)                                AS "totalOpen",
        COUNT(*) FILTER (
-         WHERE "receivedAt" >= (($1::date - 1)::timestamp + time '17:00:00') AT TIME ZONE 'Asia/Jerusalem'
+         WHERE "ownerId" IS NULL
+           AND "receivedAt" >= (($1::date - 1)::timestamp + time '17:00:00') AT TIME ZONE 'Asia/Jerusalem'
            AND "receivedAt" <  ($1::date::timestamp + time '09:30:00') AT TIME ZONE 'Asia/Jerusalem'
        )                                                                        AS overnight,
        COUNT(*) FILTER (

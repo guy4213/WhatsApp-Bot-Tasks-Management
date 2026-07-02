@@ -91,6 +91,11 @@ describe('getManagementSnapshot', () => {
     // scheduledStartAt — IncomingLead has no such column.
     expect(sql).toMatch(/"receivedAt"/);
     expect(sql).not.toMatch(/scheduledStartAt/);
+    // Product decision 2026-07-02: the CEO snapshot `overnight` count also
+    // filters `ownerId IS NULL` in the window — matches `getYoramLeadCounts`
+    // and Sasha's `findOvernightUnassignedLeads`. Raw arrival counts are
+    // never shown to the CEO.
+    expect(sql).toMatch(/COUNT\(\*\) FILTER \(\s*WHERE "ownerId" IS NULL[\s\S]+?17:00[\s\S]+?09:30[\s\S]+?\)\s*AS overnight/);
   });
 
   it('returns parsed numeric values', async () => {

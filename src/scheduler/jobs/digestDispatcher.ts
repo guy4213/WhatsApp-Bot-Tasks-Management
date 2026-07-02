@@ -121,7 +121,17 @@ export async function runDigestDispatcher(): Promise<void> {
     // Leads viewers (Sasha + dev observers) receive LEADS_MORNING at 09:30.
     // Per-user dedup — each viewer has an independent claim row so they all
     // fire independently.
-    if (isLeadsViewer(row.user_name) && isDigestDue('09:30', row.local_hm)) {
+    //
+    // Exception: users who are ALSO ExceptionsViewers (dev admins — גיא פרנסס,
+    // יאיר) already receive the Galit digest which contains the leads-counts
+    // line. Sending them the Sasha leads morning as well would create a
+    // contradictory duplicate. Only pure LeadsViewers (Sasha, who is NOT an
+    // ExceptionsViewer) get the standalone leads morning.
+    if (
+      isLeadsViewer(row.user_name)
+      && !isExceptionsViewer(row.user_name)
+      && isDigestDue('09:30', row.local_hm)
+    ) {
       await dispatchSashaLeadsMorning(row);
     }
 

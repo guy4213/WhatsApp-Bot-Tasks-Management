@@ -37,6 +37,7 @@ const formatGalitManagerMorningMock = vi.hoisted(() => vi.fn());
 const formatGalitManagerEndOfDayMock = vi.hoisted(() => vi.fn());
 
 const sendButtonMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
+const sendTextMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 const notifyMock = vi.hoisted(() => vi.fn(async () => undefined));
 const claimDigestSendMock = vi.hoisted(() => vi.fn(async () => true));
@@ -76,7 +77,7 @@ vi.mock('../whatsapp/digestContent', () => ({
 }));
 vi.mock('../whatsapp/sender', () => ({
   sendButtonMessage: sendButtonMessageMock,
-  sendTextMessage:   vi.fn(async () => undefined),
+  sendTextMessage:   sendTextMessageMock,
   sendListMessage:   vi.fn(async () => undefined),
 }));
 vi.mock('../whatsapp/templates', () => ({
@@ -197,6 +198,49 @@ describe('dispatcher — Yoram branch routing (D4-T1, name-based)', () => {
 
     expect(formatGalitManagerEndOfDayMock).toHaveBeenCalledTimes(1);
     expect(formatEmployeeEndOfDayMock).not.toHaveBeenCalled();
+  });
+
+  // ── Fix B: dev admins who are both LeadsViewer+ExceptionsViewer → Galit only ──
+  //
+  // Regression guard: גיא פרנסס and יאיר are in BOTH LEADS_VIEWER_NAMES and
+  // EXCEPTIONS_VIEWER_NAMES. Before the fix they received two morning messages
+  // at 09:30: one via dispatchSashaLeadsMorning (sendTextMessage path) and one
+  // via dispatchOne → formatGalitManagerMorning (notify path). After the fix
+  // only the Galit digest is sent.
+
+  it('09:30 — "גיא פרנסס" (both LeadsViewer+ExceptionsViewer) → only Galit digest, NOT Sasha leads morning', async () => {
+    // Row at 09:30 — the time that would previously also trigger dispatchSashaLeadsMorning.
+    // morning_time = '09:30' so isDigestDue('09:30', '09:30') = true for MORNING as well.
+    const guyRow = {
+      ...rowFor({ name: 'גיא פרנסס', role: 'ADMIN', hm: '09:30', evening: false, morning: true }),
+      morning_time: '09:30',
+    };
+    poolQueryMock.mockResolvedValueOnce({ rows: [guyRow] });
+    const dispatcher = await import('../scheduler/jobs/digestDispatcher');
+    await dispatcher.runDigestDispatcher();
+
+    // Galit digest must fire (via notify).
+    expect(formatGalitManagerMorningMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    // Sasha leads path (sendTextMessage) must NOT fire.
+    expect(sendTextMessageMock).not.toHaveBeenCalled();
+    // Inspector formatter must not run either.
+    expect(formatInspectorMorningMock).not.toHaveBeenCalled();
+  });
+
+  it('09:30 — "יאיר" (both LeadsViewer+ExceptionsViewer) → only Galit digest, NOT Sasha leads morning', async () => {
+    const yairRow = {
+      ...rowFor({ name: 'יאיר', role: 'ADMIN', hm: '09:30', evening: false, morning: true }),
+      morning_time: '09:30',
+    };
+    poolQueryMock.mockResolvedValueOnce({ rows: [yairRow] });
+    const dispatcher = await import('../scheduler/jobs/digestDispatcher');
+    await dispatcher.runDigestDispatcher();
+
+    expect(formatGalitManagerMorningMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(sendTextMessageMock).not.toHaveBeenCalled();
+    expect(formatInspectorMorningMock).not.toHaveBeenCalled();
   });
 
   // ── Regular users (not in any special set) → inspector treatment ──

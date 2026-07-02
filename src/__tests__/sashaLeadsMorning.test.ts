@@ -53,9 +53,12 @@ describe('formatSashaLeadsMorning', () => {
     expect(text).not.toMatch(/הצעת שיבוץ/);
   });
 
-  it('renders empty-leads message', () => {
+  it('renders empty-leads message (queue empty, not necessarily zero arrivals)', () => {
     const { text, params } = formatSashaLeadsMorning([], [], { name: 'שי' });
-    expect(text).toContain('לא התקבלו לידים ממתינים');
+    // "אין לידים לשיבוץ" = assignment queue empty (not "no arrivals").
+    // The old phrasing "לא התקבלו לידים ממתינים" was ambiguous when leads
+    // arrived overnight but were already assigned before 09:30.
+    expect(text).toContain('אין לידים לשיבוץ מהלילה');
     expect(params).toEqual(['שי', '0']);
   });
 

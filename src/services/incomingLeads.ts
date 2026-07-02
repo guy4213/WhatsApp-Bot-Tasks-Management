@@ -124,22 +124,36 @@ export async function findEscalationCandidates(limit = 50): Promise<IncomingLead
 // ── D4-T1 (LEADS portion) — Yoram lead-count summary ────────────────────────
 
 export interface YoramLeadCounts {
-  /** All leads received in the overnight window (prev day 17:00 → today 09:30 Jerusalem). */
+  /**
+   * Actionable overnight leads: `receivedAt` in the overnight window AND
+   * `ownerId IS NULL`. Matches Sasha's `findOvernightUnassignedLeads` list —
+   * one source of truth, one number.
+   */
   overnight: number;
-  /** All leads where ownerId IS NULL right now (total open unassigned queue). */
+  /**
+   * DEPRECATED — total open queue right now (all `ownerId IS NULL` regardless
+   * of window). Kept as a field for backward-compat with existing template
+   * `params` arrays; the Galit/Yoram digest no longer renders it (see
+   * `formatLeadsBlock`). New callers should prefer `overnight`.
+   */
   unassigned: number;
 }
 
 /**
- * Count summary for the Yoram digest leads line (spec §13: "לידים: X מהלילה · Y לא שויכו").
+ * Count summary for the Yoram/Galit digest leads line (spec §13).
  *
- * `overnight` — ALL leads received in the overnight window (previous day 17:00 →
- *   today 09:30, Asia/Jerusalem DST-aware), regardless of assignment status.
- *   Same time-zone SQL pattern as `findOvernightUnassignedLeads` but WITHOUT
- *   the `ownerId IS NULL` filter.
+ * Product decision 2026-07-02: the "לידים מהלילה" line must reflect only
+ * ACTIONABLE overnight leads (received overnight AND still unassigned). A raw
+ * arrival count is misleading in a CEO-facing digest — reading "לידים מהלילה: 2"
+ * when both are already assigned would imply work that does not exist. Sasha's
+ * pending queue and the CEO digest now use the same predicate:
  *
- * `unassigned` — total IncomingLead rows where ownerId IS NULL right now
- *   (snapshot at query time, not window-scoped).
+ *   `receivedAt` in [prev-day 17:00 IL, today 09:30 IL) AND `ownerId IS NULL`
+ *
+ * `overnight` — the shared "pending overnight" count. Same predicate as
+ *   `findOvernightUnassignedLeads`.
+ * `unassigned` — LEGACY total-open-queue snapshot (see interface doc); kept
+ *   for template `params` slot stability. Do not render as a NEW field.
  *
  * Bot NEVER writes to IncomingLead — read-only queries.
  */
@@ -147,7 +161,8 @@ export async function getYoramLeadCounts(localDate: string): Promise<YoramLeadCo
   const { rows } = await pool.query<{ overnight: string; unassigned: string }>(
     `SELECT
        COUNT(*) FILTER (
-         WHERE "receivedAt" >= (($1::date - 1)::timestamp + time '17:00:00') AT TIME ZONE 'Asia/Jerusalem'
+         WHERE "ownerId" IS NULL
+           AND "receivedAt" >= (($1::date - 1)::timestamp + time '17:00:00') AT TIME ZONE 'Asia/Jerusalem'
            AND "receivedAt" <  ($1::date::timestamp + time '09:30:00') AT TIME ZONE 'Asia/Jerusalem'
        ) AS overnight,
        COUNT(*) FILTER (WHERE "ownerId" IS NULL) AS unassigned
@@ -237,4 +252,19 @@ export async function assignLead(
     errorMessage: null,
     pendingActionId: null,
   });
+}
+
+/**
+ * Fetch a single IncomingLead row by its UUID.
+ * Returns null when no matching row is found.
+ * Used by the manager lead-detail view (D3-T6 display enhancement).
+ */
+export async function getLeadById(leadId: string): Promise<IncomingLeadRow | null> {
+  const { rows } = await pool.query<IncomingLeadRow>(
+    `SELECT ${SELECT_LEAD_COLS}
+     FROM "IncomingLead"
+     WHERE id = $1`,
+    [leadId],
+  );
+  return rows[0] ?? null;
 }

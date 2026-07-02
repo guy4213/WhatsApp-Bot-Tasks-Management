@@ -84,8 +84,11 @@ import {
   findUnassignedLeadsForAssignment,
   findActiveInspectors,
   assignLead,
+  getLeadById,
 } from '../services/incomingLeads';
 import { suggestWorkerForLead } from './leadSuggester';
+import { enrichLead } from '../services/leadCategorizer';
+import { formatLeadListRowCompact, formatLeadDetailCompact } from '../whatsapp/leadDisplay';
 import {
   extractFromContext, extractNote, extractInspectionActions,
   type ExtractionRequest, type InspectionActionExtractionItem,
@@ -3997,21 +4000,14 @@ async function handleMgrLeadsSubReply(user: ResolvedUser, trimmed: string): Prom
       await sendTextMessage({ to: user.phone, text: 'אין לידים לא משויכים כרגע.\n\n' + renderMgrLeadsSub() });
       return;
     }
-    const lines = leads.map((l, i) => {
-      const rowData: LeadListRowData = {
-        fromName: l.fromName ?? null,
-        fromEmail: l.fromEmail ?? null,
-        subject: l.subject ?? null,
-        receivedAt: l.receivedAt ?? null,
-      };
-      return `${i + 1}. ${formatLeadListRow(rowData)}`;
-    });
+    const enrichments = await Promise.all(leads.map(enrichLead));
+    const lines = leads.map((l, i) => `${i + 1}.\n${formatLeadListRowCompact(l, enrichments[i])}`);
     await setContext(user.phone, {
       awaiting: 'mgr_leads_pick_row',
       mgrLeadIds: leads.map((l) => l.id),
       mgrLeadNames: leads.map((l) => l.fromName ?? '—'),
     });
-    await sendChunked(user.phone, `לידים לא משויכים (${leads.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
+    await sendChunked(user.phone, `לידים ממתינים לטיפול (${leads.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
     return;
   }
 
@@ -4024,15 +4020,8 @@ async function handleMgrLeadsSubReply(user: ResolvedUser, trimmed: string): Prom
       await sendTextMessage({ to: user.phone, text: 'אין לידים שעברו שעה ללא שיוך כרגע.\n\n' + renderMgrLeadsSub() });
       return;
     }
-    const lines = leads.map((l, i) => {
-      const rowData: LeadListRowData = {
-        fromName: l.fromName ?? null,
-        fromEmail: l.fromEmail ?? null,
-        subject: l.subject ?? null,
-        receivedAt: l.receivedAt ?? null,
-      };
-      return `${i + 1}. ${formatLeadListRow(rowData)}`;
-    });
+    const enrichments = await Promise.all(leads.map(enrichLead));
+    const lines = leads.map((l, i) => `${i + 1}.\n${formatLeadListRowCompact(l, enrichments[i])}`);
     await setContext(user.phone, {
       awaiting: 'mgr_leads_pick_row',
       mgrLeadIds: leads.map((l) => l.id),
@@ -4055,22 +4044,29 @@ async function handleMgrLeadsPickRowReply(
     return;
   }
   const ids = ctx.mgrLeadIds ?? [];
-  const names = ctx.mgrLeadNames ?? [];
   const idx = parseInt(trimmed, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > ids.length) {
     await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${ids.length} או "חזרה".` });
     return;
   }
   const leadId = ids[idx - 1];
-  const leadName = names[idx - 1] ?? '—';
-  // Show lead details — read from IncomingLead
-  void leadId; // referenced for display only (no ID-based fetch in this list path)
-  // Layer 1 fix: restore mgr_menu_root so the next bare digit picks the right item.
-  await setContext(user.phone, { awaiting: 'mgr_menu_root' });
-  await sendTextMessage({
-    to: user.phone,
-    text: `ליד: ${leadName}\nלשיוך, בחר אפשרות 3 בתפריט הלידים.`,
+  // Fetch and display the lead detail.
+  const lead = await getLeadById(leadId);
+  if (!lead) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'לא נמצא ליד. נסה שוב.' });
+    return;
+  }
+  const enrichment = await enrichLead(lead);
+  const detailText = formatLeadDetailCompact(lead, enrichment);
+  // Keep state in mgr_leads_pick_row so "חזרה" resends the sub-menu and
+  // typing another number re-picks a lead from the same list.
+  await setContext(user.phone, {
+    awaiting: 'mgr_leads_pick_row',
+    mgrLeadIds: ctx.mgrLeadIds,
+    mgrLeadNames: ctx.mgrLeadNames,
   });
+  await sendTextMessage({ to: user.phone, text: detailText });
 }
 
 // ── 5. Workers sub-menu ───────────────────────────────────────────────────────

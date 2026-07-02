@@ -122,29 +122,58 @@ describe('findActiveInspectors', () => {
 // ── getYoramLeadCounts ────────────────────────────────────────────────────────
 
 describe('getYoramLeadCounts', () => {
-  it('returns overnight count for ALL leads in the overnight window (no ownerId filter) and total unassigned', async () => {
-    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '7', unassigned: '3' }] });
+  // Product decision 2026-07-02: `overnight` counts ACTIONABLE overnight
+  // leads only (received in the overnight window AND still unassigned) —
+  // matches `findOvernightUnassignedLeads`. Raw arrival counts would mislead
+  // a CEO reading the digest.
+  it('returns overnight = received-overnight AND ownerId IS NULL (same predicate as Sasha list)', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '2', unassigned: '3' }] });
     const result = await getYoramLeadCounts('2026-07-01');
     const [sql, params] = poolQuery.mock.calls[0];
-    // Must query IncomingLead.
+
     expect(sql).toMatch(/"IncomingLead"/);
-    // Overnight filter uses overnight window timestamps (same DST-aware SQL as findOvernightUnassignedLeads).
     expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
     expect(sql).toMatch(/17:00/);
     expect(sql).toMatch(/09:30/);
-    // Overnight count must NOT filter on ownerId (spec §13: count ALL overnight leads).
-    // The unassigned count separately filters ownerId IS NULL.
-    // Verify via a single-query aggregate pattern.
     expect(sql).toMatch(/COUNT\(\*\)/i);
+
+    // The overnight FILTER must combine BOTH predicates — the shared
+    // "actionable overnight" definition. Regex covers whitespace-forgiving
+    // multiline SQL.
+    expect(sql).toMatch(/COUNT\(\*\) FILTER \(\s*WHERE "ownerId" IS NULL[\s\S]+?"receivedAt"[\s\S]+?17:00[\s\S]+?09:30[\s\S]+?\)\s*AS overnight/);
+
     expect(params).toEqual(['2026-07-01']);
-    // Parsed correctly as integers.
-    expect(result).toEqual({ overnight: 7, unassigned: 3 });
+    expect(result).toEqual({ overnight: 2, unassigned: 3 });
   });
 
-  it('returns zeros when the DB row has 0 counts', async () => {
+  // 4 product scenarios enumerated by the CEO product decision.
+  it('scenario A — 2 overnight arrivals all assigned → overnight count = 0 (CEO sees no pending)', async () => {
+    // DB returns 0 because the SQL filter has AND ownerId IS NULL.
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '0', unassigned: '5' }] });
+    const result = await getYoramLeadCounts('2026-07-01');
+    expect(result.overnight).toBe(0);
+  });
+
+  it('scenario B — 3 overnight arrivals, 2 unassigned → overnight count = 2 (matches Sasha list length)', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '2', unassigned: '8' }] });
+    const result = await getYoramLeadCounts('2026-07-01');
+    expect(result.overnight).toBe(2);
+  });
+
+  it('scenario C — 0 overnight pending → overnight count = 0 (no implied work)', async () => {
     poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '0', unassigned: '0' }] });
     const result = await getYoramLeadCounts('2026-07-01');
-    expect(result).toEqual({ overnight: 0, unassigned: 0 });
+    expect(result.overnight).toBe(0);
+  });
+
+  it('scenario D — SQL window bounds exclude leads outside overnight window', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '0', unassigned: '0' }] });
+    await getYoramLeadCounts('2026-07-01');
+    const [sql] = poolQuery.mock.calls[0];
+    // Window bounds are LITERAL "17:00" (previous day) → "09:30" (today).
+    // Anything outside must be excluded by SQL, not the caller.
+    expect(sql).toMatch(/\(\$1::date - 1\)::timestamp \+ time '17:00:00'/);
+    expect(sql).toMatch(/\$1::date::timestamp \+ time '09:30:00'/);
   });
 
   it('gracefully returns zeros when no rows come back (defensive guard)', async () => {
