@@ -580,6 +580,60 @@ export interface TaskFieldDetail {
   missingReportInfo: boolean;
 }
 
+// ── Context values for AI extractor ──────────────────────────────────────────
+
+export interface TaskFieldContextSnapshot {
+  customerName: string | null;
+  contactName: string | null;
+  contactPhone: string | null;
+  siteAddress: string | null;
+  siteCity: string | null;
+  inspectionTypeLabel: string | null;
+  workerName: string | null;
+}
+
+/**
+ * Lightweight snapshot of a TaskField's current values for the AI context extractor.
+ * Used by handleMgrTaskActionReply to give the LLM enough context to understand
+ * free-text commands that reference existing values (e.g. "החלף את איש הקשר מ-X ל-Y").
+ * Single DB round-trip, read-only.
+ */
+export async function getTaskFieldValuesForContext(
+  taskFieldId: string,
+): Promise<TaskFieldContextSnapshot | null> {
+  const { rows } = await pool.query<TaskFieldContextSnapshot>(
+    `SELECT
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                         AS "customerName",
+       tf."fieldContactName"     AS "contactName",
+       tf."fieldContactPhone"    AS "contactPhone",
+       tf."siteAddress"          AS "siteAddress",
+       tf."siteCity"             AS "siteCity",
+       it."labelHe"              AS "inspectionTypeLabel",
+       u.name                    AS "workerName"
+     FROM "TaskField" tf
+     JOIN "Task" t             ON t.id  = tf."taskId"
+     JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     LEFT JOIN "User" u          ON u.id  = t."ownerId"
+     WHERE tf.id = $1`,
+    [taskFieldId],
+  );
+
+  if (rows.length === 0) return null;
+  log.info({ taskFieldId }, 'Loaded TaskField context snapshot for AI extractor');
+  return rows[0];
+}
+
 /**
  * Full details for a single TaskField row — used in detail views for inline actions.
  */

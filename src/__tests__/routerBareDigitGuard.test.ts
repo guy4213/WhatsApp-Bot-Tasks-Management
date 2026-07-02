@@ -49,10 +49,19 @@ vi.mock('../services/incomingLeads', () => ({
   getYoramLeadCounts: vi.fn().mockResolvedValue({ overnight: 0, unassigned: 0 }),
 }));
 
-const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+const msgLogBare: string[] = [];
+const sendTextMessage = vi.fn(async (arg: { to: string; text: string }) => { msgLogBare.push(arg.text); });
+const sendListMessage = vi.fn(async (arg: {
+  to: string; body: string;
+  sections: Array<{ rows: Array<{ id: string; title: string }> }>;
+}) => {
+  const allText = [arg.body, ...arg.sections.flatMap((s) => s.rows.map((r) => r.title))].join('\n');
+  msgLogBare.push(allText);
+});
 vi.mock('../whatsapp/sender', () => ({
-  sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
+  sendTextMessage:   (arg: { to: string; text: string }) => sendTextMessage(arg),
   sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   (arg: { to: string; body: string; sections: Array<{ rows: Array<{ id: string; title: string }> }> }) => sendListMessage(arg),
 }));
 
 // parseIntent spy — tracks whether the AI parser was called.
@@ -228,11 +237,13 @@ function makeWorker(): ResolvedUser {
 }
 
 function allMessages(): string[] {
-  return sendTextMessage.mock.calls.map((c) => c[0]?.text ?? '');
+  return [...msgLogBare];
 }
 
 beforeEach(() => {
   sendTextMessage.mockClear();
+  sendListMessage.mockClear();
+  msgLogBare.length = 0;
   parseIntentMock.mockClear();
   setContext.mockClear();
   clearContext.mockClear();

@@ -20,8 +20,9 @@ vi.mock('../../src/db/connection', () => ({
 const sendTextMessage = vi.fn().mockResolvedValue(undefined);
 const sendButtonMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
-  sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
+  sendTextMessage:   (...a: unknown[]) => sendTextMessage(...a),
   sendButtonMessage: (...a: unknown[]) => sendButtonMessage(...a),
+  sendListMessage:   vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock notify — used by dispatchOne (normal MORNING/EVENING)

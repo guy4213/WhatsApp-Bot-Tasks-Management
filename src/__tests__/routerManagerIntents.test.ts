@@ -48,10 +48,19 @@ vi.mock('../services/incomingLeads', () => ({
   getYoramLeadCounts: vi.fn().mockResolvedValue({ overnight: 0, unassigned: 0 }),
 }));
 
-const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+const msgLogIntents: string[] = [];
+const sendTextMessage = vi.fn(async (arg: { to: string; text: string }) => { msgLogIntents.push(arg.text); });
+const sendListMessage = vi.fn(async (arg: {
+  to: string; body: string;
+  sections: Array<{ rows: Array<{ id: string; title: string }> }>;
+}) => {
+  const allText = [arg.body, ...arg.sections.flatMap((s) => s.rows.map((r) => r.title))].join('\n');
+  msgLogIntents.push(allText);
+});
 vi.mock('../whatsapp/sender', () => ({
-  sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
+  sendTextMessage:   (arg: { to: string; text: string }) => sendTextMessage(arg),
   sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   (arg: { to: string; body: string; sections: Array<{ rows: Array<{ id: string; title: string }> }> }) => sendListMessage(arg),
 }));
 
 let ctxStore: Record<string, unknown> | null = null;
@@ -243,8 +252,7 @@ function mockParseIntent(result: Record<string, unknown>): void {
 }
 
 function lastMsg(): string {
-  const calls = sendTextMessage.mock.calls;
-  return calls[calls.length - 1]?.[0]?.text ?? '';
+  return msgLogIntents[msgLogIntents.length - 1] ?? '';
 }
 
 const admin = makeManager();
@@ -252,6 +260,8 @@ const worker = makeWorker();
 
 beforeEach(() => {
   sendTextMessage.mockClear();
+  sendListMessage.mockClear();
+  msgLogIntents.length = 0;
   setContext.mockClear();
   clearContext.mockClear();
   getContext.mockClear();

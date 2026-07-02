@@ -51,10 +51,20 @@ vi.mock('../services/incomingLeads', () => ({
 }));
 
 // sender
-const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+// Track all outbound messages in order so lastMsg() works regardless of surface.
+const msgLog: string[] = [];
+const sendTextMessage  = vi.fn(async (arg: { to: string; text: string }) => { msgLog.push(arg.text); });
+const sendListMessage  = vi.fn(async (arg: {
+  to: string; body: string;
+  sections: Array<{ rows: Array<{ id: string; title: string }> }>;
+}) => {
+  const allText = [arg.body, ...arg.sections.flatMap((s) => s.rows.map((r) => r.title))].join('\n');
+  msgLog.push(allText);
+});
 vi.mock('../whatsapp/sender', () => ({
-  sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
+  sendTextMessage:   (arg: { to: string; text: string }) => sendTextMessage(arg),
   sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   (arg: { to: string; body: string; sections: Array<{ rows: Array<{ id: string; title: string }> }> }) => sendListMessage(arg),
 }));
 
 // Conversation context — in-memory store
@@ -213,13 +223,15 @@ const yoram   = makeUser({ id: 'u-yoram', role: 'SALES', name: 'יורם', isEle
 const sasha   = makeUser({ id: 'u-sasha', role: 'SALES', name: 'סשה', isElevated: false });
 const worker  = makeUser({ id: 'u-worker', role: 'SALES', name: 'דני', isElevated: false });
 
+/** Returns the most recently sent message (text or list message body+rows). */
 function lastMsg(): string {
-  const calls = sendTextMessage.mock.calls;
-  return calls[calls.length - 1]?.[0]?.text ?? '';
+  return msgLog[msgLog.length - 1] ?? '';
 }
 
 beforeEach(() => {
   sendTextMessage.mockClear();
+  sendListMessage.mockClear();
+  msgLog.length = 0;
   setContext.mockClear();
   clearContext.mockClear();
   getContext.mockClear();

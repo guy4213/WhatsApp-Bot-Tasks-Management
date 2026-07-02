@@ -73,7 +73,8 @@ vi.mock('../whatsapp/digestContent', () => ({
 }));
 vi.mock('../whatsapp/sender', () => ({
   sendButtonMessage: sendButtonMessageMock,
-  sendTextMessage: vi.fn(async () => undefined),
+  sendTextMessage:   vi.fn(async () => undefined),
+  sendListMessage:   vi.fn(async () => undefined),
 }));
 vi.mock('../whatsapp/templates', () => ({
   notify: notifyMock,

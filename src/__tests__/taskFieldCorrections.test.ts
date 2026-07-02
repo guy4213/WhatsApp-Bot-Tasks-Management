@@ -29,7 +29,9 @@ vi.mock('../db/connection', () => ({
 
 const sendTextMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
-  sendTextMessage: (...args: unknown[]) => sendTextMessage(...args),
+  sendTextMessage:   (...args: unknown[]) => sendTextMessage(...args),
+  sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   vi.fn().mockResolvedValue(undefined),
 }));
 
 const writeAuditLog = vi.fn().mockResolvedValue('audit-id');

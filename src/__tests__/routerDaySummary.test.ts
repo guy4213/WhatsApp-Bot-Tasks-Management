@@ -50,6 +50,7 @@ const sendTextMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
   sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
   sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   vi.fn().mockResolvedValue(undefined),
 }));
 
 let ctxStore: Record<string, unknown> | null = null;

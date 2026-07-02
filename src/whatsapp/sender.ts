@@ -88,6 +88,59 @@ export async function sendButtonMessage({ to, body, buttons }: ButtonMessage): P
   );
 }
 
+export interface ListMessage {
+  to: string;
+  body: string;           // main body text shown above the button
+  buttonLabel: string;    // ≤ 20 chars — the label on the "open list" button
+  sections: Array<{
+    title?: string;       // section header (≤ 24 chars)
+    rows: Array<{
+      id: string;         // unique payload — the router matches on this
+      title: string;      // ≤ 24 chars — line 1 of each row
+      description?: string; // ≤ 72 chars — line 2 (optional)
+    }>;
+  }>;
+}
+
+/**
+ * Interactive list message (in-session only). The selected row's `id` is returned
+ * by Meta as interactive.list_reply.id and routed to the router as plain text.
+ *
+ * Supports up to 10 rows total. Do NOT use for dynamic-count lists (search
+ * results, inspection lists) that may exceed 10 rows — use sendTextMessage with
+ * numbered text for those. Appropriate for: static menus (6-item manager menu),
+ * 4-item action prompt.
+ *
+ * Falls back silently to numbered text on send failure when caller wraps in try/catch.
+ */
+export async function sendListMessage({ to, body, buttonLabel, sections }: ListMessage): Promise<void> {
+  const recipient = normalizeRecipient(to);
+  await deliver(
+    recipient,
+    {
+      messaging_product: 'whatsapp',
+      to: recipient,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: body },
+        action: {
+          button: buttonLabel.slice(0, 20),
+          sections: sections.map((s) => ({
+            ...(s.title ? { title: s.title.slice(0, 24) } : {}),
+            rows: s.rows.map((r) => ({
+              id: r.id,
+              title: r.title.slice(0, 24),
+              ...(r.description ? { description: r.description.slice(0, 72) } : {}),
+            })),
+          })),
+        },
+      },
+    },
+    body,
+  );
+}
+
 export interface TemplateMessage {
   to: string;
   /** Template name as registered/approved in Meta WhatsApp Manager. */

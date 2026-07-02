@@ -18,7 +18,8 @@ vi.mock('../db/connection', () => ({
 const sendButtonMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
   sendButtonMessage: (...args: unknown[]) => sendButtonMessage(...args),
-  sendTextMessage: vi.fn().mockResolvedValue(undefined),
+  sendTextMessage:   vi.fn().mockResolvedValue(undefined),
+  sendListMessage:   vi.fn().mockResolvedValue(undefined),
 }));
 
 beforeEach(() => {

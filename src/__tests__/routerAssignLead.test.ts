@@ -33,10 +33,12 @@ vi.mock('../ai/leadSuggester', () => ({
   suggestWorkerForLead: (...a: unknown[]) => suggestWorkerForLead(...a),
 }));
 
-const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+const sendTextMessage   = vi.fn().mockResolvedValue(undefined);
+const sendButtonMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
-  sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
-  sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendTextMessage:   (...a: unknown[]) => sendTextMessage(...a),
+  sendButtonMessage: (...a: unknown[]) => sendButtonMessage(...a),
+  sendListMessage:   vi.fn().mockResolvedValue(undefined),
 }));
 
 // Conversation context — simple in-memory simulation.
@@ -288,8 +290,13 @@ describe('assign_lead — happy path', () => {
     const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, '1');
 
-    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
-    const confirmMsg = texts.find((t) => t.includes('לשייך') && t.includes('אישור'));
+    // Confirmation now sent via sendButtonMessage (Group A UX upgrade);
+    // fall back to checking sendTextMessage for the body content.
+    const btnCalls = sendButtonMessage.mock.calls.map((c) => c[0] as { body: string; buttons: unknown[] });
+    const txtCalls = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    const confirmMsg =
+      btnCalls.find((c) => c.body.includes('לשייך'))?.body ??
+      txtCalls.find((t) => t.includes('לשייך') && t.includes('אישור'));
     expect(confirmMsg).toBeDefined();
     expect(confirmMsg).toContain('ישראל ישראלי');
     expect(confirmMsg).toContain('דני');

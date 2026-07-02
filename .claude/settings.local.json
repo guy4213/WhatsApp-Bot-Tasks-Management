@@ -20,7 +20,15 @@
       "Write",
       "Bash(git *)",
       "Bash(cp .env.example .env)",
-      "Bash(node -e \"console.log\\('INTERNAL_API_SECRET candidate:', require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")"
+      "Bash(node -e \"console.log\\('INTERNAL_API_SECRET candidate:', require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")",
+      "Bash(cp .claude/worktrees/agent-a4be6425add2550ff/src/ai/contextExtractor.ts src/ai/contextExtractor.ts)",
+      "Bash(cp .claude/worktrees/agent-a4be6425add2550ff/src/services/managerViews.ts src/services/managerViews.ts)",
+      "Bash(cp .claude/worktrees/agent-a4be6425add2550ff/src/__tests__/contextExtractor.test.ts src/__tests__/contextExtractor.test.ts)",
+      "Bash(cp .claude/worktrees/agent-a4be6425add2550ff/src/__tests__/detailViewAIContext.test.ts src/__tests__/detailViewAIContext.test.ts)",
+      "Bash(git show *)",
+      "Bash(git merge-file *)",
+      "Bash(echo \"exit: $?\")",
+      "Read(//tmp/**)"
     ]
   }
 }

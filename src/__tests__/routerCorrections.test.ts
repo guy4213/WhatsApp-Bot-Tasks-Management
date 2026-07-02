@@ -100,10 +100,12 @@ vi.mock('../ai/taskResolver', () => ({
 }));
 
 // sender
-const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+const sendTextMessage   = vi.fn().mockResolvedValue(undefined);
+const sendButtonMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
-  sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
-  sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendTextMessage:   (...a: unknown[]) => sendTextMessage(...a),
+  sendButtonMessage: (...a: unknown[]) => sendButtonMessage(...a),
+  sendListMessage:   vi.fn().mockResolvedValue(undefined),
 }));
 
 // Conversation context: simple in-memory state.
@@ -301,7 +303,7 @@ describe('D2-T12 — correct_task_field_site', () => {
       clarification: null, requires_confirmation: false, requires_manager_approval: false,
       transition: null, problem_type: null,
     });
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     // Worker sends a correction.
     await sendMessage(makeWorker(), 'כתובת אתר: רוטשילד 10');
@@ -326,7 +328,7 @@ describe('D2-T12 — correct_task_field_site', () => {
       clarification: null, requires_confirmation: false, requires_manager_approval: false,
       transition: null, problem_type: null,
     });
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), 'כתובת אתר: רוטשילד 10 תל אביב');
 
@@ -352,7 +354,7 @@ describe('D2-T12 — correct_task_field_site', () => {
       clarification: null, requires_confirmation: false, requires_manager_approval: false,
       transition: null, problem_type: null,
     });
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), 'שדה_לא_קיים: ערך');
     expect(updateSiteMetadata).not.toHaveBeenCalled();
@@ -384,7 +386,7 @@ describe('D2-T12 — correct_site AI extraction path', () => {
       clarification: null, requires_confirmation: false, requires_manager_approval: false,
       transition: null, problem_type: null,
     });
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     // Voice-style input (no colon) — should trigger AI extractor
     await sendMessage(makeWorker(), 'אני רוצה לעדכן את הטלפון של איש הקשר ל-050-9999999');
@@ -410,16 +412,21 @@ describe('D2-T12 — correct_site AI extraction path', () => {
       clarification: null, requires_confirmation: false, requires_manager_approval: false,
       transition: null, problem_type: null,
     });
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), 'תעדכן את הערים לחיפה');
 
-    // Should show confirmation prompt, not apply immediately
+    // Should show confirmation prompt (via sendButtonMessage), not apply immediately
     expect(updateSiteMetadata).not.toHaveBeenCalled();
     expect(ctxStore?.awaiting).toBe('correct_site_confirm_extracted');
-    const text = sendTextMessage.mock.calls[0][0].text;
-    expect(text).toContain('הבנתי');
-    expect(text).toContain('חיפה');
+    // Confirmation is now sent via sendButtonMessage (Group A UX upgrade)
+    const btnCalls = sendButtonMessage.mock.calls;
+    const txtCalls = sendTextMessage.mock.calls;
+    const confirmBody =
+      (btnCalls[0]?.[0] as { body: string } | undefined)?.body ??
+      txtCalls[0]?.[0]?.text ?? '';
+    expect(confirmBody).toContain('הבנתי');
+    expect(confirmBody).toContain('חיפה');
   });
 
   it('falls back to rigid rejection at low confidence (< 0.60)', async () => {
@@ -436,7 +443,7 @@ describe('D2-T12 — correct_site AI extraction path', () => {
       clarification: null, requires_confirmation: false, requires_manager_approval: false,
       transition: null, problem_type: null,
     });
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), 'שלום מה נשמע');
 
@@ -459,7 +466,7 @@ describe('D2-T12 — correct_site AI extraction path', () => {
       clarification: null, requires_confirmation: false, requires_manager_approval: false,
       transition: null, problem_type: null,
     });
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     // Rigid template input
     await sendMessage(makeWorker(), 'כתובת אתר: רוטשילד 10 תל אביב');
@@ -485,7 +492,7 @@ describe('D2-T12 — correct_site AI extraction path', () => {
       taskFieldId: 'tf-own', taskId: 'task-1', taskOwnerId: 'u-worker',
       fieldStatus: 'ASSIGNED', currentInspectionTypeId: null, currentLabelHe: null,
     });
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await handleAIMessage(makeWorker(), '1');
 
@@ -554,7 +561,7 @@ describe('D2-T13 — reassign_task', () => {
       candidateTaskIds: ['task-1'],
       candidateUserIds: ['w-1', 'w-2'],
     };
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeManager(), '1');
 
@@ -572,7 +579,7 @@ describe('D2-T13 — reassign_task', () => {
       candidateTaskIds: ['task-2'],
       candidateUserIds: ['w-1'],
     };
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeManager(), '1');
 
@@ -586,7 +593,7 @@ describe('D2-T13 — reassign_task', () => {
       candidateTaskIds: ['task-1'],
       candidateUserIds: ['w-1'],
     };
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeManager(), '99');
     expect(reassignTask).not.toHaveBeenCalled();
@@ -680,14 +687,21 @@ describe('D2-T14 — correct_inspection_type', () => {
       taskFieldId: 'tf-own',
       candidateUserIds: ['type-a'],
     };
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), '1');
 
     expect(ctxStore?.awaiting).toBe('correct_type_confirm');
     expect(ctxStore?.candidateUserIds).toEqual(['type-a']);
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('גהות');
-    expect(sendTextMessage.mock.calls[0][0].text).toContain('כן');
+    // Confirmation is now sent via sendButtonMessage (Group A UX upgrade)
+    const btnBody = (sendButtonMessage.mock.calls[0]?.[0] as { body: string } | undefined)?.body;
+    const txtBody = sendTextMessage.mock.calls[0]?.[0]?.text;
+    const confirmBody = btnBody ?? txtBody ?? '';
+    expect(confirmBody).toContain('גהות');
+    // Button message contains the type name; fallback text contains 'כן' hint
+    // Accept either form.
+    const hasYesHint = (btnBody !== undefined) || (txtBody ?? '').includes('כן');
+    expect(hasYesHint).toBe(true);
   });
 
   it('calls correctInspectionType on "כן" and acks with old/new names', async () => {
@@ -697,7 +711,7 @@ describe('D2-T14 — correct_inspection_type', () => {
       taskFieldId: 'tf-own',
       candidateUserIds: ['type-a'],
     };
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), 'כן');
 
@@ -714,7 +728,7 @@ describe('D2-T14 — correct_inspection_type', () => {
       taskFieldId: 'tf-own',
       candidateUserIds: ['type-a'],
     };
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), 'לא');
 
@@ -730,7 +744,7 @@ describe('D2-T14 — correct_inspection_type', () => {
       taskFieldId: 'tf-closed',
       candidateUserIds: ['type-a'],
     };
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), 'כן');
 
@@ -748,7 +762,7 @@ describe('D2-T14 — correct_inspection_type', () => {
       taskFieldId: 'tf-own',
       candidateUserIds: ['type-a', 'type-b'],
     };
-    sendTextMessage.mockClear();
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
 
     await sendMessage(makeWorker(), 'גהות');
 

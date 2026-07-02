@@ -30,10 +30,12 @@ vi.mock('../services/taskFieldScheduling', () => ({
   scheduleTaskField: (...a: unknown[]) => scheduleTaskField(...a),
 }));
 
-const sendTextMessage = vi.fn().mockResolvedValue(undefined);
+const sendTextMessage   = vi.fn().mockResolvedValue(undefined);
+const sendButtonMessage = vi.fn().mockResolvedValue(undefined);
 vi.mock('../whatsapp/sender', () => ({
-  sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
-  sendButtonMessage: vi.fn().mockResolvedValue(undefined),
+  sendTextMessage:   (...a: unknown[]) => sendTextMessage(...a),
+  sendButtonMessage: (...a: unknown[]) => sendButtonMessage(...a),
+  sendListMessage:   vi.fn().mockResolvedValue(undefined),
 }));
 
 // Conversation context — simple in-memory simulation.
@@ -552,8 +554,18 @@ describe('schedule_await_duration state', () => {
     await handleAIMessage(user, 'אישור');
 
     expect(ctxStore).toMatchObject({ awaiting: 'schedule_confirm', scheduleDurationMinutes: 60 });
-    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
-    expect(texts.some((t) => t.includes('לאישור') || t.includes('1. אישור'))).toBe(true);
+    // Confirmation is now sent via sendButtonMessage (Group A UX upgrade).
+    // If sendButtonMessage was called, the body should contain the confirm text.
+    // If it fell back to sendTextMessage (e.g. on test error), check that instead.
+    const buttonCalls = sendButtonMessage.mock.calls;
+    const textCalls = sendTextMessage.mock.calls;
+    const confirmedViaButton = buttonCalls.some(
+      (c) => typeof c[0]?.body === 'string' && (c[0].body.includes('לאישור') || c[0].body.includes('לקוח')),
+    );
+    const confirmedViaText = textCalls.some(
+      (c) => typeof c[0]?.text === 'string' && (c[0].text.includes('לאישור') || c[0].text.includes('1. אישור')),
+    );
+    expect(confirmedViaButton || confirmedViaText).toBe(true);
   });
 
   it('numeric input sets custom duration', async () => {

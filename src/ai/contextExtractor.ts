@@ -37,7 +37,20 @@ export type ExtractionIntent =
   | 'missing_info_note'
   | 'equipment_missing_note'
   | 'problem_note'
-  | 'field_notes';
+  | 'field_notes'
+  | 'inspection_action';
+
+/** Current TaskField values passed to the 'inspection_action' extractor so the
+ *  LLM can recognise references to existing contact/address values. */
+export interface TaskFieldContextValues {
+  customerName: string | null;
+  contactName: string | null;
+  contactPhone: string | null;
+  siteAddress: string | null;
+  siteCity: string | null;
+  inspectionTypeLabel: string | null;
+  workerName: string | null;
+}
 
 export interface ExtractionRequest {
   /** Human message (possibly voice-transcribed). */
@@ -50,6 +63,12 @@ export interface ExtractionRequest {
   history?: Array<{ role: 'user' | 'bot'; content: string }>;
   /** Optional current date to help resolve relative times ("מחר", "ראשון"). */
   todayIsoDate?: string;
+  /**
+   * Current TaskField field values — only relevant for intent='inspection_action'.
+   * Passed so the LLM can recognise "מרונית לוי" as referring to the current
+   * contact rather than treating it as a search term.
+   */
+  currentTaskFieldValues?: TaskFieldContextValues;
 }
 
 export interface ExtractionResult {
@@ -103,8 +122,51 @@ const BASE_SYSTEM_PREFIX = [
   'רמת הביטחון (confidence): 0.0–1.0. 0.85+ = בטוח. 0.60–0.85 = ייתכן (הצג ואשר). מתחת ל-0.60 = לא זוהה.',
 ].join('\n');
 
+/** Build the dynamic system-prompt block for intent='inspection_action'. */
+function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
+  const currentValues = values
+    ? [
+        'ערכי הבדיקה הנוכחיים (לפני השינוי):',
+        `- לקוח: ${values.customerName ?? '—'}`,
+        `- שם איש קשר: ${values.contactName ?? '—'}`,
+        `- טלפון איש קשר: ${values.contactPhone ?? '—'}`,
+        `- כתובת אתר: ${values.siteAddress ?? '—'}`,
+        `- עיר: ${values.siteCity ?? '—'}`,
+        `- סוג בדיקה: ${values.inspectionTypeLabel ?? '—'}`,
+        `- עובד משויך: ${values.workerName ?? '—'}`,
+      ].join('\n')
+    : '';
+
+  return [
+    'המשתמש צופה בפרטי בדיקה ספציפית ושולח הודעה חופשית (כולל קולית).',
+    'מטרתך: לזהות איזו פעולה המשתמש רוצה לבצע על הבדיקה הנוכחית, ואילו ערכים חדשים הוא מספק.',
+    '',
+    'פעולות אפשריות (שדה "action"):',
+    '- correct_site  → שינוי פרטי אתר: כתובת, עיר, שם איש קשר, טלפון איש קשר',
+    '- correct_type  → שינוי סוג הבדיקה',
+    '- reassign      → שיוך מחדש לעובד אחר',
+    '- back          → חזרה לרשימה הקודמת',
+    '- cancel        → ביטול / עצור',
+    '',
+    currentValues,
+    '',
+    'כללים חשובים:',
+    '- אם המשתמש מזכיר שם/טלפון של איש קשר קיים (כפי שמופיע בערכים הנוכחיים) — זה הקשר לאישור, לא מונח חיפוש לזיהוי המשימה. המשתמש כבר מסתכל על הבדיקה הנכונה.',
+    '- "החלף את איש הקשר מ-X ל-Y" → action=correct_site, newContactName=Y (ו-newContactPhone אם ניתן טלפון).',
+    '- "שנה את הכתובת ל..." → action=correct_site, newSiteAddress=<הערך>, newSiteCity=<עיר אם צוינה>.',
+    '- "לשייך מחדש ל..." → action=reassign, newWorkerName=<השם>.',
+    '- "שנה סוג בדיקה ל..." → action=correct_type, newInspectionTypeQuery=<הערך>.',
+    '- "חזרה" / "תחזור" / "4" → action=back.',
+    '- "ביטול" / "עצור" → action=cancel.',
+    '- אם אינך בטוח מה הפעולה — החזר confidence נמוך מ-0.60.',
+    '- לא ניתן לזהות פעולה ברורה — החזר action=null, confidence < 0.60.',
+  ].join('\n');
+}
+
 function buildSystemPrompt(req: ExtractionRequest): string {
-  const intentBlock = INTENT_SYSTEM_BLOCKS[req.intent] ?? '';
+  const intentBlock = req.intent === 'inspection_action'
+    ? buildInspectionActionBlock(req.currentTaskFieldValues)
+    : (INTENT_SYSTEM_BLOCKS[req.intent] ?? '');
   const fieldList = req.fields.map((f) => `- ${f.key} (${f.labelHe}, סוג: ${f.kind})`).join('\n');
   const todayBlock = req.todayIsoDate ? `\nתאריך היום: ${req.todayIsoDate}` : '';
 
@@ -194,6 +256,8 @@ const INTENT_SYSTEM_BLOCKS: Record<ExtractionIntent, string> = {
     'כל תשובה שאינה ריקה מקובלת. הסר קידומות מנומסות.',
     'confidence תמיד >= 0.85 כאשר יש תוכן.',
   ].join('\n'),
+
+  inspection_action: '', // built dynamically via buildInspectionActionBlock()
 };
 
 // ── User message builder ──────────────────────────────────────────────────────

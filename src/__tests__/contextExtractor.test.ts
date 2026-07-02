@@ -333,3 +333,211 @@ describe('extractFromContext — schedule_duration', () => {
     expect(result.values.duration_minutes).toBe(60);
   });
 });
+
+// ── inspection_action — Priority 1 ───────────────────────────────────────────
+
+describe('extractFromContext — inspection_action', () => {
+  const actionFields: ExtractionRequest['fields'] = [
+    { key: 'action',                  labelHe: 'פעולה',              kind: 'string' },
+    { key: 'newSiteAddress',          labelHe: 'כתובת אתר חדשה',    kind: 'address' },
+    { key: 'newSiteCity',             labelHe: 'עיר חדשה',           kind: 'string' },
+    { key: 'newContactName',          labelHe: 'שם איש קשר חדש',    kind: 'string' },
+    { key: 'newContactPhone',         labelHe: 'טלפון איש קשר חדש', kind: 'phone' },
+    { key: 'newInspectionTypeQuery',  labelHe: 'סוג בדיקה חדש',     kind: 'string' },
+    { key: 'newWorkerName',           labelHe: 'שם עובד חדש',       kind: 'string' },
+  ];
+
+  const taskFieldValues: import('../ai/contextExtractor').TaskFieldContextValues = {
+    customerName: 'חברת אלפא',
+    contactName: 'רונית לוי',
+    contactPhone: '052-7654321',
+    siteAddress: 'הרצל 5 תל אביב',
+    siteCity: 'תל אביב',
+    inspectionTypeLabel: 'בדיקת רעש',
+    workerName: 'דני כהן',
+  };
+
+  it('contact replacement: extracts action=correct_site, name+phone, high confidence', async () => {
+    const provider = highConfidenceProvider({
+      action: 'correct_site',
+      newSiteAddress: null, newSiteCity: null,
+      newContactName: 'גל לגזיאל',
+      newContactPhone: '050-1234567',
+      newInspectionTypeQuery: null, newWorkerName: null,
+    });
+    const result = await extractFromContext(
+      {
+        message: 'החלף את איש הקשר מרונית לוי לגל לגזיאל, 050-1234567',
+        intent: 'inspection_action',
+        fields: actionFields,
+        currentTaskFieldValues: taskFieldValues,
+      },
+      provider,
+    );
+    expect(result.confidence).toBeGreaterThanOrEqual(0.85);
+    expect(result.values.action).toBe('correct_site');
+    expect(result.values.newContactName).toBe('גל לגזיאל');
+    expect(result.values.newContactPhone).toBe('050-1234567');
+    expect(result.values.newSiteAddress).toBeNull();
+  });
+
+  it('address change: extracts action=correct_site, newSiteAddress, high confidence', async () => {
+    const provider = highConfidenceProvider({
+      action: 'correct_site',
+      newSiteAddress: 'רוטשילד 20 תל אביב',
+      newSiteCity: 'תל אביב',
+      newContactName: null, newContactPhone: null,
+      newInspectionTypeQuery: null, newWorkerName: null,
+    });
+    const result = await extractFromContext(
+      {
+        message: 'לשנות את הכתובת לרוטשילד 20 תל אביב',
+        intent: 'inspection_action',
+        fields: actionFields,
+        currentTaskFieldValues: taskFieldValues,
+      },
+      provider,
+    );
+    expect(result.values.action).toBe('correct_site');
+    expect(result.values.newSiteAddress).toBe('רוטשילד 20 תל אביב');
+    expect(result.values.newSiteCity).toBe('תל אביב');
+  });
+
+  it('reassign: extracts action=reassign + newWorkerName, high confidence', async () => {
+    const provider = highConfidenceProvider({
+      action: 'reassign',
+      newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
+      newInspectionTypeQuery: null, newWorkerName: 'דני',
+    });
+    const result = await extractFromContext(
+      {
+        message: 'לשייך מחדש לדני',
+        intent: 'inspection_action',
+        fields: actionFields,
+        currentTaskFieldValues: taskFieldValues,
+      },
+      provider,
+    );
+    expect(result.values.action).toBe('reassign');
+    expect(result.values.newWorkerName).toBe('דני');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it('correct_type: extracts action=correct_type + newInspectionTypeQuery', async () => {
+    const provider = highConfidenceProvider({
+      action: 'correct_type',
+      newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
+      newInspectionTypeQuery: 'בדיקת קרינה', newWorkerName: null,
+    });
+    const result = await extractFromContext(
+      {
+        message: 'לשנות את סוג הבדיקה לבדיקת קרינה',
+        intent: 'inspection_action',
+        fields: actionFields,
+        currentTaskFieldValues: taskFieldValues,
+      },
+      provider,
+    );
+    expect(result.values.action).toBe('correct_type');
+    expect(result.values.newInspectionTypeQuery).toBe('בדיקת קרינה');
+  });
+
+  it('"חזרה" → action=back, high confidence', async () => {
+    const provider = highConfidenceProvider({
+      action: 'back',
+      newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
+      newInspectionTypeQuery: null, newWorkerName: null,
+    });
+    const result = await extractFromContext(
+      {
+        message: 'חזרה',
+        intent: 'inspection_action',
+        fields: actionFields,
+        currentTaskFieldValues: taskFieldValues,
+      },
+      provider,
+    );
+    expect(result.values.action).toBe('back');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it('ambiguous phrase → low confidence, null action', async () => {
+    const provider = lowConfidenceProvider({
+      action: null,
+      newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null,
+      newInspectionTypeQuery: null, newWorkerName: null,
+    }, 0.35);
+    const result = await extractFromContext(
+      {
+        message: 'הבדיקה נראית בעייתית',
+        intent: 'inspection_action',
+        fields: actionFields,
+        currentTaskFieldValues: taskFieldValues,
+      },
+      provider,
+    );
+    expect(result.confidence).toBeLessThan(0.60);
+    expect(result.clarification).toBeTruthy();
+  });
+
+  it('passes currentTaskFieldValues in the system prompt (provider sees them)', async () => {
+    let seenSystemPrompt = '';
+    const provider: import('../ai/provider').LLMProvider = {
+      name: 'test',
+      emitStructured: async (req) => {
+        seenSystemPrompt = req.system;
+        return {
+          values: { action: 'back', newSiteAddress: null, newSiteCity: null, newContactName: null, newContactPhone: null, newInspectionTypeQuery: null, newWorkerName: null },
+          confidence: 0.95,
+          clarification: null,
+        };
+      },
+    };
+    await extractFromContext(
+      {
+        message: 'חזרה',
+        intent: 'inspection_action',
+        fields: actionFields,
+        currentTaskFieldValues: taskFieldValues,
+      },
+      provider,
+    );
+    // System prompt must include the current contact name so the LLM can resolve references.
+    expect(seenSystemPrompt).toContain('רונית לוי');
+    expect(seenSystemPrompt).toContain('052-7654321');
+    expect(seenSystemPrompt).toContain('דני כהן');
+  });
+
+  it('works without currentTaskFieldValues (graceful degradation)', async () => {
+    const provider = highConfidenceProvider({
+      action: 'correct_site',
+      newSiteAddress: 'רחוב הרצל 10',
+      newSiteCity: null, newContactName: null, newContactPhone: null,
+      newInspectionTypeQuery: null, newWorkerName: null,
+    });
+    const result = await extractFromContext(
+      {
+        message: 'שנה כתובת לרחוב הרצל 10',
+        intent: 'inspection_action',
+        fields: actionFields,
+        // no currentTaskFieldValues
+      },
+      provider,
+    );
+    expect(result.values.action).toBe('correct_site');
+    expect(result.values.newSiteAddress).toBe('רחוב הרצל 10');
+  });
+
+  it('provider null → returns empty result', async () => {
+    const result = await extractFromContext(
+      {
+        message: 'שנה שם',
+        intent: 'inspection_action',
+        fields: actionFields,
+        currentTaskFieldValues: taskFieldValues,
+      },
+      null,
+    );
+    expect(result).toEqual({ values: {}, confidence: 0, clarification: null });
+  });
+});

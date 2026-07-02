@@ -24,7 +24,7 @@ import { getHistory, appendTurn } from '../services/chatHistory';
 import {
   listTasks, getTaskById, getAllowedTaskTypes, getAllowedPriorities, findUsersByName,
 } from '../services/tasks';
-import { sendTextMessage } from '../whatsapp/sender';
+import { sendTextMessage, sendButtonMessage, sendListMessage } from '../whatsapp/sender';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
 import {
@@ -76,6 +76,7 @@ import {
   searchTasksByWorkerName,
   searchTasksByProductCode,
   getTaskFieldDetail,
+  getTaskFieldValuesForContext,
   type TodayFieldInspectionRow,
 } from '../services/managerViews';
 import { isManagerMenuUser } from './menu';
@@ -146,19 +147,23 @@ const NUMERIC_PICKER_AWAITING: Set<AwaitingKind> = new Set<AwaitingKind>([
   // escaping to the AI would break the search-refine loop.
   'schedule_intake_pick_task', 'schedule_pick_from_search',
   'assign_lead_pick_lead', 'assign_lead_pick_worker',
-  // Manager menu system — top-level, sub-menus, list pickers, action menus.
+  // Manager menu system — top-level, sub-menus, list pickers.
+  // NOTE: mgr_*_action states are intentionally EXCLUDED — they handle free-text
+  // via context-aware AI extraction (handleMgrActionFreeText) rather than escaping
+  // to the generic AI parser, which would lose the taskFieldId context.
   'mgr_menu_root',
   'mgr_exceptions_sub', 'mgr_leads_sub', 'mgr_workers_sub', 'mgr_search_sub',
-  'mgr_today_pick_task', 'mgr_today_action',
-  'mgr_exceptions_pick_row', 'mgr_exceptions_action',
+  'mgr_today_pick_task',
+  'mgr_exceptions_pick_row',
   'mgr_leads_pick_row',
   'mgr_workers_pick_worker',
-  'mgr_search_pick_task', 'mgr_search_action',
+  'mgr_search_pick_task',
 ]);
 
 // Nav words a numeric picker will accept without escaping to AI: pure digits,
-// or the Hebrew/English navigation vocabulary (בי טול / חזרה / חיפוש / …).
-const NUMERIC_PICKER_NAV_RE = /^(?:\d+|חזרה|ביטול|עצור|אישור|כן|לא|חיפוש|yes|no|cancel|ok)$/i;
+// Hebrew/English navigation vocabulary, or interactive button/list payload IDs
+// (CONFIRM_*, MGR_MENU_*, ACTION_*) that arrive from tapped WhatsApp buttons.
+const NUMERIC_PICKER_NAV_RE = /^(?:\d+|חזרה|ביטול|עצור|אישור|כן|לא|חיפוש|yes|no|cancel|ok|CONFIRM_(?:YES|NO|EDIT)_\w+|MGR_MENU_\d+|ACTION_(?:CORRECT_SITE|CORRECT_TYPE|REASSIGN|BACK))$/i;
 
 /** True when `trimmed` is either digits or a known picker navigation word. */
 function looksLikeNumericPickerInput(trimmed: string): boolean {
@@ -244,6 +249,15 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   const inspTap = matchInspectionCardTap(text);
   if (inspTap) {
     await handleInspectionCardTap(user, inspTap.kind, inspTap.taskFieldId);
+    return;
+  }
+
+  // MGR_MENU_N list-tap with no active context: treat as if user is at mgr_menu_root.
+  // This handles stale-context scenarios where context cleared between the list-message
+  // send and the tap arriving.
+  if (/^MGR_MENU_\d+$/i.test(text.trim()) && isManagerMenuUser(user)) {
+    await setContext(user.phone, { awaiting: 'mgr_menu_root' });
+    await continueConversation(user, text.trim(), { awaiting: 'mgr_menu_root' });
     return;
   }
 
@@ -1267,6 +1281,30 @@ async function showMenu(user: ResolvedUser): Promise<void> {
   // between the 6-item manager menu and the 7-item employee menu.
   const awaitingKind = isManagerMenuUser(user) ? 'mgr_menu_root' : 'menu';
   await setContext(user.phone, { awaiting: awaitingKind });
+
+  // Group B: manager menu → Meta List Message (up to 10 rows, avoids typing).
+  // Falls back to numbered text on any send failure.
+  if (isManagerMenuUser(user)) {
+    const items = menuItemsFor(user);
+    try {
+      await sendListMessage({
+        to: user.phone,
+        body: 'שלום, מה תרצה לעשות?',
+        buttonLabel: 'פתח תפריט',
+        sections: [{
+          title: 'תפריט ניהול',
+          rows: items.map((r) => ({
+            id: `MGR_MENU_${r.n}`,
+            title: r.label,
+          })),
+        }],
+      });
+      return;
+    } catch (err) {
+      log.warn({ err }, 'sendListMessage failed for manager menu — falling back to text');
+    }
+  }
+
   await sendTextMessage({ to: user.phone, text: renderMenu(user) });
 }
 
@@ -2559,10 +2597,21 @@ async function handleAssignLeadPickWorkerReply(
     assignLeadSelectedWorkerId: workerId,
     assignLeadSelectedWorkerName: workerName,
   });
-  await sendTextMessage({
-    to: user.phone,
-    text: `לשייך את הליד של ${leadName} ל-${workerName}?\n1. אישור\n2. ביטול`,
-  });
+  // Group A: confirmation via reply buttons; fallback to numbered text.
+  const assignConfirmBody = `לשייך את הליד של ${leadName} ל-${workerName}?`;
+  try {
+    await sendButtonMessage({
+      to: user.phone,
+      body: assignConfirmBody,
+      buttons: [
+        { id: 'CONFIRM_YES_ASSIGN_LEAD', title: 'אישור' },
+        { id: 'CONFIRM_NO_ASSIGN_LEAD',  title: 'ביטול' },
+      ],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendButtonMessage failed for assign_lead confirm — falling back to text');
+    await sendTextMessage({ to: user.phone, text: `${assignConfirmBody}\n1. אישור\n2. ביטול` });
+  }
 }
 
 /** State: assign_lead_confirm — user typed 1 (confirm) or 2 (cancel). */
@@ -2587,9 +2636,9 @@ async function handleAssignLeadConfirmReply(
     return;
   }
 
-  // Accept "1" or any YES word; "2" or NO words cancel.
-  const isYes = trimmed === '1' || YES_RE.test(trimmed);
-  const isNo  = trimmed === '2' || NO_RE.test(trimmed);
+  // Accept "1", CONFIRM_YES_*, or any YES word; "2", CONFIRM_NO_*, or NO words cancel.
+  const isYes = trimmed === '1' || /^CONFIRM_YES_/i.test(trimmed) || YES_RE.test(trimmed);
+  const isNo  = trimmed === '2' || /^CONFIRM_NO_/i.test(trimmed)  || NO_RE.test(trimmed);
 
   if (isNo) {
     await clearContext(user.phone);
@@ -2751,10 +2800,21 @@ async function handleCorrectSiteAwaitValueReply(
       pendingExtractedField: key,
       pendingExtractedValue: value as string,
     });
-    await sendTextMessage({
-      to: user.phone,
-      text: `הבנתי: ${label} = ${value as string}\nנכון? 1. כן  2. לא (שלח שוב בתבנית: <שדה>: <ערך>)`,
-    });
+    // Group A: 2-way confirm via reply buttons; fallback to text.
+    const siteConfirmBody = `הבנתי: ${label} = ${value as string}\nנכון?`;
+    try {
+      await sendButtonMessage({
+        to: user.phone,
+        body: siteConfirmBody,
+        buttons: [
+          { id: 'CONFIRM_YES_SITE_CORRECT', title: 'אישור' },
+          { id: 'CONFIRM_NO_SITE_CORRECT',  title: 'תיקון' },
+        ],
+      });
+    } catch (err) {
+      log.warn({ err }, 'sendButtonMessage failed for site_correct confirm — falling back to text');
+      await sendTextMessage({ to: user.phone, text: `${siteConfirmBody}\n1. כן  2. לא (שלח שוב בתבנית: <שדה>: <ערך>)` });
+    }
     return;
   }
 
@@ -2794,8 +2854,8 @@ async function handleCorrectSiteConfirmExtractedReply(
   trimmed: string,
   ctx: ConversationState,
 ): Promise<void> {
-  const isYes = trimmed === '1' || YES_RE.test(trimmed);
-  const isNo  = trimmed === '2' || NO_RE.test(trimmed);
+  const isYes = trimmed === '1' || /^CONFIRM_YES_/i.test(trimmed) || YES_RE.test(trimmed);
+  const isNo  = trimmed === '2' || /^CONFIRM_NO_/i.test(trimmed)  || /^CONFIRM_EDIT_/i.test(trimmed) || NO_RE.test(trimmed);
 
   if (isNo || /^ביטול$|^cancel$/i.test(trimmed)) {
     // Revert to the await_value state so they can try again.
@@ -3006,10 +3066,21 @@ async function handleCorrectTypePickFromListReply(
       taskFieldId: ctx.taskFieldId,
       candidateUserIds: [newTypeId],
     });
-    await sendTextMessage({
-      to: user.phone,
-      text: `לשנות את סוג הבדיקה ל-"${chosen?.labelHe ?? newTypeId}"?\nהשב "כן" לאישור או "לא" לביטול.`,
-    });
+    // Group A: 2-way confirm via reply buttons; fallback to text.
+    const typeConfirmBody = `לשנות את סוג הבדיקה ל-"${chosen?.labelHe ?? newTypeId}"?`;
+    try {
+      await sendButtonMessage({
+        to: user.phone,
+        body: typeConfirmBody,
+        buttons: [
+          { id: 'CONFIRM_YES_TYPE_CORRECT', title: 'אישור' },
+          { id: 'CONFIRM_NO_TYPE_CORRECT',  title: 'ביטול' },
+        ],
+      });
+    } catch (err) {
+      log.warn({ err }, 'sendButtonMessage failed for type_correct confirm — falling back to text');
+      await sendTextMessage({ to: user.phone, text: `${typeConfirmBody}\nהשב "כן" לאישור או "לא" לביטול.` });
+    }
     return;
   }
   // Treat as a search term.
@@ -3042,12 +3113,12 @@ async function handleCorrectTypeConfirmReply(
     await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
     return;
   }
-  if (NO_RE.test(trimmed)) {
+  if (NO_RE.test(trimmed) || /^CONFIRM_NO_/i.test(trimmed)) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: 'בוטל.' });
     return;
   }
-  if (!YES_RE.test(trimmed)) {
+  if (!YES_RE.test(trimmed) && !/^CONFIRM_YES_/i.test(trimmed)) {
     await sendTextMessage({ to: user.phone, text: 'השב "כן" לאישור או "לא" לביטול.' });
     return;
   }
@@ -3413,7 +3484,7 @@ async function handleScheduleAwaitDurationReply(
     return;
   }
   const startFormatted = `${fmtDate(ctx.scheduleStartAt)} ${fmtTime(ctx.scheduleStartAt)}`;
-  const confirmText = [
+  const confirmBody = [
     'לאישור:',
     `לקוח: ${task.customerName ?? '(לא ידוע)'}`,
     `בדיקה: ${task.inspectionLabelHe ?? task.title}`,
@@ -3421,21 +3492,32 @@ async function handleScheduleAwaitDurationReply(
     `איש קשר: ${[task.fieldContactName, task.fieldContactPhone].filter(Boolean).join(', ') || '—'}`,
     `מתי: ${startFormatted}`,
     `משך: ${duration} דקות`,
-    '',
-    '1. אישור  2. ביטול',
   ].join('\n');
   await setContext(user.phone, { ...ctx, awaiting: 'schedule_confirm', scheduleDurationMinutes: duration });
-  await sendTextMessage({ to: user.phone, text: confirmText });
+  // Group A: confirmation via reply buttons; fallback to numbered text.
+  try {
+    await sendButtonMessage({
+      to: user.phone,
+      body: confirmBody,
+      buttons: [
+        { id: 'CONFIRM_YES_SCHEDULE', title: 'אישור' },
+        { id: 'CONFIRM_NO_SCHEDULE',  title: 'ביטול' },
+      ],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendButtonMessage failed for schedule confirm — falling back to text');
+    await sendTextMessage({ to: user.phone, text: `${confirmBody}\n\n1. אישור  2. ביטול` });
+  }
 }
 
-/** State: schedule_confirm — user types 1 (confirm) or 2 (cancel). */
+/** State: schedule_confirm — user types 1 (confirm) or 2 (cancel) or taps a button. */
 async function handleScheduleConfirmReply(
   user: ResolvedUser,
   trimmed: string,
   ctx: ConversationState,
 ): Promise<void> {
-  const isYes = trimmed === '1' || YES_RE.test(trimmed);
-  const isNo  = trimmed === '2' || NO_RE.test(trimmed);
+  const isYes = trimmed === '1' || /^CONFIRM_YES_/i.test(trimmed) || YES_RE.test(trimmed);
+  const isNo  = trimmed === '2' || /^CONFIRM_NO_/i.test(trimmed)  || NO_RE.test(trimmed);
   if (isNo || /^ביטול$|^cancel$/i.test(trimmed)) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: 'בוטל.' });
@@ -3577,8 +3659,13 @@ async function handleMgrMenuRootReply(
     await showMenu(user);
     return;
   }
+
+  // Accept MGR_MENU_N list-tap payloads (e.g. "MGR_MENU_2") as equivalent to typing the digit.
+  const listTapMatch = trimmed.match(/^MGR_MENU_(\d+)$/i);
+  const resolvedTrimmed = listTapMatch ? listTapMatch[1] : trimmed;
+
   const items = menuItemsFor(user);
-  const idx = parseInt(trimmed, 10);
+  const idx = parseInt(resolvedTrimmed, 10);
   if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
     await sendTextMessage({ to: user.phone, text: `אנא השב במספר בין 1 ל-${items.length}.` });
     return;
@@ -4131,6 +4218,17 @@ const MGR_TASK_INLINE_ACTIONS = [
   '4. חזרה',
 ].join('\n');
 
+// Group C: detail-view action prompt via List Message (4 options > 3-button limit).
+const MGR_ACTION_LIST_SECTIONS = [{
+  title: 'פעולות',
+  rows: [
+    { id: 'ACTION_CORRECT_SITE', title: 'תיקון פרטי ביקור' },
+    { id: 'ACTION_CORRECT_TYPE', title: 'תיקון סוג בדיקה' },
+    { id: 'ACTION_REASSIGN',     title: 'שיוך מחדש' },
+    { id: 'ACTION_BACK',         title: 'חזרה' },
+  ],
+}];
+
 async function showMgrTaskFieldDetail(
   user: ResolvedUser,
   taskFieldId: string,
@@ -4160,14 +4258,39 @@ async function showMgrTaskFieldDetail(
     problemNote: detail.problemNote ?? (detail.missingReportInfoNote ? `חסר: ${detail.missingReportInfoNote}` : null),
   };
 
-  const text = formatInspectionDetail(detailData, `מה תרצה לעשות?\n${MGR_TASK_INLINE_ACTIONS}`);
-
   await setContext(user.phone, {
     awaiting: returnState,
     mgrSelectedTaskFieldId: taskFieldId,
     mgrSelectedTaskId: taskId,
   });
-  await sendTextMessage({ to: user.phone, text });
+
+  // Group C: send detail text first, then action list message.
+  // Fall back to combined text+actions on list-message failure.
+  const detailText = formatInspectionDetail(detailData, '');
+  const detailBody = detailText.replace(/\n\s*$/, ''); // trim trailing newlines
+  try {
+    await sendTextMessage({ to: user.phone, text: detailBody.trim() });
+    await sendListMessage({
+      to: user.phone,
+      body: 'מה תרצה לעשות?',
+      buttonLabel: 'בחר פעולה',
+      sections: MGR_ACTION_LIST_SECTIONS,
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendListMessage failed for action prompt — falling back to text');
+    await sendTextMessage({ to: user.phone, text: `${detailBody.trim()}\n\nמה תרצה לעשות?\n${MGR_TASK_INLINE_ACTIONS}` });
+  }
+}
+
+// Normalize ACTION_* list-tap payloads to the digit equivalent.
+function resolveActionPayload(trimmed: string): string {
+  const payloadMap: Record<string, string> = {
+    'ACTION_CORRECT_SITE': '1',
+    'ACTION_CORRECT_TYPE': '2',
+    'ACTION_REASSIGN':     '3',
+    'ACTION_BACK':         '4',
+  };
+  return payloadMap[trimmed.toUpperCase()] ?? trimmed;
 }
 
 /** Handles inline action picks from detail views (items 2, 3, 6). */
@@ -4176,8 +4299,19 @@ async function handleMgrTaskActionReply(
   trimmed: string,
   ctx: ConversationState,
 ): Promise<void> {
-  if (/^חזרה$/.test(trimmed) || trimmed === '4') {
+  // Normalize ACTION_* list-tap payloads to the digit equivalent (Agent A).
+  const resolved = resolveActionPayload(trimmed);
+
+  // Fast path: "חזרה" or "4" → back to menu.
+  if (/^חזרה$/.test(resolved) || resolved === '4') {
     await showMenu(user);
+    return;
+  }
+
+  // Fast path: "ביטול" / "cancel" / "עצור" → cancel without AI (Agent B).
+  if (/^ביטול$|^cancel$|^עצור$/i.test(trimmed)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
     return;
   }
 
@@ -4189,7 +4323,7 @@ async function handleMgrTaskActionReply(
     return;
   }
 
-  const idx = parseInt(trimmed, 10);
+  const idx = parseInt(resolved, 10);
 
   if (idx === 1) {
     // תיקון פרטי ביקור → prime D2-T12 flow (skip pick-task step)
@@ -4243,5 +4377,259 @@ async function handleMgrTaskActionReply(
     return;
   }
 
-  await sendTextMessage({ to: user.phone, text: MGR_TASK_INLINE_ACTIONS });
+  // Free-text / voice path: context-aware AI extraction (Agent B).
+  // The user is VIEWING a specific TaskField and sent free-text or a voice message.
+  // We pass the current TaskField values to the extractor so it can understand
+  // references like "מרונית לוי" as "the current contact" rather than a search term.
+  await handleMgrActionFreeText(user, trimmed, ctx, taskFieldId, taskId);
+}
+
+/**
+ * Context-aware free-text handler for mgr_*_action states.
+ * Invoked when the user sends non-digit text while viewing a specific TaskField.
+ */
+async function handleMgrActionFreeText(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  taskFieldId: string,
+  taskId: string,
+): Promise<void> {
+  // Load current TaskField values for the extractor context.
+  const snapshot = await getTaskFieldValuesForContext(taskFieldId);
+
+  const INSPECTION_ACTION_FIELDS: ExtractionRequest['fields'] = [
+    { key: 'action',                  labelHe: 'פעולה',           kind: 'string' },
+    { key: 'newSiteAddress',          labelHe: 'כתובת אתר חדשה',  kind: 'address' },
+    { key: 'newSiteCity',             labelHe: 'עיר חדשה',         kind: 'string' },
+    { key: 'newContactName',          labelHe: 'שם איש קשר חדש',  kind: 'string' },
+    { key: 'newContactPhone',         labelHe: 'טלפון איש קשר חדש', kind: 'phone' },
+    { key: 'newInspectionTypeQuery',  labelHe: 'סוג בדיקה חדש',   kind: 'string' },
+    { key: 'newWorkerName',           labelHe: 'שם עובד חדש',     kind: 'string' },
+  ];
+
+  const history = await getHistory(user.phone);
+  const result = await extractFromContext(
+    {
+      message: text,
+      intent: 'inspection_action',
+      fields: INSPECTION_ACTION_FIELDS,
+      history: history.map((t) => ({ role: t.role === 'assistant' ? 'bot' : 'user', content: t.content })),
+      todayIsoDate: localJerusalemDate(),
+      currentTaskFieldValues: snapshot
+        ? {
+            customerName: snapshot.customerName,
+            contactName: snapshot.contactName,
+            contactPhone: snapshot.contactPhone,
+            siteAddress: snapshot.siteAddress,
+            siteCity: snapshot.siteCity,
+            inspectionTypeLabel: snapshot.inspectionTypeLabel,
+            workerName: snapshot.workerName,
+          }
+        : undefined,
+    },
+  );
+
+  const action = typeof result.values.action === 'string' ? result.values.action.trim() : null;
+
+  // Low confidence → fall back to numbered prompt.
+  if (result.confidence < CONF_LOW || !action) {
+    await setContext(user.phone, {
+      awaiting: ctx.awaiting,
+      mgrSelectedTaskFieldId: taskFieldId,
+      mgrSelectedTaskId: taskId,
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: (result.clarification ?? 'לא הבנתי — כתוב 1/2/3/4 או נסח מחדש.') + '\n\n' + MGR_TASK_INLINE_ACTIONS,
+    });
+    return;
+  }
+
+  if (action === 'back') {
+    await showMenu(user);
+    return;
+  }
+
+  if (action === 'cancel') {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+
+  if (action === 'correct_site') {
+    // Extract whichever site fields were provided.
+    const siteFields: Array<{ key: keyof import('../services/taskFieldCorrections').SiteMetadataFields; value: string }> = [];
+    const fieldMappings: Array<[string, keyof import('../services/taskFieldCorrections').SiteMetadataFields]> = [
+      ['newSiteAddress', 'siteAddress'],
+      ['newSiteCity', 'siteCity'],
+      ['newContactName', 'fieldContactName'],
+      ['newContactPhone', 'fieldContactPhone'],
+    ];
+    for (const [extractedKey, dbKey] of fieldMappings) {
+      const val = result.values[extractedKey];
+      if (typeof val === 'string' && val.trim()) {
+        siteFields.push({ key: dbKey, value: val.trim() });
+      }
+    }
+
+    if (siteFields.length === 0) {
+      // AI said correct_site but gave no values — show the site field menu.
+      await showSiteFieldMenu(user, taskFieldId);
+      return;
+    }
+
+    if (result.confidence >= CONF_HIGH) {
+      // High confidence: apply all extracted fields directly.
+      for (const { key, value } of siteFields) {
+        await updateSiteMetadata(taskFieldId, user.id, { [key]: value });
+      }
+      await clearContext(user.phone);
+      const summary = siteFields.map(({ key, value }) => {
+        const labelMap: Record<string, string> = {
+          siteAddress: 'כתובת אתר', siteCity: 'עיר',
+          fieldContactName: 'שם איש קשר', fieldContactPhone: 'טלפון איש קשר',
+        };
+        return `${labelMap[key] ?? key}: ${value}`;
+      }).join(', ');
+      await sendTextMessage({ to: user.phone, text: `עודכן בהצלחה — ${summary}` });
+      await auditEvent(user, 'correct_task_field_site', null, 'SUCCESS');
+      return;
+    }
+
+    // Medium confidence (0.60–0.85): echo back the extracted values and ask for confirmation.
+    const { key: firstKey, value: firstValue } = siteFields[0];
+    const labelMap: Record<string, string> = {
+      siteAddress: 'כתובת אתר', siteCity: 'עיר',
+      fieldContactName: 'שם איש קשר', fieldContactPhone: 'טלפון איש קשר',
+    };
+    const label = labelMap[firstKey] ?? firstKey;
+    await setContext(user.phone, {
+      awaiting: 'correct_site_confirm_extracted',
+      taskFieldId,
+      pendingExtractedField: firstKey,
+      pendingExtractedValue: firstValue,
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: `הבנתי: ${label} = ${firstValue}\nנכון? 1. כן  2. לא`,
+    });
+    return;
+  }
+
+  if (action === 'correct_type') {
+    const typeQuery = typeof result.values.newInspectionTypeQuery === 'string'
+      ? result.values.newInspectionTypeQuery.trim()
+      : null;
+
+    const allTypes = await listInspectionTypes();
+    let typesToShow = allTypes;
+
+    if (typeQuery) {
+      const lower = typeQuery.toLowerCase();
+      const filtered = allTypes.filter(
+        (t) => t.labelHe.includes(typeQuery) || t.code.toLowerCase().includes(lower),
+      );
+      if (filtered.length > 0) typesToShow = filtered;
+    }
+
+    const display = typesToShow.slice(0, 20);
+    if (display.length === 0) {
+      // Fall back to full type list.
+      const fakeIntent: import('../types').AIIntentResult = {
+        intent: 'correct_inspection_type', confidence: 1, task_reference: null,
+        field: null, new_value: null, params: {}, missing_fields: [], clarification: null,
+        requires_confirmation: false, requires_manager_approval: false, transition: null, problem_type: null,
+      };
+      await showInspectionTypeListForCorrection(user, fakeIntent, taskFieldId);
+      return;
+    }
+
+    const lines = display.map((t, i) => `${i + 1}. [${t.code}] ${t.labelHe}`);
+    await setContext(user.phone, {
+      awaiting: 'correct_type_pick_from_list',
+      taskFieldId,
+      candidateUserIds: display.map((t) => t.id),
+    });
+    const extraLine = typesToShow.length > 20 ? `\nועוד ${typesToShow.length - 20}. כתוב מילת חיפוש לצמצום.` : '';
+    await sendTextMessage({
+      to: user.phone,
+      text: `בחר סוג בדיקה חדש (השב במספר):\n${lines.join('\n')}${extraLine}`,
+    });
+    return;
+  }
+
+  if (action === 'reassign') {
+    if (!user.isElevated) {
+      await setContext(user.phone, {
+        awaiting: ctx.awaiting,
+        mgrSelectedTaskFieldId: taskFieldId,
+        mgrSelectedTaskId: taskId,
+      });
+      await sendTextMessage({ to: user.phone, text: 'אין הרשאה — רק מנהל יכול לשייך מחדש.\n\n' + MGR_TASK_INLINE_ACTIONS });
+      return;
+    }
+
+    const workerQuery = typeof result.values.newWorkerName === 'string'
+      ? result.values.newWorkerName.trim()
+      : null;
+
+    // Fuzzy match on the worker list.
+    const allWorkers = await findUsersByName(workerQuery ?? '');
+    if (!allWorkers || allWorkers.length === 0) {
+      await setContext(user.phone, {
+        awaiting: ctx.awaiting,
+        mgrSelectedTaskFieldId: taskFieldId,
+        mgrSelectedTaskId: taskId,
+      });
+      await sendTextMessage({
+        to: user.phone,
+        text: `לא נמצאו עובדים${workerQuery ? ` בשם "${workerQuery}"` : ''}.\n\n${MGR_TASK_INLINE_ACTIONS}`,
+      });
+      return;
+    }
+
+    if (allWorkers.length === 1 && result.confidence >= CONF_HIGH) {
+      // Single unambiguous match + high confidence → confirm before writing.
+      const worker = allWorkers[0];
+      await setContext(user.phone, {
+        awaiting: 'reassign_pick_worker',
+        candidateTaskIds: [taskId],
+        candidateUserIds: [worker.id],
+      });
+      // Pre-select: skip the list and jump to confirmation.
+      await sendTextMessage({
+        to: user.phone,
+        text: `לשייך את המשימה ל-${worker.name}?\n1. כן  2. לא`,
+      });
+      return;
+    }
+
+    // Multiple workers or medium confidence → show numbered list.
+    const workerLines = allWorkers.map((w, i) => `${i + 1}. ${w.name}`);
+    const fakeIntent: import('../types').AIIntentResult = {
+      intent: 'reassign_task', confidence: 1, task_reference: taskId, field: null,
+      new_value: null, params: {}, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false, transition: null, problem_type: null,
+    };
+    await setContext(user.phone, {
+      awaiting: 'reassign_pick_worker',
+      intent: fakeIntent,
+      candidateTaskIds: [taskId],
+      candidateUserIds: allWorkers.map((w) => w.id),
+    });
+    await sendTextMessage({ to: user.phone, text: `למי לשייך את המשימה?\n${workerLines.join('\n')}\nהשב במספר.` });
+    return;
+  }
+
+  // Unknown action — show the menu again.
+  await setContext(user.phone, {
+    awaiting: ctx.awaiting,
+    mgrSelectedTaskFieldId: taskFieldId,
+    mgrSelectedTaskId: taskId,
+  });
+  await sendTextMessage({
+    to: user.phone,
+    text: (result.clarification ?? 'לא הבנתי — כתוב 1/2/3/4 או נסח מחדש.') + '\n\n' + MGR_TASK_INLINE_ACTIONS,
+  });
 }
