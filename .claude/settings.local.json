@@ -39,7 +39,19 @@
       "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/whatsapp/leadDisplay.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/whatsapp/leadDisplay.ts)",
       "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/__tests__/leadCategorizer.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/leadCategorizer.test.ts)",
       "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/__tests__/leadDisplay.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/leadDisplay.test.ts)",
-      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/__tests__/routerLeadsDisplay.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/routerLeadsDisplay.test.ts)"
+      "Bash(cp C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/.claude/worktrees/agent-a91cfb3aad9339e46/src/__tests__/routerLeadsDisplay.test.ts C:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management/src/__tests__/routerLeadsDisplay.test.ts)",
+      "Bash(psql --version)",
+      "Bash(npx tsx *)",
+      "Bash(npx ts-node *)",
+      "PowerShell($env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx vitest run src/__tests__/routerManagerMenu.test.ts 2>&1 | Select-Object -Last 15)",
+      "Bash(cd \"C:\\\\Users\\\\guy42\\\\Documents\\\\WhatsApp-Bot-Tasks-Management\")",
+      "Bash(grep '^WHATSAPP_ACCESS_TOKEN=' .env)",
+      "Bash(grep '^META_APP_ID=' .env)",
+      "Bash(curl *)",
+      "Bash(echo \"=== /me/businesses ===\")",
+      "Bash(echo \"=== WABA access ===\")",
+      "Bash(echo \"\")",
+      "Bash(echo \"=== Phone Number access ===\")"
     ]
   }
 }

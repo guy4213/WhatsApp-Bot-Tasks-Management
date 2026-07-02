@@ -92,7 +92,7 @@ function managerMenu(): MenuRoute[] {
     { n: 4, label: 'לידים ממתינים לטיפול',          action: { kind: 'mgr_leads_sub' } },
     { n: 5, label: 'עובדים וסיכומי יום',            action: { kind: 'mgr_workers_sub' } },
     { n: 6, label: 'חיפוש משימה / בדיקה',          action: { kind: 'mgr_search_sub' } },
-    { n: 7, label: 'הבדיקות שלי להיום',            action: { kind: 'mgr_my_inspections_today' } },
+    { n: 7, label: 'הבדיקות שלי',                  action: { kind: 'mgr_my_inspections_today' } },
   ];
 }
 

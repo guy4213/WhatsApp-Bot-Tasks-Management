@@ -66,7 +66,9 @@ export interface DuePreReminderRow {
  * (per SCHEMA_CRM.md).
  */
 export async function findDuePreReminders(limit = 50): Promise<DuePreReminderRow[]> {
-  const { rows } = await pool.query<DuePreReminderRow>(
+  const { rows } = await pool.query<DuePreReminderRow & { dbNowLocal?: string }>(
+    // dbNowLocal exposes Postgres' now() in Asia/Jerusalem so ops can compare
+    // DB clock vs scheduledStartAt when debugging why the poll returns 0 rows.
     `SELECT
        tf.id                AS "taskFieldId",
        tf."scheduledStartAt",
@@ -87,7 +89,8 @@ export async function findDuePreReminders(limit = 50): Promise<DuePreReminderRow
          p.client,
          il."fromName"
        )                    AS "customerName",
-       t.title              AS "taskTitle"
+       t.title              AS "taskTitle",
+       to_char(now() AT TIME ZONE 'Asia/Jerusalem', 'YYYY-MM-DD HH24:MI:SS') AS "dbNowLocal"
      FROM "TaskField" tf
      JOIN "Task" t                ON t.id  = tf."taskId"
      JOIN "InspectionType" it     ON it.id = tf."inspectionTypeId"
@@ -106,6 +109,11 @@ export async function findDuePreReminders(limit = 50): Promise<DuePreReminderRow
      ORDER BY tf."scheduledStartAt" ASC
      LIMIT $1`,
     [limit],
+  );
+  const dbNowLocal = rows[0]?.dbNowLocal ?? null;
+  log.info(
+    { rowCount: rows.length, dbNowLocal },
+    'findDuePreReminders — query complete',
   );
   return rows;
 }
@@ -157,6 +165,8 @@ export function formatPreReminderCard(row: DuePreReminderRow): string {
 export async function sendAndStampPreReminder(row: DuePreReminderRow): Promise<void> {
   const body = formatPreReminderCard(row);
 
+  log.info({ taskFieldId: row.taskFieldId }, 'pre-reminder send — attempting');
+
   await sendButtonMessage({
     to: row.workerPhone,
     body,
@@ -188,14 +198,25 @@ export async function sendAndStampPreReminder(row: DuePreReminderRow): Promise<v
  * failed row's `preReminderSentAt` remains NULL so the next tick retries.
  */
 export async function runPreInspectionReminderPoll(): Promise<void> {
+  log.info({}, 'pre-reminder poll — start');
   const rows = await findDuePreReminders();
+  log.info({ dueCount: rows.length }, 'pre-reminder poll — due rows');
   if (rows.length === 0) return;
-  log.info({ count: rows.length }, 'pre-reminder polling — due rows');
   for (const row of rows) {
+    log.info(
+      {
+        taskFieldId: row.taskFieldId,
+        scheduledStartAt: row.scheduledStartAt.toISOString(),
+        workerId: row.workerId,
+        phonePresent: !!row.workerPhone,
+      },
+      'pre-reminder poll — processing row',
+    );
     try {
       await sendAndStampPreReminder(row);
     } catch (err) {
       log.error({ err, taskFieldId: row.taskFieldId }, 'pre-reminder send failed; will retry next tick');
     }
   }
+  log.info({ dueCount: rows.length }, 'pre-reminder poll — done');
 }

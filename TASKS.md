@@ -583,7 +583,7 @@ Addendum. See `SPEC_FIELD_V2.md` § "Addendum — 2026-07-01".
 - **Blocked:** no.
 
 ### D2-T15 — Pre-inspection 60-minute reminder
-**Status:** DONE (local, uncommitted)
+**Status:** DONE (local, uncommitted) — see follow-up **X-T15a** in §4.7.
 
 A field worker receives a WhatsApp reminder ~60 min before their scheduled inspection (when `scheduledStartAt <= now() + 60 min`) so they can prepare and leave on time.
 
@@ -637,6 +637,93 @@ A manager who is also a field inspector can now open item 7 from the manager men
 **Tests run:** `npx vitest run` — all new tests pass; zero regressions against pre-existing suite; `npx tsc --noEmit` clean (pre-existing TS errors in this worktree are unrelated to this task).
 
 **Deviations from spec:** none. Reused `showMgrTaskFieldDetail` (detail formatter) and `formatInspectionListRow` (list row). `Task.status` not written. Lead code not touched.
+
+**Follow-up (2026-07-02):** item 7 label changed from "הבדיקות שלי להיום" to "הבדיקות שלי"; today remains the default but arbitrary date ranges are now supported via free text. See **X-T16a** in §4.7.
+
+---
+
+## 4.7 Product-fix batch (2026-07-02)
+
+### X-T15a — Fix pre-inspection reminder in production + gate assignment card auto-send + debug logs
+**Status:** DONE (local, uncommitted)
+
+**Context.** In-field verification on 2026-07-02 revealed that the D2-T15 pre-inspection reminder never fires in the real DB. A TaskField scheduled for 13:00 Jerusalem, tested at ~12:08, produced no WhatsApp. Root cause: migration `011_pre_reminder.sql` was **never applied to the Supabase instance** — the `TaskField."preReminderSentAt"` column did not exist. Every `*/2` tick failed inside `findDuePreReminders` with `column "preReminderSentAt" does not exist` (SQLSTATE 42703), so no row could ever be selected.
+
+**Separate product decision (Jul 2026).** Automatic WhatsApp assignment cards on TaskField creation / re-assignment are **not** wanted. `assignmentCardNotifier` (D5-T6) is now gated behind an env flag (default OFF); code retained for a future explicit manual command.
+
+**Fixes:**
+1. Applied migration 011 (idempotent — `schema_migrations` shows `('011_pre_reminder.sql','2026-07-02 09:33:36.702Z')`). Post-migration verification: a real TaskField (id=`aeb02160-…`, scheduled 2026-07-02T10:45:00Z) had `preReminderSentAt` stamped at `2026-07-02T09:54:02.999Z` — the reminder fired ~51 min before scheduled start, worker tapped "יוצא בזמן", status transitioned to EN_ROUTE. **End-to-end proof captured via `src/scripts/diagPreReminder.ts`.**
+2. Gated `assignmentCardNotifier` cron in `src/scheduler/index.ts` behind `ASSIGNMENT_CARD_NOTIFIER_ENABLED=true`, mirroring the `completionNotifier` / `LEGACY_DAILY_SUMMARY_ENABLED` pattern. Default OFF. Warn log when enabled; info log explaining the product decision when disabled.
+3. Added persistent INFO logs to `runPreInspectionReminderPoll` + `findDuePreReminders` + `sendAndStampPreReminder` (poll start, DB `now()` local, `dueCount`, per-row `taskFieldId`/`scheduledStartAt`/`workerId`/`phonePresent` — no raw phones, send-attempt, send/stamp result). Non-destructive; kept permanently for future ops.
+4. `.env.example` updated with `ASSIGNMENT_CARD_NOTIFIER_ENABLED=false` under §8 "Legacy feature gates" + product-decision comment.
+
+**Files changed:**
+- `src/scheduler/index.ts` — assignment-card cron wrapped in env gate.
+- `src/services/preInspectionReminder.ts` — added INFO logs, added `dbNowLocal` column to the SELECT.
+- `.env.example` — added the new flag.
+
+**Files created:**
+- `src/__tests__/assignmentCardGate.test.ts` — 3 tests (env unset / false / true → gate behavior).
+- `src/scripts/diagPreReminder.ts` — non-destructive DB diagnostic (migration check, column check, DB now(), findDuePreReminders live run, ±3h near-window survey with exclusion reasons). Kept as an ops asset; does no writes; masks phones.
+
+**Files audited (no direct sends found):**
+- `src/services/taskFieldScheduling.ts` — clean; no WhatsApp on TaskField insert.
+- `src/services/taskFieldCorrections.ts` — two `sendTextMessage` calls exist but both are user-triggered (Yoram/Sasha type-correction audit notify + user-initiated reschedule confirm) — NOT auto-assignment cards. No changes.
+
+**Constraints satisfied:**
+- Task.status never written.
+- Lead-assignment notifications (`leadAssignmentNotifier`) untouched — still fires independently.
+- No creation-time WhatsApp on TaskField create or Task.ownerId assignment.
+- Dedup remains per-TaskField via `preReminderSentAt`.
+- `scheduledStartAt` is the only date field used for the reminder window.
+
+**Tests run:** `npx vitest run` — 56/56 across the affected scope (assignment-gate + preInspectionReminder + intent regex + date parser + range query). `npx tsc --noEmit` clean.
+
+**Known risks / follow-ups:**
+- DB session TZ reports `UTC` despite the pool startup option `-c timezone=Asia/Jerusalem` (Supabase pooler drops connection startup options). Immaterial to the pre-reminder window (timestamptz math is TZ-agnostic), but any code that later relies on `to_char(now(), 'YYYY-MM-DD')::date` without `AT TIME ZONE 'Asia/Jerusalem'` will read UTC. Existing digest / range queries already do the explicit `AT TIME ZONE` cast so they are safe.
+- `assignmentCardGate.test.ts` uses `globalThis.__disabledSchedCount` to share state between tests — works because vitest runs tests in file order, but consider refactoring to independent tests when convenient.
+- `routerManagerMenu.test.ts` has a pre-existing OOM under vitest fork pool (present on main baseline too — 24 tests pass then heap exhaustion). Not caused by this batch; the specific label-change assertions run before the OOM point and pass.
+
+---
+
+### X-T16a — "My inspections" flexible date range (extends D2-T16)
+**Status:** DONE (local, uncommitted)
+
+**Product goal.** Any user can ask for their own TaskField rows over an arbitrary date range in free text, not only today. Manager menu item 7 label changed to "הבדיקות שלי" (today remains the default; a footer nudges the user to try other ranges).
+
+**Business date is always `TaskField.scheduledStartAt` in Asia/Jerusalem** (CLAUDE.md §6.1). Never `Task.createdAt`, `Task.dueDate`, `TaskField.assignedAt`, or `TaskField.finishedAt`.
+
+**Files created:**
+- `src/services/myInspectionsRange.ts` — `getMyInspectionsInRange(userId, fromLocalDate, toLocalDate)` — half-open window, INNER JOIN Task → InspectionType, LEFT JOINs to Customer/Lead/Project/IncomingLead for the 6-source COALESCE'd customerName. Excludes CANCELED / DECLINED. Never plain Task rows without TaskField.
+- `src/ai/dateRangeParser.ts` — `parseHebrewInspectionRange(text, nowJerusalem?)` — pure, deterministic. Supports: היום, מחר, השבוע, שבוע הבא, החודש, חודש הבא, named weekdays (יום ראשון..שבת → next occurrence incl. today), single date "ב-DD/M[/YYYY]", range "בין DD/M ל-DD/M[/YYYY]" (unspecified past year auto-bumps to next year), "לעוד שבוע" / "לעוד חודש" (rolling from today). Uses UTC-noon anchors for date math to avoid DST flips.
+- `src/__tests__/dateRangeParser.test.ts` — 14 tests with pinned `NOW=2026-07-02T09:00:00Z` (Thursday 12:00 IL).
+- `src/__tests__/myInspectionsRange.test.ts` — 6 tests: SQL shape (ownerId, TZ window, INNER joins), no forbidden date columns, row mapping.
+- `src/__tests__/myInspectionsIntent.test.ts` — 14 tests locking in `MY_INSPECTIONS_RE` shape (self-contained alternatives allow empty suffix → today; "מה יש לי" requires a date-cue).
+
+**Files modified:**
+- `src/ai/menu.ts` — manager item 7 label: "הבדיקות שלי להיום" → "הבדיקות שלי". Action kind unchanged.
+- `src/ai/router.ts` — exported `MY_INSPECTIONS_RE` (regex with date-cue lookahead on the ambiguous "מה יש לי" branch); added `handleMyInspectionsFreeText` + `formatMyInspectionsRange` + small local helpers (`formatHmJerusalem`, `localJerusalemDateOf`, `addLocalDay`, `daysBetween`); dispatched from `handleAIMessage` immediately after `MENU_TRIGGER_RE` and before the bare-digit guard / AI parser; empty suffix → default today; unparseable non-empty suffix → hint "לא הצלחתי להבין את הטווח…"; multi-day range → each row shows DD/MM+HH:MM, single-day → HH:MM only. Reuses existing `mgr_my_today_pick_task` conversation context so numeric picks flow through the existing detail-view handler. Appended a "אפשר גם לכתוב…" footer to `showMyFieldInspectionsToday` so manager item 7 tells users about the range vocabulary.
+- `src/__tests__/managerMenu.test.ts`, `src/__tests__/routerManagerMenu.test.ts` — updated item 7 label assertions.
+
+**Router regex shape (verbatim, for reviewers):**
+```
+^((?:הבדיקות\s+שלי|בדיקות(?:\s+השטח)?\s+שלי|תראה\s+לי\s+את\s+(?:ה)?בדיקות(?:\s+השטח)?\s+שלי|איזה\s+בדיקות\s+יש\s+לי)|(?:מה\s+יש\s+לי)(?=\s+<DATE_CUE>))(.*)$
+```
+`<DATE_CUE>` covers היום / מחר / השבוע / שבוע הבא / החודש / חודש הבא / לעוד (שבוע|חודש) / named weekday / "בין <digit>" / "ב-<digit>".
+
+**Manager vs. worker semantics preserved:**
+- Manager item 2 — org-wide today (unchanged).
+- Manager item 7 — own inspections today (default) + footer telling the user they can ask for other ranges.
+- Worker menu items 1 (today) / 2 (tomorrow) — unchanged.
+- Any user, free text: "הבדיקות שלי <range>" — own inspections in that range.
+
+**Never displays:** the raw word "משפחה" (category label if used is "קטגוריית בדיקה"). Category rendering itself is out of scope for this task — only `InspectionType.labelHe` is shown for "סוג בדיקה".
+
+**Tests run:** 56/56 across the affected scope. `npx tsc --noEmit` clean.
+
+**Known follow-ups:**
+- Range vocabulary is intentionally conservative. Extend the parser when users ask for phrases we don't cover (e.g. "בעוד שבוע", "לפני יומיים", exact "לתאריך X").
+- If the AI intent parser ever tries to match "הבדיקות שלי …" as a task intent, the fast path here shadows it — that's intentional.
 
 ---
 

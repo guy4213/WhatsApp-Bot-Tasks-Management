@@ -76,7 +76,7 @@ describe('menuItemsFor — manager-menu users', () => {
     'לידים ממתינים לטיפול',
     'עובדים וסיכומי יום',
     'חיפוש משימה / בדיקה',
-    'הבדיקות שלי להיום',
+    'הבדיקות שלי',
   ];
 
   const EXPECTED_ACTION_KINDS = [
@@ -155,7 +155,7 @@ describe('renderMenu', () => {
     expect(text).toContain('לידים ממתינים לטיפול');
     expect(text).toContain('עובדים וסיכומי יום');
     expect(text).toContain('חיפוש משימה / בדיקה');
-    expect(text).toContain('הבדיקות שלי להיום');
+    expect(text).toContain('הבדיקות שלי');
   });
 
   it('employee gets emoji-prefixed header', () => {

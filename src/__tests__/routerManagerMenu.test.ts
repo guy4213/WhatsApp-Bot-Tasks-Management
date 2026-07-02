@@ -254,12 +254,12 @@ afterEach(() => { vi.restoreAllMocks(); });
 // ── Menu trigger ──────────────────────────────────────────────────────────────
 
 describe('menu trigger', () => {
-  it('admin sees the 7-item manager menu with item 7 "הבדיקות שלי להיום"', async () => {
+  it('admin sees the 7-item manager menu with item 7 "הבדיקות שלי"', async () => {
     await handleAIMessage(admin, 'תפריט');
     expect(lastMsg()).toContain('שלום, מה תרצה לעשות?');
     expect(lastMsg()).toContain('תמונת מצב ניהולית');
     expect(lastMsg()).toContain('בדיקות שטח להיום');
-    expect(lastMsg()).toContain('הבדיקות שלי להיום');
+    expect(lastMsg()).toContain('הבדיקות שלי');
     // awaiting state should be mgr_menu_root
     expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
   });
@@ -783,7 +783,7 @@ describe('inline actions from task detail view', () => {
 
 // ── Item 7: my field inspections today (D2-T16) ───────────────────────────────
 
-describe('item 7 — הבדיקות שלי להיום (D2-T16)', () => {
+describe('item 7 — הבדיקות שלי (D2-T16)', () => {
   const myInspectionRows = [
     {
       taskFieldId: 'my-tf1', taskId: 'my-t1', workerName: 'מנהל',
@@ -797,11 +797,11 @@ describe('item 7 — הבדיקות שלי להיום (D2-T16)', () => {
     },
   ];
 
-  it('manager menu has 7 items; item 7 label is "הבדיקות שלי להיום"', async () => {
+  it('manager menu has 7 items; item 7 label is "הבדיקות שלי"', async () => {
     await handleAIMessage(admin, 'תפריט');
     const msg = lastMsg();
     // The list message rows include the title of every menu item
-    expect(msg).toContain('הבדיקות שלי להיום');
+    expect(msg).toContain('הבדיקות שלי');
     // Should also contain earlier items — just a spot check
     expect(msg).toContain('תמונת מצב ניהולית');
     expect(msg).toContain('חיפוש משימה / בדיקה');

@@ -87,11 +87,19 @@ export function startScheduler(): void {
   // falls in the window (default ON for everyone; opt-out/retime via the menu).
   cron.schedule('*/5 * * * *', safe('digestDispatcher', JOB_LOCK_IDS.digestDispatcher, runDigestDispatcher), { timezone: TZ });
 
-  // D5-T6: every 2 minutes, poll for TaskField rows created by the CRM
-  // scheduling form with `workerNotifiedAt IS NULL`, send the §6 inspection
-  // card (D2-T2), and stamp `workerNotifiedAt`. Advisory lock guards against
-  // duplicate sends across instances.
-  cron.schedule('*/2 * * * *', safe('assignmentCardNotifier', JOB_LOCK_IDS.assignmentCardNotifier, runAssignmentCardNotifier), { timezone: TZ });
+  // Product decision (Jul 2026): the bot does NOT auto-send a WhatsApp
+  // assignment card just because a TaskField was created / re-assigned. The
+  // D5-T6 poller (src/scheduler/jobs/assignmentCardNotifier.ts) and the
+  // §6 inspection card sender (src/services/inspectionAssignment.ts) are
+  // retained as reference for a future explicit manual command
+  // ("שלח כרטיס בדיקה לעובד"), but the auto-fire cron is OFF by default.
+  // Re-enable only via ASSIGNMENT_CARD_NOTIFIER_ENABLED=true.
+  if (process.env.ASSIGNMENT_CARD_NOTIFIER_ENABLED === 'true') {
+    cron.schedule('*/2 * * * *', safe('assignmentCardNotifier', JOB_LOCK_IDS.assignmentCardNotifier, runAssignmentCardNotifier), { timezone: TZ });
+    log.warn('ASSIGNMENT_CARD_NOTIFIER_ENABLED=true — assignmentCardNotifier is ACTIVE (auto-sends WhatsApp assignment cards on TaskField creation; product decision Jul 2026 was to keep this OFF — confirm this is intentional)');
+  } else {
+    log.info('assignmentCardNotifier is DISABLED (ASSIGNMENT_CARD_NOTIFIER_ENABLED!=true) — auto-send on TaskField creation is intentionally off per product decision Jul 2026; enable via ASSIGNMENT_CARD_NOTIFIER_ENABLED=true for future manual-command flows');
+  }
 
   // D3-T3 + D3-T4: every 2 minutes, poll IncomingLead for newly assigned rows
   // (alert the inspector) and daytime-unassigned >1h rows (escalate to Sasha).
