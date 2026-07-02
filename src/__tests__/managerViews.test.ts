@@ -275,6 +275,13 @@ describe('getAllWorkersDayOverview', () => {
     expect(sql).toMatch(/upper\(u\."?status"?::text\)\s*=\s*'ACTIVE'/i);
   });
 
+  it('filters out non-Hebrew-named accounts (generic system/placeholder users)', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [] });
+    await getAllWorkersDayOverview(LOCAL_DATE);
+    const [sql] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/u\.name\s*~\s*'\[א-ת\]'/);
+  });
+
   it('includes an active worker with zero TaskField rows today (finished/total/exceptions all 0)', async () => {
     poolQuery.mockResolvedValueOnce({
       rows: [

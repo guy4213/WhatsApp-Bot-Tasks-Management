@@ -401,11 +401,14 @@ export interface WorkerDayOverviewRow {
 
 /**
  * Per-worker day counts for "עובדים וסיכומי יום" option 1.
- * Returns one row per active user — including users with zero TaskFields
- * today (finished/total/exceptions all 0). Starting FROM "User" (rather than
- * FROM "TaskField") is deliberate: a manager/admin with no field visit today
- * must still appear (and be pickable) instead of silently disappearing from
- * the list, which previously read as "this employee doesn't exist".
+ * Returns one row per active user with a Hebrew name — including users with
+ * zero TaskFields today (finished/total/exceptions all 0). Starting FROM
+ * "User" (rather than FROM "TaskField") is deliberate: a manager/admin with
+ * no field visit today must still appear (and be pickable) instead of
+ * silently disappearing from the list, which previously read as "this
+ * employee doesn't exist". The Hebrew-name filter excludes generic
+ * system/placeholder accounts (e.g. "Sales", "Admin", "Billing") that are
+ * ACTIVE in the DB but are not real employees.
  */
 export async function getAllWorkersDayOverview(
   localDate: string,
@@ -432,6 +435,7 @@ export async function getAllWorkersDayOverview(
        AND tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
        AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
      WHERE upper(u.status::text) = 'ACTIVE'
+       AND u.name ~ '[א-ת]'
      GROUP BY u.id, u.name
      ORDER BY u.name ASC`,
     [localDate],

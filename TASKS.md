@@ -755,9 +755,11 @@ Confirmed NOT the cause: no role-based filter, no `LIMIT` truncation (only 9 of 
 
 **Constraints satisfied:** read-only query change (no writes); no `Task.status` touched; no permission-gate change (`isManagerMenuUser` untouched); `TaskField.scheduledStartAt` remains the sole "today" date column (§6.1); no migration needed.
 
-**Known follow-ups:**
-- If the business wants the 6 generic system accounts hidden from these employee-facing lists, add an explicit, documented filter (e.g. exclude `email LIKE '%@galit.local'` or require `phone IS NOT NULL`) — not done here, no spec basis.
+**Known follow-ups (resolved same session, see addendum below):**
+- ~~If the business wants the 6 generic system accounts hidden from these employee-facing lists, add an explicit, documented filter~~ — done, see below.
 - Not independently verified against the live CRM DB (no `DATABASE_URL` in this environment) — verified via the user's exported `User` table snapshot + code/query-logic review + full test suite.
+
+**Addendum (same day, follow-up request):** user asked explicitly to filter out the non-Hebrew-named generic system accounts (Sales/Admin/Manager/Billing/Technician/Expert) from `getAllWorkersDayOverview`. Added `AND u.name ~ '[א-ת]'` to the query's `WHERE` clause (Postgres POSIX regex — matches any name containing at least one Hebrew letter; excludes pure-Latin placeholder names). Updated JSDoc. Added test `managerViews.test.ts` — asserts the SQL contains the Hebrew-name filter. Full scope stayed limited to this one function (not applied to `findUsersByName`, used by the unrelated reassign/lead-assign pickers — out of scope, not requested). Re-ran `npx vitest run` on the affected files (67/67 passed) + full suite (910 passed / 7 skipped, same pre-existing OOM-after-completion pattern) + `npx tsc --noEmit` clean.
 
 ---
 
