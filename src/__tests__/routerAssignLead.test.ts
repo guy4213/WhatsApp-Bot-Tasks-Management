@@ -179,6 +179,23 @@ function makeWorker(overrides: Partial<ResolvedUser> = {}): ResolvedUser {
   };
 }
 
+// D5-T19i: a MANAGER/ADMIN who is NOT one of the named leads viewers (Sasha
+// + dev observers) — e.g. a plain manager named "רותם" who never appears in
+// LEADS_VIEWER_NAMES. Previously always rejected; now allowed via isElevated.
+function makeElevatedNonLeadsViewer(overrides: Partial<ResolvedUser> = {}): ResolvedUser {
+  return {
+    id: 'u-manager',
+    name: 'רותם',
+    phone: '972503333333',
+    role: 'MANAGER',
+    isElevated: true,
+    canViewAllRecords: true,
+    canManageUsers: false,
+    canManagePermissions: false,
+    ...overrides,
+  };
+}
+
 const SAMPLE_LEADS = [
   { id: 'lead-1', subject: 'בדיקת קרינה', fromName: 'ישראל ישראלי', fromEmail: null, body: null, receivedAt: new Date(), status: null, ownerId: null, taskId: null },
   { id: 'lead-2', subject: 'בדיקת מים', fromName: 'שרה כהן', fromEmail: null, body: null, receivedAt: new Date(), status: null, ownerId: null, taskId: null },
@@ -211,7 +228,7 @@ async function loadRouter() {
 // ── Auth: non-leads-viewer is rejected ───────────────────────────────────────
 
 describe('assign_lead — auth rejection for non-leads-viewer', () => {
-  it('rejects a regular worker who is NOT a leads viewer', async () => {
+  it('rejects a regular worker who is NOT a leads viewer and NOT elevated', async () => {
     const user = makeWorker();
     // Seed context with assign_lead intent so it routes to executeIntent.
     ctxStore = null;
@@ -223,6 +240,30 @@ describe('assign_lead — auth rejection for non-leads-viewer', () => {
     const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
     expect(texts.some((t) => t.includes('אין הרשאה'))).toBe(true);
     expect(assignLead).not.toHaveBeenCalled();
+  });
+
+  // D5-T19i regression: ADMIN/MANAGER must now be allowed even when they are
+  // not one of the named leads-viewer special users.
+  it('allows a MANAGER who is not a named leads viewer (D5-T19i)', async () => {
+    const user = makeElevatedNonLeadsViewer();
+    ctxStore = null;
+    findUnassignedLeadsForAssignment.mockResolvedValueOnce(SAMPLE_LEADS);
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'לשייך ליד');
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('אין הרשאה'))).toBe(false);
+    expect(ctxStore).toMatchObject({ awaiting: 'assign_lead_pick_lead' });
+  });
+
+  it('allows an ADMIN who is not a named leads viewer (D5-T19i)', async () => {
+    const user = makeElevatedNonLeadsViewer({ id: 'u-admin', name: 'אורלי', role: 'ADMIN' });
+    ctxStore = null;
+    findUnassignedLeadsForAssignment.mockResolvedValueOnce(SAMPLE_LEADS);
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'לשייך ליד');
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('אין הרשאה'))).toBe(false);
+    expect(ctxStore).toMatchObject({ awaiting: 'assign_lead_pick_lead' });
   });
 });
 

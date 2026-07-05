@@ -566,13 +566,13 @@ describe('AI intent missing_equipment_free dispatch', () => {
       transition: null, problem_type: null,
     });
     await handleAIMessage(makeWorker(), 'חסר לי ציוד');
-    // Should prompt for what is missing.
+    // Should prompt for what is missing (D5-T19k: the structured sub-menu).
     expect(msgLog.some((m) => /ציוד חסר/i.test(m))).toBe(true);
-    // Context set for equipment_missing_note awaiting state.
+    // Context set for missing_equipment_choice awaiting state.
     const ctxCalls = setContext.mock.calls;
     const equipmentCtxSet = ctxCalls.some((c) => {
       const s = c[1] as { awaiting?: string };
-      return s.awaiting === 'equipment_missing_note';
+      return s.awaiting === 'missing_equipment_choice';
     });
     expect(equipmentCtxSet).toBe(true);
   });

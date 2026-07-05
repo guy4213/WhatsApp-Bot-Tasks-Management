@@ -212,7 +212,9 @@ describe('D2-T10 — option 1 (הכל בוצע)', () => {
 // ── Option 2: חסר מידע לדוח → D2-T7 hand-off ────────────────────────────────
 
 describe('D2-T10 — option 2 (חסר מידע לדוח) hands off to D2-T7', () => {
-  it('unique open TaskField → prompts "מה חסר לדוח?" + awaiting=missing_info_note', async () => {
+  // D5-T19j: startMissingInfoFlow now shows a structured sub-menu first
+  // instead of jumping straight to the free-text "מה חסר לדוח?" prompt.
+  it('unique open TaskField → shows the missing-info sub-menu + awaiting=missing_info_choice', async () => {
     const user = makeUser();
     dayFieldSummary.mockResolvedValueOnce({ finished: [], waitingForInfoCount: 0 });
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: 'משה' });
@@ -223,8 +225,9 @@ describe('D2-T10 — option 2 (חסר מידע לדוח) hands off to D2-T7', ()
     await handleAIMessage(user, '2');
 
     expect(findOpenTaskFieldForWorker).toHaveBeenCalledWith(user.id);
-    expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'מה חסר לדוח?' });
-    expect(ctxStore).toMatchObject({ awaiting: 'missing_info_note', taskFieldId: 'tf-1' });
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('מה חסר לדוח?');
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('טופס דגימה');
+    expect(ctxStore).toMatchObject({ awaiting: 'missing_info_choice', taskFieldId: 'tf-1' });
   });
 
   it('multi-open → routes to missing_info_disambig (D2-T5 disambig flow)', async () => {

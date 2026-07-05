@@ -242,6 +242,7 @@ beforeEach(() => {
   getContext.mockClear();
   parseIntentMock.mockClear();
   ctxStore = null;
+  getTodayFieldInspections.mockReset();
   getFieldExceptionRows.mockReset();
   getAllWorkersDayOverview.mockReset();
   getWorkerDayDetail.mockReset();
@@ -252,6 +253,55 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 const DR = { from: '2026-07-01', to: '2026-07-04' };
+
+// ── list_today_field_inspections with dateRange (D5-T19g) ────────────────────
+
+describe('list_today_field_inspections — dateRange forwarding', () => {
+  it('passes dateRange to getTodayFieldInspections when present', async () => {
+    getTodayFieldInspections.mockResolvedValue([{
+      taskFieldId: 'tf1', taskId: 't1', workerName: 'דני', customerName: 'לקוח',
+      taskTitle: 'משימה', timeHm: '09:00', siteCity: 'רעננה',
+      fieldStatus: 'ASSIGNED', family: 'noise', typeLabelHe: 'רעש',
+    }]);
+    parseIntentMock.mockResolvedValue(makeIntent('list_today_field_inspections', {
+      params: { dateRange: DR },
+    }));
+    await handleAIMessage(admin, 'בדיקות שטח בין 1/7 ל-3/7');
+    expect(getTodayFieldInspections).toHaveBeenCalledWith(
+      expect.any(String), // localDate (today)
+      DR,
+    );
+  });
+
+  it('passes undefined (no dateRange) when absent — today default', async () => {
+    getTodayFieldInspections.mockResolvedValue([]);
+    parseIntentMock.mockResolvedValue(makeIntent('list_today_field_inspections', { params: {} }));
+    await handleAIMessage(admin, 'בדיקות שטח להיום');
+    expect(getTodayFieldInspections).toHaveBeenCalledWith(expect.any(String), undefined);
+  });
+
+  it('count_only=true forwards dateRange too and reports the count', async () => {
+    getTodayFieldInspections.mockResolvedValue([
+      { taskFieldId: 'tf1', taskId: 't1', workerName: 'דני', customerName: null, taskTitle: null, timeHm: null, siteCity: null, fieldStatus: 'ASSIGNED', family: 'noise', typeLabelHe: 'רעש' },
+      { taskFieldId: 'tf2', taskId: 't2', workerName: 'יוסי', customerName: null, taskTitle: null, timeHm: null, siteCity: null, fieldStatus: 'ASSIGNED', family: 'noise', typeLabelHe: 'רעש' },
+    ]);
+    parseIntentMock.mockResolvedValue(makeIntent('list_today_field_inspections', {
+      params: { dateRange: DR, count_only: true },
+    }));
+    await handleAIMessage(admin, 'כמה בדיקות שטח בין 1/7 ל-3/7');
+    expect(getTodayFieldInspections).toHaveBeenCalledWith(expect.any(String), DR);
+    expect(msgLog.at(-1)).toMatch(/יש 2 בדיקות שטח/);
+  });
+
+  it('ignores invalid dateRange (from > to) — falls back to undefined', async () => {
+    getTodayFieldInspections.mockResolvedValue([]);
+    parseIntentMock.mockResolvedValue(makeIntent('list_today_field_inspections', {
+      params: { dateRange: { from: '2026-07-05', to: '2026-07-01' } },
+    }));
+    await handleAIMessage(admin, 'בדיקות שטח');
+    expect(getTodayFieldInspections).toHaveBeenCalledWith(expect.any(String), undefined);
+  });
+});
 
 // ── list_open_exceptions with dateRange ───────────────────────────────────────
 

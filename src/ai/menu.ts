@@ -274,3 +274,56 @@ export function renderDaySummaryFollowUpMenu(): string {
     daySummaryFollowUpMenu().map((i) => `${i.n}. ${i.label}`).join('\n')
   );
 }
+
+// ── D5-T19j: structured "missing info" sub-menu (top of D2-T7 flow) ─────────
+// Shown before the free-text "מה חסר לדוח?" prompt. Options 1-6 are preset
+// note text (dispatched immediately, no AI extraction needed); option 7
+// ("אחר") falls through to the existing free-text capture. Numbered text per
+// D5-T4 policy (see the JSDoc on `problemTypeMenu` above).
+
+export interface MissingInfoMenuItem {
+  n: number;
+  label: string;
+  presetNote: string | null; // null = "אחר" — free-text capture
+}
+
+export function missingInfoMenu(): MissingInfoMenuItem[] {
+  return [
+    { n: 1, label: 'טופס דגימה',              presetNote: 'טופס דגימה' },
+    { n: 2, label: 'מדד',                      presetNote: 'מדד' },
+    { n: 3, label: 'שעה',                       presetNote: 'שעה' },
+    { n: 4, label: 'מספר היתר',                presetNote: 'מספר היתר' },
+    { n: 5, label: 'פרטי אתר',                 presetNote: 'פרטי אתר' },
+    { n: 6, label: 'שם איש קשר / מתכנן',       presetNote: 'שם איש קשר / מתכנן' },
+    { n: 7, label: 'אחר',                       presetNote: null },
+  ];
+}
+
+export function renderMissingInfoMenu(): string {
+  return 'מה חסר לדוח?\n' + missingInfoMenu().map((i) => `${i.n}. ${i.label}`).join('\n');
+}
+
+// ── D5-T19k: structured "missing equipment" sub-menu (pairs with D5-T19j) ───
+// Shown before the free-text "איזה ציוד חסר לך?" prompt. Same pattern:
+// options 1-5 preset, option 6 ("אחר") falls through to free-text capture.
+
+export interface MissingEquipmentMenuItem {
+  n: number;
+  label: string;
+  presetNote: string | null; // null = "אחר" — free-text capture
+}
+
+export function missingEquipmentMenu(): MissingEquipmentMenuItem[] {
+  return [
+    { n: 1, label: 'בטריות',              presetNote: 'בטריות' },
+    { n: 2, label: 'מכשיר מדידה',         presetNote: 'מכשיר מדידה' },
+    { n: 3, label: 'מזרן',                 presetNote: 'מזרן' },
+    { n: 4, label: 'מד רעש/קרינה',        presetNote: 'מד רעש/קרינה' },
+    { n: 5, label: 'טופס בדיקה',          presetNote: 'טופס בדיקה' },
+    { n: 6, label: 'אחר',                  presetNote: null },
+  ];
+}
+
+export function renderMissingEquipmentMenu(): string {
+  return 'איזה ציוד חסר לך?\n' + missingEquipmentMenu().map((i) => `${i.n}. ${i.label}`).join('\n');
+}

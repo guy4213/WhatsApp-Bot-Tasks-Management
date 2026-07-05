@@ -162,6 +162,26 @@ describe('getTodayFieldInspections', () => {
     expect(rows[0].workerName).toBe('דני');
     expect(rows[0].fieldStatus).toBe('CONFIRMED');
   });
+
+  // D5-T19g: optional dateRange widens the window beyond today, same
+  // half-open pattern as getFieldExceptionRows / workers_day_overview.
+  it('uses dateRange.from/to (half-open) instead of the single-day window when provided', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await getTodayFieldInspections(LOCAL_DATE, { from: '2026-07-01', to: '2026-07-08' });
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/\$1::date/);
+    expect(sql).toMatch(/\$2::date/);
+    expect(sql).not.toMatch(/INTERVAL\s+'1 day'/);
+    expect(params).toEqual(['2026-07-01', '2026-07-08']);
+  });
+
+  it('falls back to the single-day window when dateRange is absent', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await getTodayFieldInspections(LOCAL_DATE);
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/INTERVAL\s+'1 day'/);
+    expect(params).toEqual([LOCAL_DATE]);
+  });
 });
 
 // ── getFieldExceptionRows ─────────────────────────────────────────────────────

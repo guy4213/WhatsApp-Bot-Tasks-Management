@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { MENU_TRIGGER_RE, menuItemsFor, renderMenu } from '../ai/menu';
+import {
+  MENU_TRIGGER_RE, menuItemsFor, renderMenu,
+  missingInfoMenu, renderMissingInfoMenu,
+  missingEquipmentMenu, renderMissingEquipmentMenu,
+} from '../ai/menu';
 import type { ResolvedUser } from '../types';
 
 function makeUser(overrides: Partial<ResolvedUser> = {}): ResolvedUser {
@@ -131,6 +135,53 @@ describe('renderMenu', () => {
   it('renders a numbered list with every item label', () => {
     const text = renderMenu(employee);
     for (const item of menuItemsFor(employee)) {
+      expect(text).toContain(`${item.n}. ${item.label}`);
+    }
+  });
+});
+
+// D5-T19j — structured "missing info" sub-menu.
+describe('missingInfoMenu / renderMissingInfoMenu', () => {
+  it('returns exactly 7 items numbered 1..7, item 7 ("אחר") has presetNote=null', () => {
+    const items = missingInfoMenu();
+    expect(items).toHaveLength(7);
+    expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(items[6].label).toBe('אחר');
+    expect(items[6].presetNote).toBeNull();
+    // Items 1-6 all have a non-null preset note.
+    for (const item of items.slice(0, 6)) {
+      expect(typeof item.presetNote).toBe('string');
+      expect(item.presetNote!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('renderMissingInfoMenu includes the header and every item label, numbered', () => {
+    const text = renderMissingInfoMenu();
+    expect(text).toContain('מה חסר לדוח?');
+    for (const item of missingInfoMenu()) {
+      expect(text).toContain(`${item.n}. ${item.label}`);
+    }
+  });
+});
+
+// D5-T19k — structured "missing equipment" sub-menu (pairs with D5-T19j).
+describe('missingEquipmentMenu / renderMissingEquipmentMenu', () => {
+  it('returns exactly 6 items numbered 1..6, item 6 ("אחר") has presetNote=null', () => {
+    const items = missingEquipmentMenu();
+    expect(items).toHaveLength(6);
+    expect(items.map((i) => i.n)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(items[5].label).toBe('אחר');
+    expect(items[5].presetNote).toBeNull();
+    for (const item of items.slice(0, 5)) {
+      expect(typeof item.presetNote).toBe('string');
+      expect(item.presetNote!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('renderMissingEquipmentMenu includes the header and every item label, numbered', () => {
+    const text = renderMissingEquipmentMenu();
+    expect(text).toContain('איזה ציוד חסר לך?');
+    for (const item of missingEquipmentMenu()) {
       expect(text).toContain(`${item.n}. ${item.label}`);
     }
   });

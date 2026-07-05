@@ -163,20 +163,29 @@ async function pressMenu(user: ResolvedUser, n: number) {
 // ── Missing-info flow (D2-T7) ────────────────────────────────────────────────
 
 describe('D2-T7 — missing info flow via menu item 6', () => {
-  it('prompts for the missing detail, captures the reply, writes + notifies', async () => {
+  // D5-T19j: menu item 6 now shows a structured sub-menu first instead of
+  // jumping straight to the free-text "מה חסר לדוח?" prompt.
+  it('shows the missing-info sub-menu; option 7 ("אחר") falls through to free text; captures the reply, writes + notifies', async () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: 'משה כהן' });
 
     await pressMenu(user, 6);
 
-    // Prompt sent, awaiting state set.
+    // Sub-menu sent, awaiting state set.
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
-    expect(sendTextMessage.mock.calls[0][0].text).toBe('מה חסר לדוח?');
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('מה חסר לדוח?');
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('טופס דגימה');
+    expect(ctxStore).toMatchObject({ awaiting: 'missing_info_choice', taskFieldId: 'tf-1' });
+
+    // Worker picks "7" (אחר) → falls through to free-text capture.
+    sendTextMessage.mockClear();
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, '7');
+    expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'מה חסר לדוח?' });
     expect(ctxStore).toMatchObject({ awaiting: 'missing_info_note', taskFieldId: 'tf-1' });
 
     // Worker replies with the note.
     sendTextMessage.mockClear();
-    const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, 'חסר מספר היתר בנייה');
 
     expect(writeMissingInfo).toHaveBeenCalledWith({
@@ -186,6 +195,38 @@ describe('D2-T7 — missing info flow via menu item 6', () => {
     });
     expect(notifyOfficeMissingInfo).toHaveBeenCalledWith('tf-1');
     expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+  });
+
+  it('picking a preset item (1 = "טופס דגימה") writes directly, no free-text prompt', async () => {
+    const user = makeUser();
+    findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: 'משה כהן' });
+    await pressMenu(user, 6);
+    expect(ctxStore).toMatchObject({ awaiting: 'missing_info_choice', taskFieldId: 'tf-1' });
+
+    sendTextMessage.mockClear();
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, '1');
+
+    expect(writeMissingInfo).toHaveBeenCalledWith({
+      taskFieldId: 'tf-1',
+      note: 'טופס דגימה',
+      updatedBy: user.id,
+    });
+    expect(notifyOfficeMissingInfo).toHaveBeenCalledWith('tf-1');
+    expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+    expect(ctxStore).toBeNull();
+  });
+
+  it('invalid choice re-sends the sub-menu, keeps awaiting state', async () => {
+    const user = makeUser();
+    findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: 'משה כהן' });
+    await pressMenu(user, 6);
+    sendTextMessage.mockClear();
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, '99');
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('מה חסר לדוח?');
+    expect(writeMissingInfo).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({ awaiting: 'missing_info_choice', taskFieldId: 'tf-1' });
   });
 
   it('no open inspection → "אין לך כרגע בדיקות פתוחות." + no writes', async () => {
@@ -860,19 +901,43 @@ describe('D2-T9 — equipment reminder handling', () => {
     expect(ctxStore).toBeNull();
   });
 
-  it('"חסר לי ציוד" tap → prompts for the missing-equipment note and sets awaiting state', async () => {
+  // D5-T19k: shows the structured missing-equipment sub-menu first instead
+  // of jumping straight to the free-text prompt.
+  it('"חסר לי ציוד" tap → shows the missing-equipment sub-menu and sets awaiting state', async () => {
     const user = equipUser();
     ctxStore = null;
     const { handleAIMessage } = await loadRouter();
     await handleAIMessage(user, `EQUIP_MISSING_${USER_ID}_${LOCAL_DATE}`);
-    expect(sendTextMessage).toHaveBeenCalledWith({
-      to: user.phone,
-      text: 'איזה ציוד חסר לך?',
-    });
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('איזה ציוד חסר לך?');
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('בטריות');
     expect(ctxStore).toMatchObject({
-      awaiting: 'equipment_missing_note',
+      awaiting: 'missing_equipment_choice',
       equipmentLocalDate: LOCAL_DATE,
     });
+    expect(notifyOfficeMissingEquipment).not.toHaveBeenCalled();
+  });
+
+  it('picking a preset item (1 = "בטריות") from the tap sub-menu writes directly', async () => {
+    const user = equipUser();
+    ctxStore = { awaiting: 'missing_equipment_choice', equipmentLocalDate: LOCAL_DATE };
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, '1');
+    expect(notifyOfficeMissingEquipment).toHaveBeenCalledWith({
+      userId: user.id,
+      userName: user.name,
+      note: 'בטריות',
+      localDate: LOCAL_DATE,
+    });
+    expect(ctxStore).toBeNull();
+  });
+
+  it('picking "אחר" from the missing-equipment sub-menu falls through to free-text capture', async () => {
+    const user = equipUser();
+    ctxStore = { awaiting: 'missing_equipment_choice', equipmentLocalDate: LOCAL_DATE };
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, '6');
+    expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'איזה ציוד חסר לך?' });
+    expect(ctxStore).toMatchObject({ awaiting: 'equipment_missing_note', equipmentLocalDate: LOCAL_DATE });
     expect(notifyOfficeMissingEquipment).not.toHaveBeenCalled();
   });
 
@@ -921,11 +986,12 @@ describe('D2-T9 — equipment reminder handling', () => {
     expect(notifyOfficeMissingEquipment).not.toHaveBeenCalled();
   });
 
-  it('menu item 5 (חסר ציוד) → opens the same missing-equipment prompt', async () => {
+  it('menu item 5 (חסר ציוד) → opens the missing-equipment sub-menu (D5-T19k)', async () => {
     const user = equipUser();
     await pressMenu(user, 5);
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toBe('איזה ציוד חסר לך?');
-    expect(ctxStore).toMatchObject({ awaiting: 'equipment_missing_note' });
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('איזה ציוד חסר לך?');
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('בטריות');
+    expect(ctxStore).toMatchObject({ awaiting: 'missing_equipment_choice' });
     // equipmentLocalDate is set to today (Asia/Jerusalem) — assert format only,
     // not the exact date, so the test is timezone / calendar-stable.
     const local = (ctxStore as { equipmentLocalDate?: string }).equipmentLocalDate ?? '';

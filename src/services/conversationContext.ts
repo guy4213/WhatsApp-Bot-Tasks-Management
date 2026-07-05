@@ -16,6 +16,10 @@ export type AwaitingKind =
   // `resolveOpenTaskFieldByHint` in `services/inspections.ts`.
   | 'missing_info_note'
   | 'missing_info_disambig'
+  // D5-T19j: structured sub-menu of common missing-info items shown before
+  // the free-text 'missing_info_note' prompt (option 7 = "אחר" falls through
+  // to it).
+  | 'missing_info_choice'
   | 'problem_type_choice'
   | 'problem_type_note'
   | 'problem_disambig'
@@ -31,6 +35,10 @@ export type AwaitingKind =
   // D2-T9: worker tapped "חסר לי ציוד" on the morning equipment reminder →
   // next inbound text is the free-text description of what is missing.
   | 'equipment_missing_note'
+  // D5-T19k: structured sub-menu of common missing-equipment items shown
+  // before the free-text 'equipment_missing_note' prompt (option 6 = "אחר"
+  // falls through to it).
+  | 'missing_equipment_choice'
   // D2-T3: worker tapped a §6 inspection-card reply button → next inbound text
   // completes the flow. `_reason` follows the DECLINE button (short reason);
   // `_note` follows the NEED_INFO button (free-text follow-up).

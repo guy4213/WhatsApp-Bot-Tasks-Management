@@ -34,6 +34,8 @@ import {
   statusUpdateMenu, renderStatusUpdateMenu,
   finishedFollowUpMenu, renderFinishedFollowUpMenu,
   daySummaryFollowUpMenu, renderDaySummaryFollowUpMenu,
+  missingInfoMenu, renderMissingInfoMenu,
+  missingEquipmentMenu, renderMissingEquipmentMenu,
 } from './menu';
 import {
   findOpenTaskFieldForWorker,
@@ -73,7 +75,7 @@ import {
 import { getEmployeeEndOfDay, getCompanyEndOfDay } from '../services/tasks';
 import { formatEmployeeEndOfDay, formatManagerEndOfDay } from '../whatsapp/digestContent';
 // D3-T6: Sasha lead-assignment via WhatsApp.
-import { isLeadsViewer } from '../services/specialUsers';
+import { canAssignLeads } from '../services/specialUsers';
 // Manager menu: unified 7-item manager menu view queries.
 import {
   getManagementSnapshot,
@@ -165,6 +167,7 @@ const NUMERIC_PICKER_AWAITING: Set<AwaitingKind> = new Set<AwaitingKind>([
   // Worker + role menus.
   'menu',
   'problem_type_choice', 'status_choice', 'finished_followup', 'day_summary_choice',
+  'missing_info_choice', 'missing_equipment_choice', // D5-T19j/k
   // Confirmations.
   'reassign_confirm', 'correct_site_confirm', 'correct_type_confirm', 'schedule_confirm',
   'assign_lead_confirm',
@@ -662,6 +665,10 @@ async function continueConversation(
   }
 
   // ── v2 inspector flows (D2-T5 + D2-T6 + D2-T7 + D2-T8) — no AI intent ──────
+  if (ctx.awaiting === 'missing_info_choice') {
+    await handleMissingInfoChoiceReply(user, trimmed, ctx);
+    return;
+  }
   if (ctx.awaiting === 'missing_info_note') {
     await handleMissingInfoNoteReply(user, text, ctx);
     return;
@@ -704,6 +711,10 @@ async function continueConversation(
   }
   if (ctx.awaiting === 'callback_customer_note') {
     await handleCallbackCustomerNoteReply(user, text);
+    return;
+  }
+  if (ctx.awaiting === 'missing_equipment_choice') {
+    await handleMissingEquipmentChoiceReply(user, trimmed, ctx);
     return;
   }
   if (ctx.awaiting === 'equipment_missing_note') {
@@ -1066,11 +1077,8 @@ async function executeIntent(
         };
         await handleEquipmentMissingNoteReply(user, note, equipCtx);
       } else {
-        await setContext(user.phone, {
-          awaiting: 'equipment_missing_note',
-          equipmentLocalDate: localDate,
-        });
-        await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
+        // D5-T19k: no specific item named yet — show the structured sub-menu.
+        await showMissingEquipmentChoice(user, localDate);
       }
       return;
     }
@@ -1145,14 +1153,18 @@ async function executeIntent(
         await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
         return;
       }
+      // D5-T19g: optional dateRange widens the window beyond today, same
+      // pattern as list_open_exceptions / list_pending_leads / workers_day_overview.
+      const tfiDateRange = extractDateRange(intent.params?.dateRange);
       // count_only: return a numeric count rather than the full picker list.
       if (intent.params?.count_only === true) {
-        const todayRows = await getTodayFieldInspections(localJerusalemDate());
+        const todayRows = await getTodayFieldInspections(localJerusalemDate(), tfiDateRange ?? undefined);
+        const tfiLabel = tfiDateRange ? `${fmtDDMM(tfiDateRange.from)}–${fmtDDMM(tfiDateRange.to)}` : 'היום';
         await clearContext(user.phone);
-        await sendTextMessage({ to: user.phone, text: `יש ${todayRows.length} בדיקות שטח היום.` });
+        await sendTextMessage({ to: user.phone, text: `יש ${todayRows.length} בדיקות שטח ${tfiLabel}.` });
         return;
       }
-      await showMgrTodayInspections(user);
+      await showMgrTodayInspections(user, tfiDateRange ?? undefined);
       return;
     }
 
@@ -1726,14 +1738,10 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
       await startReportProblemFlow(user);
       return;
     case 'missing_equipment':
-      // D2-T9: menu item 5 shortcut → same "what's missing?" prompt as the
+      // D2-T9: menu item 5 shortcut → same sub-menu (D5-T19k) as the
       // "חסר לי ציוד" button on the morning equipment reminder. Uses today's
       // Asia/Jerusalem local date so the office alert stamps the right day.
-      await setContext(user.phone, {
-        awaiting: 'equipment_missing_note',
-        equipmentLocalDate: localJerusalemDate(),
-      });
-      await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
+      await showMissingEquipmentChoice(user, localJerusalemDate());
       return;
     case 'missing_report_info':
       await startMissingInfoFlow(user);
@@ -1830,11 +1838,44 @@ async function startMissingInfoFlow(user: ResolvedUser): Promise<void> {
     });
     return;
   }
+  // D5-T19j: structured sub-menu of common missing-info items before the
+  // free-text prompt. Option 7 ("אחר") falls through to missing_info_note.
   await setContext(user.phone, {
-    awaiting: 'missing_info_note',
+    awaiting: 'missing_info_choice',
     taskFieldId: found.taskFieldId,
   });
-  await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+  await sendTextMessage({ to: user.phone, text: renderMissingInfoMenu() });
+}
+
+/** State: missing_info_choice — worker picks a preset item (1-6) or "אחר" (7). */
+async function handleMissingInfoChoiceReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!ctx.taskFieldId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const items = missingInfoMenu();
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
+    // Invalid — resend the menu, keep the awaiting state.
+    await sendTextMessage({ to: user.phone, text: renderMissingInfoMenu() });
+    return;
+  }
+  const chosen = items[idx - 1];
+  if (chosen.presetNote === null) {
+    // "אחר" — fall through to the existing free-text capture.
+    await setContext(user.phone, { awaiting: 'missing_info_note', taskFieldId: ctx.taskFieldId });
+    await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+    return;
+  }
+  await writeMissingInfo({ taskFieldId: ctx.taskFieldId, note: chosen.presetNote, updatedBy: user.id });
+  const sent = await notifyOfficeMissingInfo(ctx.taskFieldId);
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 /**
@@ -2410,13 +2451,53 @@ async function handleEquipmentTap(
     await sendTextMessage({ to: user.phone, text: 'מעולה, יום עבודה טוב!' });
     return;
   }
-  // "חסר לי ציוד" — prompt for the free-text note; the next inbound text
-  // lands in `handleEquipmentMissingNoteReply`.
+  // "חסר לי ציוד" — D5-T19k: show the structured sub-menu first.
+  await showMissingEquipmentChoice(user, localDate);
+}
+
+/**
+ * D5-T19k: shared entry point for "what equipment is missing?" — shows a
+ * structured sub-menu of common items before the free-text prompt. Option
+ * 6 ("אחר") falls through to the existing free-text capture
+ * (equipment_missing_note). Mirrors the D5-T19j pattern for missing-info.
+ */
+async function showMissingEquipmentChoice(user: ResolvedUser, localDate: string): Promise<void> {
   await setContext(user.phone, {
-    awaiting: 'equipment_missing_note',
+    awaiting: 'missing_equipment_choice',
     equipmentLocalDate: localDate,
   });
-  await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
+  await sendTextMessage({ to: user.phone, text: renderMissingEquipmentMenu() });
+}
+
+/** State: missing_equipment_choice — worker picks a preset item (1-5) or "אחר" (6). */
+async function handleMissingEquipmentChoiceReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const localDate = ctx.equipmentLocalDate ?? localJerusalemDate();
+  const items = missingEquipmentMenu();
+  const idx = parseInt(trimmed, 10);
+  if (!Number.isInteger(idx) || idx < 1 || idx > items.length) {
+    // Invalid — resend the menu, keep the awaiting state.
+    await sendTextMessage({ to: user.phone, text: renderMissingEquipmentMenu() });
+    return;
+  }
+  const chosen = items[idx - 1];
+  if (chosen.presetNote === null) {
+    // "אחר" — fall through to the existing free-text capture.
+    await setContext(user.phone, { awaiting: 'equipment_missing_note', equipmentLocalDate: localDate });
+    await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
+    return;
+  }
+  const sent = await notifyOfficeMissingEquipment({
+    userId: user.id,
+    userName: user.name,
+    note: chosen.presetNote,
+    localDate,
+  });
+  await clearContext(user.phone);
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 async function handleEquipmentMissingNoteReply(
@@ -3076,7 +3157,7 @@ async function safePriorities(): Promise<string[]> {
 //   3. User picks worker → confirmation prompt
 //   4. User confirms → assignLead() writes ownerId → ack message
 //
-// Auth: only isLeadsViewer(user.name) may proceed. Others get a rejection.
+// Auth: canAssignLeads(user) — isLeadsViewer (Sasha + dev observers) OR isElevated (ADMIN/MANAGER, D5-T19i). Others get a rejection.
 // After assignLead() the D3-T3 poller picks up the new ownerId automatically.
 
 const AUTH_REJECT_MSG =
@@ -3094,7 +3175,7 @@ async function tryPrePopulateAssignLead(
   leadRef: string,
   assigneeName: string,
 ): Promise<boolean> {
-  if (!isLeadsViewer(user.name)) {
+  if (!canAssignLeads(user)) {
     await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
     return true;
   }
@@ -3145,7 +3226,7 @@ async function tryPrePopulateAssignLead(
 
 /** Entry-point: triggered by the `assign_lead` AI intent or a direct call. */
 async function startAssignLeadFlow(user: ResolvedUser): Promise<void> {
-  if (!isLeadsViewer(user.name)) {
+  if (!canAssignLeads(user)) {
     await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
     return;
   }
@@ -3184,7 +3265,7 @@ async function handleAssignLeadPickLeadReply(
   trimmed: string,
   ctx: ConversationState,
 ): Promise<void> {
-  if (!isLeadsViewer(user.name)) {
+  if (!canAssignLeads(user)) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
     return;
@@ -3248,7 +3329,7 @@ async function handleAssignLeadPickWorkerReply(
   trimmed: string,
   ctx: ConversationState,
 ): Promise<void> {
-  if (!isLeadsViewer(user.name)) {
+  if (!canAssignLeads(user)) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
     return;
@@ -3305,7 +3386,7 @@ async function handleAssignLeadConfirmReply(
   trimmed: string,
   ctx: ConversationState,
 ): Promise<void> {
-  if (!isLeadsViewer(user.name)) {
+  if (!canAssignLeads(user)) {
     await clearContext(user.phone);
     await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
     return;
@@ -4364,13 +4445,23 @@ async function showMgrSnapshot(user: ResolvedUser): Promise<void> {
 
 // ── 2. Today's field inspections ─────────────────────────────────────────────
 
-async function showMgrTodayInspections(user: ResolvedUser): Promise<void> {
+/**
+ * D5-T19g: optional `dateRange` widens the org-wide field-inspections list
+ * beyond "today" — same half-open-window pattern as list_open_exceptions /
+ * list_pending_leads / workers_day_overview. Absent → existing today-only
+ * behavior, unchanged (still used by manager menu item 2).
+ */
+async function showMgrTodayInspections(
+  user: ResolvedUser,
+  dateRange?: import('../services/managerViews').DateRangeParam,
+): Promise<void> {
   const localDate = localJerusalemDate();
-  const rows = await getTodayFieldInspections(localDate);
+  const rows = await getTodayFieldInspections(localDate, dateRange);
+  const label = dateRange ? `${fmtDDMM(dateRange.from)}–${fmtDDMM(dateRange.to)}` : `היום (${fmtDDMM(localDate)})`;
 
   if (rows.length === 0) {
     await clearContext(user.phone);
-    await sendTextMessage({ to: user.phone, text: `אין בדיקות שטח משובצות להיום (${fmtDDMM(localDate)}).` });
+    await sendTextMessage({ to: user.phone, text: `אין בדיקות שטח משובצות ${label}.` });
     return;
   }
 
@@ -4382,7 +4473,7 @@ async function showMgrTodayInspections(user: ResolvedUser): Promise<void> {
       siteCity: r.siteCity,
       fieldStatus: r.fieldStatus,
       workerName: r.workerName,
-      dateStr: localDate,
+      dateStr: dateRange ? dateRange.from : localDate,
     };
     // Today's org-wide list: include worker name for each row
     return `${i + 1}. ${formatInspectionListRow(rowData, true)}`;
@@ -4394,7 +4485,7 @@ async function showMgrTodayInspections(user: ResolvedUser): Promise<void> {
     mgrTaskIds: rows.map((r) => r.taskId),
   });
   await sendChunked(user.phone,
-    `בדיקות שטח היום — ${fmtDDMM(localDate)} (${rows.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים ופעולות, או "חזרה" לתפריט.`,
+    `בדיקות שטח — ${label} (${rows.length}):\n\n${lines.join('\n\n')}\n\nבחר מספר לפרטים ופעולות, או "חזרה" לתפריט.`,
   );
 }
 
@@ -4863,8 +4954,8 @@ async function handleMgrLeadsSubReply(user: ResolvedUser, trimmed: string): Prom
   }
 
   if (idx === 3) {
-    // Assign lead — requires isLeadsViewer
-    if (!isLeadsViewer(user.name)) {
+    // Assign lead — requires canAssignLeads (D5-T19i: isLeadsViewer OR isElevated)
+    if (!canAssignLeads(user)) {
       await setContext(user.phone, { awaiting: 'mgr_leads_sub' });
       await sendTextMessage({
         to: user.phone,

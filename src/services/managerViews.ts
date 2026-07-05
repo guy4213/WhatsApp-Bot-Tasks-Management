@@ -162,9 +162,24 @@ export interface TodayFieldInspectionRow {
  * All TaskField rows whose `scheduledStartAt` falls today (Asia/Jerusalem), org-wide.
  * Ordered by scheduledStartAt ASC so the list reads chronologically.
  */
+/**
+ * D5-T19g: optional `dateRange` widens the window beyond "today" (half-open,
+ * `from` inclusive / `to` exclusive local Asia/Jerusalem dates), matching the
+ * same pattern as `getFieldExceptionRows` / `list_pending_leads` /
+ * `workers_day_overview`. Absent → falls back to the single `localDate` day
+ * window (existing today-only behavior, unchanged).
+ */
 export async function getTodayFieldInspections(
   localDate: string,
+  dateRange?: DateRangeParam,
 ): Promise<TodayFieldInspectionRow[]> {
+  const params: unknown[] = dateRange ? [dateRange.from, dateRange.to] : [localDate];
+  const dateWindow = dateRange
+    ? `tf."scheduledStartAt" >= ($1::date) AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  ($2::date) AT TIME ZONE 'Asia/Jerusalem'`
+    : `tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'`;
+
   const { rows } = await pool.query<{
     taskFieldId: string;
     taskId: string;
@@ -205,13 +220,12 @@ export async function getTodayFieldInspections(
      LEFT JOIN "Project"      p  ON p.id  = t."projectId"
      LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
      LEFT JOIN "User" u          ON u.id  = t."ownerId"
-     WHERE tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
-       AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+     WHERE ${dateWindow}
      ORDER BY tf."scheduledStartAt" ASC`,
-    [localDate],
+    params,
   );
 
-  log.info({ localDate, count: rows.length }, 'Loaded today field inspections (org-wide)');
+  log.info({ localDate, dateRange, count: rows.length }, 'Loaded today field inspections (org-wide)');
   return rows;
 }
 

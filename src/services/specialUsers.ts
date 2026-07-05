@@ -23,6 +23,7 @@
  * no drift possible.
  */
 import { pool } from '../db/connection';
+import type { ResolvedUser } from '../types';
 
 export const SASHA_NAME = 'סשה';
 
@@ -55,6 +56,20 @@ export function isExceptionsViewer(userName: string | null | undefined): boolean
 
 export function isLeadsViewer(userName: string | null | undefined): boolean {
   return typeof userName === 'string' && LEADS_VIEWER_NAMES.has(userName);
+}
+
+/**
+ * D5-T19i: users allowed to assign leads via WhatsApp. Previously only
+ * `isLeadsViewer` (Sasha + the two dev observers) could — ADMIN/MANAGER were
+ * rejected outright, even though they are legitimate lead-assignment
+ * stakeholders per an explicit product decision (2026-07-05 QA). Widened to
+ * `isLeadsViewer(name) OR isElevated` (ADMIN/MANAGER) — CLAUDE.md §6.5 lists
+ * this as the documented allowlist extension, not a new forbidden write:
+ * `assign_lead` only ever updates `IncomingLead.ownerId`, already a
+ * documented allowed write (§6.6).
+ */
+export function canAssignLeads(user: Pick<ResolvedUser, 'name' | 'isElevated'>): boolean {
+  return isLeadsViewer(user.name) || user.isElevated;
 }
 
 /**
