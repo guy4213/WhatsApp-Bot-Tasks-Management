@@ -212,6 +212,7 @@ export type AIIntent =
 // triggered ones (ASSIGNED / CONFIRMED / DECLINED / NEEDS_MORE_INFO / CANCELED)
 // are NOT valid `set_field_status.transition` values.
 export type FieldStatusTransition =
+  | 'CONFIRM'             // D5-T18: worker confirms assignment via free text
   | 'DEPARTED'
   | 'ARRIVED'
   | 'FINISHED'

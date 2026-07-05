@@ -984,6 +984,40 @@ describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
     expect(allText).not.toContain('לא זוהתה פעולה ברורה');
   });
 
+  it('"אישרתי" → set_field_status CONFIRM → advanceFieldStatus on current TF (D5-T18)', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'set_field_status', confidence: 0.95,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: 'CONFIRM', problem_type: null,
+    });
+    await handleAIMessage(manager, 'אישרתי');
+    expect(advanceFieldStatusMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      transition: 'CONFIRM',
+      updatedBy: manager.id,
+    });
+  });
+
+  it('"שנה סטטוס לאושרה" → set_field_status CONFIRM (D5-T18)', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'set_field_status', confidence: 0.94,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: 'CONFIRM', problem_type: null,
+    });
+    await handleAIMessage(manager, 'שנה סטטוס לאושרה');
+    expect(advanceFieldStatusMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      transition: 'CONFIRM',
+      updatedBy: manager.id,
+    });
+  });
+
   it('"הגעתי" → set_field_status ARRIVED → advanceFieldStatus on current TF', async () => {
     seedActionCtx('mgr_today_action');
     parseIntentMock.mockResolvedValue({
@@ -1190,5 +1224,38 @@ describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
     expect(extractInspectionActionsMock).toHaveBeenCalled();
     // No status advance.
     expect(advanceFieldStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('unsupported-field edit ("שנה כותרת") → extractor clarification is surfaced verbatim', async () => {
+    // The user asks to edit a Task field that only the CRM owns
+    // (title/notes/description). The extractor now returns a helpful
+    // Hebrew clarification explaining what IS available from the bot.
+    // The router should show it as-is, without the generic "לא הבנתי"
+    // 1/2/3/4 prefix.
+    reassignTask.mockClear();
+    updateSiteMetadata.mockClear();
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'unknown', confidence: 0.1, task_reference: null, field: null,
+      new_value: null, params: {}, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [],
+      confidence: 0.3,
+      clarification:
+        'עדכון הכותרת של המשימה זמין רק ב-CRM ולא מהבוט. מכאן אפשר לתקן פרטי אתר, לשנות סוג בדיקה, לשייך מחדש, או לשנות תאריך/שעה.',
+    });
+    await handleAIMessage(manager, 'תעדכן את הכותרת של המשימה');
+    // Extractor's clarification must reach the user.
+    const allText = sendTextMessage.mock.calls
+      .map((c) => (c[0] as { text: string }).text)
+      .join('\n');
+    expect(allText).toContain('עדכון הכותרת של המשימה זמין רק ב-CRM');
+    expect(allText).toContain('מכאן אפשר לתקן פרטי אתר');
+    // No write happened.
+    expect(updateSiteMetadata).not.toHaveBeenCalled();
+    expect(reassignTask).not.toHaveBeenCalled();
   });
 });

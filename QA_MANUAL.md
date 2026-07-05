@@ -174,6 +174,64 @@
 
 ---
 
+### TC-2.8 — CONFIRM (אושרה) בטקסט חופשי (D5-T18)
+**Setup:** מצב עובד/מנהל ב־detail view של בדיקה שהסטטוס שלה ASSIGNED (או כל סטטוס לא סופי).
+
+בדוק כל אחת:
+- `אישרתי`
+- `אושרה`
+- `מאשר`
+- `אני מאשר`
+- `אני מאשר את הבדיקה`
+- `שנה סטטוס לאושרה`
+- `עדכן סטטוס לאושרה`
+
+**מצופה:**
+- הסטטוס בבדיקה עולה ל־CONFIRMED, הזמן מסתמל ב־`confirmedAt`
+- תגובת הבוט: `עדכנתי — סטטוס: אושרה.`
+- אין הודעת "לאיזה סטטוס לעדכן?" (הוסר עבור פראזות אלה)
+
+**גם — regression:** בדוק שכל שאר הסטטוסים החופשיים עדיין עובדים:
+- `יצאתי` → EN_ROUTE
+- `הגעתי` → ARRIVED
+- `סיימתי` → FINISHED_FIELD (עם finished_followup)
+- `שנה סטטוס ליצאתי` → EN_ROUTE
+- `עדכן סטטוס לבאתר` → ARRIVED
+- `עדכן סטטוס להסתיים` → FINISHED_FIELD
+
+**מה עדיין לא נתמך (בכוונה):**
+- `שנה סטטוס לשובץ` — ASSIGNED הוא state ראשוני של ה־CRM, לא מעבר חוקי של עובד. הבוט יחזיר clarification.
+- `דחיתי` / `לא אקח` — DECLINED דורש reason capture; לא נכלל בסבב הזה. יטופל ב־D5-T19 אם המוצר יבקש.
+
+**תוצאה בפועל:** _______________________________________________
+
+---
+
+### TC-2.7 — Clarification עבור עריכה שאינה נתמכת (D5-T17)
+**Setup:** מצב עובד/מנהל ב־detail view של בדיקה ספציפית (state = `mgr_today_action`).
+
+בדוק כל אחת:
+- `תעדכן את ההערות - נוסח חדש כלשהו`
+- `שנה את הכותרת של המשימה ל...`
+- `תשנה תיאור`
+- `תעדכן את סטטוס המשימה`
+- `החלף לקוח`
+
+**מצופה:**
+- **לפני התיקון:** "לא זוהתה פעולה ברורה מההודעה" + התפריט הגנרי 1/2/3/4 ❌
+- **אחרי התיקון:** תגובה ספציפית ומסבירה:
+  > "עדכון הכותרת/ההערות/התיאור של המשימה זמין רק ב-CRM ולא מהבוט. מכאן אפשר לתקן פרטי אתר (כתובת/עיר/איש קשר), לשנות סוג בדיקה, לשייך מחדש, או לשנות תאריך/שעה."
+
+**גם — regression:** בדיקות שכן נתמכות עדיין עובדות:
+- `שנה את הכתובת לרוטשילד 20` → correct_site
+- `שייך מחדש לדני` → reassign
+- `שנה סוג בדיקה לקרינה` → correct_type
+- `תדחה ליום שני ב-10` → reschedule
+
+**תוצאה בפועל:** _______________________________________________
+
+---
+
 ### TC-2.6 — Free-text בכל מצב detail-view (D5-T15 hotfix)
 **Setup:** מצב עובד (או מנהל שהוא גם עובד). היכנס ל־detail view של בדיקה ספציפית:
 1. שלח `הבדיקות שלי` → רשימת בדיקות ממוספרת
@@ -1105,6 +1163,8 @@ VALUES
 | **15** | **Worker intent in detail-view** | **Typing "יצאתי" / "הגעתי" / "סיימתי" / "הלקוח לא ענה" in the detail view of a specific inspection dispatches on THAT inspection, no "לא זוהתה פעולה ברורה"** |
 | **15b** | **AI-first for vague status** | **"שנה סטטוס" (no target) → AI clarification "לאיזה סטטוס לעדכן?", not a 4-item menu** |
 | **16** | **Universal pivot from any note-capture** | **In `missing_info_note` / `equipment_missing_note` / `decline_reason` / etc., typing "תפריט" / "יצאתי" / "מה יש היום" pivots to that intent instead of being captured as the note** |
+| **17** | **Helpful clarification for CRM-only edits** | **"תעדכן את הכותרת" / "שנה תיאור" / "תעדכן הערות" in a detail view returns a specific explanation "זמין רק ב-CRM ... מכאן אפשר לתקן פרטי אתר / סוג בדיקה / שיוך / תאריך" instead of the generic "לא זוהתה פעולה ברורה"** |
+| **18** | **CONFIRM status via free-text** | **"אישרתי" / "אני מאשר" / "שנה סטטוס לאושרה" writes fieldStatus=CONFIRMED + confirmedAt on the current TaskField, response "עדכנתי — סטטוס: אושרה."** |
 
 ---
 

@@ -40,6 +40,7 @@ export const TASK_FILTERS = ['today', 'this_week', 'open', 'next_deadline', 'ove
 // v2 field-inspector enums (SPEC_FIELD_V2 §4/§7/§9). These are the SUBSET of
 // worker-triggered fieldStatus transitions and the 7 declared problem types.
 export const FIELD_STATUS_TRANSITIONS = [
+  'CONFIRM',              // D5-T18: worker confirms the assignment ("אישרתי", "אושר", "מאשר")
   'DEPARTED',
   'ARRIVED',
   'FINISHED',

@@ -275,6 +275,19 @@ describe('notifyOfficeMissingInfo', () => {
 // ── advanceFieldStatus (D2-T5) ──────────────────────────────────────────────
 
 describe('advanceFieldStatus', () => {
+  it('CONFIRM → UPDATE fieldStatus=CONFIRMED + confirmedAt (D5-T18)', async () => {
+    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await advanceFieldStatus({ taskFieldId: 'tf-cf', transition: 'CONFIRM', updatedBy: 'u-4' });
+    expect(poolQuery).toHaveBeenCalledTimes(1);
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/"fieldStatus"\s*=\s*'CONFIRMED'/);
+    expect(sql).toMatch(/"confirmedAt"\s*=\s*now\(\)/);
+    expect(sql).not.toMatch(/"departedAt"\s*=/);
+    expect(sql).not.toMatch(/"arrivedAt"\s*=/);
+    expect(sql).not.toMatch(/"finishedAt"\s*=/);
+    expect(params).toEqual(['tf-cf', 'u-4']);
+  });
+
   it('DEPARTED → UPDATE fieldStatus=EN_ROUTE + departedAt + updatedByUserId, parameterized', async () => {
     poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
     await advanceFieldStatus({ taskFieldId: 'tf-a', transition: 'DEPARTED', updatedBy: 'u-1' });

@@ -198,7 +198,7 @@ export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTa
 // `transition` type is narrowed at the type level so a caller can never pass
 // WAITING_FOR_INFO / HAS_PROBLEM here by accident.
 
-export type AdvanceTransition = 'DEPARTED' | 'ARRIVED' | 'FINISHED';
+export type AdvanceTransition = 'CONFIRM' | 'DEPARTED' | 'ARRIVED' | 'FINISHED';
 
 // ── D2-T3: inspection card button-reply writes (CONFIRM/DECLINE/NEED_INFO) ──
 // SPEC §6/§7. Three deterministic transitions triggered by the three buttons
@@ -329,11 +329,22 @@ export interface AdvanceFieldStatusParams {
 /**
  * §7 write: advance `TaskField.fieldStatus` and stamp the matching timestamp.
  * FINISHED is UNCONDITIONAL — no guard on the current fieldStatus, per spec.
+ * D5-T18: CONFIRM writes CONFIRMED + confirmedAt (mirrors the §6 button flow
+ * `confirmInspection` — same column set, different entry point).
  */
 export async function advanceFieldStatus(params: AdvanceFieldStatusParams): Promise<void> {
   const { taskFieldId, transition, updatedBy } = params;
   let sql: string;
   switch (transition) {
+    case 'CONFIRM':
+      sql =
+        `UPDATE "TaskField"
+            SET "fieldStatus"     = 'CONFIRMED',
+                "confirmedAt"     = now(),
+                "updatedByUserId" = $2,
+                "updatedAt"       = now()
+          WHERE id = $1`;
+      break;
     case 'DEPARTED':
       sql =
         `UPDATE "TaskField"

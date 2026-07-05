@@ -298,9 +298,9 @@ describe('parseIntentResult — manager intents', () => {
 });
 
 describe('FIELD_STATUS_TRANSITIONS', () => {
-  it('has exactly the 5 worker-triggered transitions', () => {
+  it('has exactly the 6 worker-triggered transitions (D5-T18 added CONFIRM)', () => {
     expect([...FIELD_STATUS_TRANSITIONS].sort()).toEqual(
-      ['ARRIVED', 'DEPARTED', 'FINISHED', 'HAS_PROBLEM', 'WAITING_FOR_INFO'],
+      ['ARRIVED', 'CONFIRM', 'DEPARTED', 'FINISHED', 'HAS_PROBLEM', 'WAITING_FOR_INFO'],
     );
   });
 });

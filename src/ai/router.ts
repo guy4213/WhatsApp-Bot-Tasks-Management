@@ -1036,7 +1036,7 @@ async function executeIntent(
         }
         return;
       }
-      if (transition === 'DEPARTED' || transition === 'ARRIVED' || transition === 'FINISHED') {
+      if (transition === 'CONFIRM' || transition === 'DEPARTED' || transition === 'ARRIVED' || transition === 'FINISHED') {
         const hint = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
         await runAdvanceStatusDirect(user, transition, hint || null);
         return;
@@ -2096,6 +2096,7 @@ async function runProblemDirect(
 // resolve via `resolveOpenTaskFieldByHint`.
 
 const STATUS_HE_LABEL: Record<AdvanceTransition, string> = {
+  CONFIRM:  'אושרה',
   DEPARTED: 'בדרך',
   ARRIVED:  'באתר',
   FINISHED: 'הבדיקה הסתיימה',
@@ -2352,7 +2353,7 @@ async function handleDisambigReply(
   if (flow === 'status') {
     // If a pendingTransition was pre-stored (free-text set_field_status path),
     // perform it directly. Otherwise open the 3-item status sub-menu.
-    if (pendingTransition === 'DEPARTED' || pendingTransition === 'ARRIVED' || pendingTransition === 'FINISHED') {
+    if (pendingTransition === 'CONFIRM' || pendingTransition === 'DEPARTED' || pendingTransition === 'ARRIVED' || pendingTransition === 'FINISHED') {
       await performTransition(user, taskFieldId, pendingTransition);
       return;
     }
@@ -5572,7 +5573,8 @@ async function tryPivotToAIIntent(
   const isTopLevelPivot = PIVOT_INTENTS.includes(intent.intent);
   const isStatusPivot =
     intent.intent === 'set_field_status' &&
-    (intent.transition === 'DEPARTED' ||
+    (intent.transition === 'CONFIRM' ||
+     intent.transition === 'DEPARTED' ||
      intent.transition === 'ARRIVED' ||
      intent.transition === 'FINISHED');
   const isProblemPivot =
@@ -5655,7 +5657,7 @@ async function tryDispatchWorkerIntentInline(
   // and HAS_PROBLEM open the note / problem-type prompt on the current TF.
   if (intent.intent === 'set_field_status') {
     const transition = intent.transition ?? null;
-    if (transition === 'DEPARTED' || transition === 'ARRIVED' || transition === 'FINISHED') {
+    if (transition === 'CONFIRM' || transition === 'DEPARTED' || transition === 'ARRIVED' || transition === 'FINISHED') {
       await performTransition(user, taskFieldId, transition);
       return true;
     }

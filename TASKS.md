@@ -1392,6 +1392,152 @@ unambiguous UX contract). All intent detection routed through the LLM.
 
 ---
 
+### D5-T17 — Helpful clarification for unsupported Task-field edits (2026-07-05 iteration)
+
+**Status:** DONE (local, uncommitted)
+
+**Problem reported live (4th iteration):** viewing a specific inspection's
+detail, the user asked "תעדכן את ההערות - בדיקת ניסיון..." (update the
+task's notes/description). Bot answered "לא זוהתה פעולה ברורה מההודעה" +
+the generic 4-item menu. The user re-tried "ביקשתי לשנות את הערות המשימה
+ל: ..." → same generic fallback. Also tried "תשנה את הכותרת למשימה
+אחרונה" → same. User pushback: "לא תיקנת כלום".
+
+Per project constraints (`CLAUDE.md §6.6`, §5), editing `Task` fields
+(title, description, price, dueDate, customerId, etc.) is CRM-only —
+NOT permitted from the bot. But the bot's response gave no explanation:
+it just showed the same 4-action menu.
+
+**Fix — AI-first, explanatory clarification:**
+- Extended the `inspection_action` extractor prompt in
+  `src/ai/contextExtractor.ts` (`buildInspectionActionBlock`) with an
+  explicit "פעולות שאינן זמינות מהבוט" section:
+  - Task-level fields (title, description, specialInstructions,
+    Task.status, commercial fields, customer/lead/project FK).
+- When the user asks to edit any of these, the LLM is instructed to:
+  - Return `action=null`, `confidence < 0.60`.
+  - Emit a Hebrew `clarification` explaining WHY it's not available
+    ("זמין רק ב-CRM ולא מהבוט") AND what CAN be done from the bot
+    ("מכאן אפשר לתקן פרטי אתר, לשנות סוג בדיקה, לשייך מחדש, או לשנות
+    תאריך/שעה") — customized to the user's specific request.
+- The router's `handleMgrActionFreeText` fallback (added earlier in
+  D5-T15b) already surfaces the extractor's `clarification` as-is. The
+  user now sees a specific, helpful explanation instead of the generic
+  "לא הבנתי" prefix.
+
+**Files changed:**
+- `src/ai/contextExtractor.ts` — extended
+  `buildInspectionActionBlock` with a 7-line "unsupported fields"
+  section + instruction for the LLM to emit an explanatory
+  `clarification`.
+- `src/__tests__/detailViewAIContext.test.ts` — +1 new test verifying
+  the extractor's `clarification` reaches the user verbatim when it
+  matches the unsupported-field pattern.
+
+**Constraints preserved:**
+- No new writes — the bot still refuses to edit Task-level fields (§6.6).
+- The 4 supported actions (correct_site, correct_type, reassign,
+  reschedule) are unchanged.
+- The router's existing `handleMgrActionFreeText` fallback path is
+  reused — no new code branches.
+
+**QA:** `npx tsc --noEmit` exit 0. Full suite **1139 passed / 0 failed
+/ 7 skipped**. New test in `detailViewAIContext.test.ts` verifies the
+clarification content is surfaced to the user.
+
+**Live user impact:** the user's failing scenarios now return a helpful
+message:
+> "עדכון ההערות של המשימה זמין רק ב-CRM ולא מהבוט. מכאן אפשר לתקן פרטי
+> אתר, לשנות סוג בדיקה, לשייך מחדש, או לשנות תאריך/שעה."
+
+instead of the confusing generic "לא זוהתה פעולה ברורה".
+
+**Future work (LOW, not shipped here):** if the product decides to
+support any of these Task-level edits from the bot (which would be a
+spec change), it belongs in a new domain-2 task, not in this NLU
+polish batch.
+
+---
+
+### D5-T18 — Add CONFIRM (אושרה) to free-text worker status transitions (2026-07-05 iteration)
+
+**Status:** DONE (local, uncommitted)
+
+**Problem reported live (5th iteration):** in the detail view, user typed
+"שנה סטטוס לאושרה". Bot returned the AI clarification "לאיזה סטטוס
+לעדכן? כתוב 'יצאתי', 'הגעתי', או 'סיימתי'." — but the user wanted to
+change the status to CONFIRMED (אושרה), which wasn't in the list. User's
+push: allow more of the workflow status values from free text
+("אושר", "שובץ" etc).
+
+**Analysis:** worker-triggered transitions per SPEC_FIELD_V2 §7 and the
+worker menu (item 3) previously covered only DEPARTED / ARRIVED /
+FINISHED (plus WAITING_FOR_INFO / HAS_PROBLEM via their own flows).
+CONFIRMED existed only via the §6 inspection-card button (§6
+`confirmInspection`) — no free-text entry point. ASSIGNED is set by the
+CRM at TaskField creation and is not a legal worker transition (workers
+don't "revert" to assigned).
+
+**Fix (CONFIRM only):**
+- Added `CONFIRM` to `FIELD_STATUS_TRANSITIONS` enum (`src/ai/schema.ts`).
+- Added `CONFIRM` to `FieldStatusTransition` union (`src/types/index.ts`).
+- Extended `AdvanceTransition` type + `advanceFieldStatus` in
+  `src/services/inspections.ts` — new CONFIRM case writes
+  `fieldStatus='CONFIRMED'` + `confirmedAt=now()` (same column set as
+  the §6 button path).
+- Router updates:
+  - `STATUS_HE_LABEL[CONFIRM] = 'אושרה'` — response label.
+  - `performTransition` / `handleDisambigReply` (status_disambig) /
+    `runAdvanceStatusDirect` / `tryDispatchWorkerIntentInline` (D5-T15
+    inline path) all extended to accept CONFIRM.
+  - Universal-pivot `tryPivotToAIIntent` (D5-T16) now also treats
+    `set_field_status` with `transition='CONFIRM'` as a high-confidence
+    pivot from text-capture states.
+- Intent parser prompt:
+  - Extended `WORKER_INTENT_LIST` set_field_status line with the CONFIRM
+    mapping: "אישרתי", "אושרה", "מאשר", "אני מאשר", "אני מאשר את
+    הבדיקה", "אישור", "מאשר את השיבוץ".
+  - +8 CONFIRM examples in `WORKER_FEW_SHOT`.
+  - +3 examples for the "explicit-status-name" pattern ("שנה סטטוס
+    ליצאתי", "עדכן סטטוס לבאתר", "עדכן סטטוס להסתיים") so the LLM emits
+    the specific transition instead of the transition=null clarification
+    fallback.
+
+**Not included (deliberate):**
+- `ASSIGNED` — the CRM's initial state, not a worker-triggered
+  transition. Adding it would violate the §6.3 worker status flow
+  contract and open a workflow-integrity risk.
+- `DECLINED` — requires a reason capture; would ship as a separate
+  D5-T19 with the sub-flow if the product owner asks.
+- `CANCELED` — office-only per §6.3, not a worker transition.
+
+**Files changed:**
+- `src/ai/schema.ts` — `FIELD_STATUS_TRANSITIONS` +CONFIRM (1 line).
+- `src/types/index.ts` — `FieldStatusTransition` +CONFIRM (1 line).
+- `src/services/inspections.ts` — `AdvanceTransition` +CONFIRM; new
+  switch branch in `advanceFieldStatus` (10 lines).
+- `src/ai/router.ts` — `STATUS_HE_LABEL[CONFIRM]`; extended 4 pattern
+  matches for CONFIRM.
+- `src/ai/intentParser.ts` — `WORKER_INTENT_LIST` prompt + 11 new
+  FEW_SHOT lines.
+- `src/__tests__/aiSchema.test.ts` — expected transitions list from 5
+  → 6.
+- `src/__tests__/inspections.test.ts` — +1 test for CONFIRM SQL
+  (fieldStatus='CONFIRMED' + confirmedAt).
+- `src/__tests__/detailViewAIContext.test.ts` — +2 tests for CONFIRM
+  dispatch inside `mgr_today_action` (bare "אישרתי" + explicit "שנה
+  סטטוס לאושרה").
+
+**QA:** `npx tsc --noEmit` exit 0. Full suite **1145 passed / 0 failed
+/ 7 skipped**.
+
+**Live user impact:** "שנה סטטוס לאושרה" / "אישרתי" / "אני מאשר את
+הבדיקה" now dispatch CONFIRM on the current TaskField and respond
+"עדכנתי — סטטוס: אושרה." — no more "לאיזה סטטוס לעדכן?" prompt for
+these clearly-named CONFIRM phrasings.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:
