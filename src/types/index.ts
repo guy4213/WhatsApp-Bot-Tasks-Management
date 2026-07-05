@@ -184,6 +184,7 @@ export type AIIntent =
   | 'set_field_status'      // worker advances an inspection: departed/arrived/finished/waiting/problem
   | 'report_problem'        // worker reports a problem on an inspection (optionally with problemType)
   | 'report_missing_info'   // worker reports info missing for the final report
+  | 'list_my_inspections'   // worker (or manager) asks for their own inspections in a date scope
   | 'help'                  // user asked what the bot can do
   | 'unknown'               // could not determine intent
   // D2-T11: schedule a new TaskField
@@ -201,7 +202,10 @@ export type AIIntent =
   | 'list_open_exceptions'       // item 3: exceptions / deviations list
   | 'list_pending_leads'         // item 4: leads awaiting assignment
   | 'workers_day_overview'       // item 5: all-workers or specific-worker day overview
-  | 'search_task';               // item 6: search by customer / worker / product
+  | 'search_task'                // item 6: search by customer / worker / product
+  // D5-T10 Phase 2: new worker free-text intents
+  | 'day_summary_query'          // worker asks for their day summary via free text
+  | 'missing_equipment_free';    // worker reports missing equipment before going out (general, not task-scoped)
 
 // v2 inspector-side sub-enums (SPEC_FIELD_V2 §4, §7, §9). These are the SUBSET
 // of `fieldStatus` transitions a worker can trigger via free text — the office-

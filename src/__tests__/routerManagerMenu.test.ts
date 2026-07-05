@@ -91,6 +91,14 @@ vi.mock('../ai/provider', () => ({
   getProvider: () => ({ name: 'test' }),
 }));
 
+// contextExtractor — mock extractNote to return the trimmed input as-is, preventing
+// real LLM calls (which would OOM since the mock provider lacks emitStructured).
+vi.mock('../ai/contextExtractor', () => ({
+  extractNote: vi.fn().mockImplementation(async (text: string) => text),
+  extractFromContext: vi.fn().mockResolvedValue({}),
+  extractInspectionActions: vi.fn().mockResolvedValue([]),
+}));
+
 // parseIntent — never called for menu flows, but imported
 vi.mock('../ai/intentParser', () => ({
   parseIntent: vi.fn().mockResolvedValue({

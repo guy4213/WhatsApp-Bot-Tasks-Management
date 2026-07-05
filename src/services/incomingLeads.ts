@@ -194,8 +194,29 @@ export async function findActiveInspectors(): Promise<InspectorCandidate[]> {
  * All currently unassigned leads (ownerId IS NULL), newest first.
  * Used by D3-T6 assign-lead flow to display the pick list.
  * Defaults to 20 items — enough for a WhatsApp conversation.
+ *
+ * When `dateRange` is provided, further scopes to leads whose `receivedAt`
+ * falls in [dateRange.from, dateRange.to) — half-open, YYYY-MM-DD local dates
+ * converted via `AT TIME ZONE 'Asia/Jerusalem'`.
+ * Per §6.2, leads use `receivedAt` (not scheduledStartAt) for date filtering.
  */
-export async function findUnassignedLeadsForAssignment(limit = 20): Promise<IncomingLeadRow[]> {
+export async function findUnassignedLeadsForAssignment(
+  limit = 20,
+  dateRange?: { from: string; to: string },
+): Promise<IncomingLeadRow[]> {
+  if (dateRange) {
+    const { rows } = await pool.query<IncomingLeadRow>(
+      `SELECT ${SELECT_LEAD_COLS}
+       FROM "IncomingLead"
+       WHERE "ownerId" IS NULL
+         AND "receivedAt" >= ($2::date) AT TIME ZONE 'Asia/Jerusalem'
+         AND "receivedAt" <  ($3::date) AT TIME ZONE 'Asia/Jerusalem'
+       ORDER BY "receivedAt" DESC
+       LIMIT $1`,
+      [limit, dateRange.from, dateRange.to],
+    );
+    return rows;
+  }
   const { rows } = await pool.query<IncomingLeadRow>(
     `SELECT ${SELECT_LEAD_COLS}
      FROM "IncomingLead"

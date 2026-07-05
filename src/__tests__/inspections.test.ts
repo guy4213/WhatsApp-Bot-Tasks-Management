@@ -175,26 +175,34 @@ describe('findOpenTaskFieldForWorker', () => {
     expect(res).toBeNull();
   });
 
-  it('returns { taskFieldId, customerName } when exactly one open TaskField exists', async () => {
+  it('returns { taskFieldId, customerName, taskTitle } when exactly one open TaskField exists', async () => {
     poolQuery.mockResolvedValueOnce({
       rowCount: 1,
-      rows: [{ taskFieldId: 'tf-1', customerName: 'משה כהן' }],
+      rows: [{ taskFieldId: 'tf-1', customerName: 'משה כהן', taskTitle: null }],
     });
     const res = await findOpenTaskFieldForWorker('u-9');
-    expect(res).toEqual({ taskFieldId: 'tf-1', customerName: 'משה כהן' });
+    expect(res).toEqual({ taskFieldId: 'tf-1', customerName: 'משה כהן', taskTitle: null });
   });
 
-  it('returns { ambiguous, count } when more than one open TaskField exists', async () => {
+  it('Phase 1 — returns { ambiguous, count, items } (numbered preview list) when >1 open TaskField exists', async () => {
     poolQuery.mockResolvedValueOnce({
       rowCount: 3,
       rows: [
-        { taskFieldId: 'tf-a', customerName: 'א' },
-        { taskFieldId: 'tf-b', customerName: 'ב' },
-        { taskFieldId: 'tf-c', customerName: 'ג' },
+        { taskFieldId: 'tf-a', customerName: 'א', taskTitle: null, siteAddress: 'רח א', siteCity: 'ת"א', scheduledStartAt: null },
+        { taskFieldId: 'tf-b', customerName: 'ב', taskTitle: null, siteAddress: 'רח ב', siteCity: 'חיפה', scheduledStartAt: null },
+        { taskFieldId: 'tf-c', customerName: 'ג', taskTitle: null, siteAddress: null,   siteCity: null,    scheduledStartAt: null },
       ],
     });
     const res = await findOpenTaskFieldForWorker('u-9');
-    expect(res).toEqual({ ambiguous: true, count: 3 });
+    expect(res).toEqual({
+      ambiguous: true,
+      count: 3,
+      items: [
+        { taskFieldId: 'tf-a', customerName: 'א', siteAddress: 'רח א', siteCity: 'ת"א', scheduledStartAt: null },
+        { taskFieldId: 'tf-b', customerName: 'ב', siteAddress: 'רח ב', siteCity: 'חיפה', scheduledStartAt: null },
+        { taskFieldId: 'tf-c', customerName: 'ג', siteAddress: null,   siteCity: null,    scheduledStartAt: null },
+      ],
+    });
   });
 
   it('filters by Task.ownerId (the CRM column) and the 6 open fieldStatus values', async () => {

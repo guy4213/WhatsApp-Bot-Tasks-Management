@@ -14,11 +14,19 @@ import { isExceptionsViewer, isLeadsViewer } from '../services/specialUsers';
 
 /**
  * Opens the menu when the WHOLE message is one of: menu / תפריט / עזרה / היי / שלום
- * (optionally followed by punctuation). Anchored to the full trimmed string, so
- * real free text like "הצג את המשימות שלי" or "שלום לכולם" does NOT match and
- * flows to the AI parser exactly as before.
+ * (optionally followed by punctuation), OR a short natural-Hebrew phrase asking for
+ * the menu ("תראה לי את התפריט", "תפריט בבקשה", etc.).
+ *
+ * Anchored to the full trimmed string, so real content like
+ * "מה יש בתפריט של המערכת?" does NOT match and flows to the AI parser as before.
+ *
+ * Phase 2 expansion — adds:
+ *  - "תראה לי (את) התפריט" / "הצג לי (את) התפריט"
+ *  - "תפריט בבקשה" / "בבקשה תפריט"
+ *  - "יאללה תפריט"
+ *  - "אני רוצה (לראות) תפריט"
  */
-export const MENU_TRIGGER_RE = /^\s*(menu|תפריט|עזרה|היי|שלום)\s*[!?.,]*\s*$/i;
+export const MENU_TRIGGER_RE = /^\s*(?:menu|תפריט|עזרה|היי|שלום|(?:תראה\s+לי\s+(?:את\s+)?|הצג\s+לי\s+(?:את\s+)?)התפריט|תפריט\s+בבקשה|בבקשה\s+תפריט|יאללה\s+תפריט|אני\s+רוצה\s+(?:לראות\s+)?תפריט)\s*[!?.,]*\s*$/i;
 
 /** What a menu number does. The router translates each into existing behavior. */
 export type MenuAction =

@@ -191,6 +191,9 @@ vi.mock('../whatsapp/digestContent', () => ({
   formatDayFieldSummary: vi.fn().mockReturnValue('סיכום יום'),
   formatManagerEndOfDay: vi.fn().mockReturnValue({ text: 'eod' }),
   formatEmployeeEndOfDay: vi.fn().mockReturnValue({ text: 'eod' }),
+  formatInspectorDayList: vi.fn().mockReturnValue('אין בדיקות משובצות למחר.'),
+  formatInspectorMorning: vi.fn().mockReturnValue('בוקר טוב'),
+  formatEquipmentReminder: vi.fn().mockReturnValue({ text: 'ציוד' }),
 }));
 
 vi.mock('../ai/digestCommands', () => ({
@@ -201,6 +204,15 @@ vi.mock('../ai/digestCommands', () => ({
 
 vi.mock('../db/connection', () => ({
   pool: { query: vi.fn().mockResolvedValue({ rows: [] }) },
+}));
+
+vi.mock('../services/inspectionsQueries', () => ({
+  getInspectionsForWorkerOnDate: vi.fn().mockResolvedValue([]),
+  getFieldSummaryForWorkerOnDate: vi.fn().mockResolvedValue({ items: [], missingInfoCount: 0 }),
+}));
+
+vi.mock('../services/myInspectionsRange', () => ({
+  getMyInspectionsInRange: vi.fn().mockResolvedValue([]),
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────────
@@ -320,21 +332,36 @@ describe('Layer 2 — bare-digit guard for manager-menu users', () => {
     expect(msgs.every((m) => !m.includes('יאיר'))).toBe(true);
   });
 
-  it('bare digit does NOT trigger the guard for a regular worker (worker gets normal flow)', async () => {
-    // Worker with no context — bare "2" should go through the menu trigger logic or AI parser,
-    // NOT the manager bare-digit guard. Since "2" is not a MENU_TRIGGER_RE match and the
-    // worker has no context, it goes to AI parser.
+  it('Phase 1 parity — bare "2" from worker with no context opens worker menu + dispatches item 2 (NOT AI parser)', async () => {
+    // Before Phase 1: worker bare "2" went to AI parser → returned "לא הבנתי".
+    // After Phase 1: worker bare "2" opens the worker menu and dispatches to
+    // item 2 (הבדיקות שלי למחר). This mirrors the manager guard for the 7-item
+    // worker menu.
+    getContext.mockResolvedValue(null);
+
+    await handleAIMessage(makeWorker(), '2');
+
+    // AI parser must NOT be called.
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    // Worker menu (item 2) triggers the "tomorrow" list — empty for this mock,
+    // so we expect a friendly "אין בדיקות משובצות" message.
+    const msgs = allMessages();
+    expect(msgs.some((m) => /אין בדיקות משובצות/.test(m))).toBe(true);
+  });
+
+  it('Phase 1 parity — bare "8" from worker still falls through to AI parser (menu has only 7 items)', async () => {
+    // The worker guard is [1-7] only. 8/9 have no menu item so they must not
+    // silently open the menu — let the AI parser see the input.
     getContext.mockResolvedValue(null);
     parseIntentMock.mockResolvedValue({
       intent: 'unknown', confidence: 0.1, task_reference: null, field: null,
-      new_value: null, params: {}, missing_fields: [], clarification: 'לא הבנתי',
+      new_value: null, params: {}, missing_fields: [], clarification: null,
       requires_confirmation: false, requires_manager_approval: false,
       transition: null, problem_type: null,
     });
 
-    await handleAIMessage(makeWorker(), '2');
+    await handleAIMessage(makeWorker(), '8');
 
-    // AI parser WAS called for the worker.
     expect(parseIntentMock).toHaveBeenCalled();
   });
 

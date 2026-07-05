@@ -39,6 +39,35 @@ describe('MENU_TRIGGER_RE', () => {
     expect(MENU_TRIGGER_RE.test('צור משימה תיאום ללקוח X')).toBe(false);
     expect(MENU_TRIGGER_RE.test('עזרה עם משימה')).toBe(false);
   });
+
+  // Phase 2 — expanded menu trigger phrases
+  it('matches natural Hebrew phrases asking to show the menu', () => {
+    const shouldMatch = [
+      'תראה לי את התפריט',
+      'תראה לי התפריט',
+      'הצג לי את התפריט',
+      'הצג לי התפריט',
+      'תפריט בבקשה',
+      'בבקשה תפריט',
+      'יאללה תפריט',
+      'אני רוצה תפריט',
+      'אני רוצה לראות תפריט',
+    ];
+    for (const phrase of shouldMatch) {
+      expect(MENU_TRIGGER_RE.test(phrase)).toBe(true);
+    }
+  });
+
+  it('does NOT match phrases that merely mention תפריט in mid-sentence', () => {
+    const shouldNotMatch = [
+      'מה יש בתפריט של המערכת?',
+      'תסביר לי את התפריט בפירוט',
+      'יש לי שאלה על התפריט',
+    ];
+    for (const phrase of shouldNotMatch) {
+      expect(MENU_TRIGGER_RE.test(phrase)).toBe(false);
+    }
+  });
 });
 
 describe('menuItemsFor', () => {

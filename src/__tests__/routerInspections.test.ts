@@ -192,7 +192,11 @@ describe('D2-T7 — missing info flow via menu item 6', () => {
 
   it('ambiguous (>1 open) → captures disambig state without writing', async () => {
     const user = makeUser();
-    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 3 });
+    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 3, items: [
+      { taskFieldId: 'tf-a', customerName: 'א', siteAddress: null, siteCity: null, scheduledStartAt: null },
+      { taskFieldId: 'tf-b', customerName: 'ב', siteAddress: null, siteCity: null, scheduledStartAt: null },
+      { taskFieldId: 'tf-c', customerName: 'ג', siteAddress: null, siteCity: null, scheduledStartAt: null },
+    ] });
     await pressMenu(user, 6);
     expect(ctxStore).toMatchObject({ awaiting: 'missing_info_disambig' });
     expect(writeMissingInfo).not.toHaveBeenCalled();
@@ -302,7 +306,10 @@ describe('D2-T8 — report-problem flow via menu item 4', () => {
 
   it('ambiguous (>1 open) → captures disambig state without writing', async () => {
     const user = makeUser();
-    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 2 });
+    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 2, items: [
+      { taskFieldId: 'tf-a', customerName: 'א', siteAddress: null, siteCity: null, scheduledStartAt: null },
+      { taskFieldId: 'tf-b', customerName: 'ב', siteAddress: null, siteCity: null, scheduledStartAt: null },
+    ] });
     await pressMenu(user, 4);
     expect(ctxStore).toMatchObject({ awaiting: 'problem_disambig' });
     expect(writeProblem).not.toHaveBeenCalled();
@@ -531,7 +538,10 @@ describe('D2-T5 — status update flow via menu item 3', () => {
 
   it('ambiguous → captures status_disambig state', async () => {
     const user = makeUser();
-    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 2 });
+    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 2, items: [
+      { taskFieldId: 'tf-a', customerName: 'א', siteAddress: null, siteCity: null, scheduledStartAt: null },
+      { taskFieldId: 'tf-b', customerName: 'ב', siteAddress: null, siteCity: null, scheduledStartAt: null },
+    ] });
     await pressMenu(user, 3);
     expect(ctxStore).toMatchObject({ awaiting: 'status_disambig' });
     expect(sendTextMessage.mock.calls[0][0].text).toContain('יש לך 2 בדיקות פתוחות');

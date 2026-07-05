@@ -52,6 +52,7 @@ import {
   notifyOfficeDeclined,
   notifyOfficeNeedsMoreInfo,
   type AdvanceTransition,
+  type OpenTaskFieldPreview,
 } from '../services/inspections';
 import { getManagersForBroadcast } from '../services/pendingActions';
 import { getInspectionsForWorkerOnDate } from '../services/inspectionsQueries';
@@ -82,6 +83,10 @@ import {
   getWorkerDayDetail,
   searchTasksByWorkerName,
   searchTasksByProductCode,
+  searchTasksByAddress,
+  searchTasksByPhone,
+  searchTasksByTaskId,
+  searchTasksByFieldStatus,
   getTaskFieldDetail,
   getTaskFieldValuesForContext,
   type TodayFieldInspectionRow,
@@ -202,11 +207,34 @@ const CONFIRM_NO_MULTI  = 'CONFIRM_NO_MULTI_ACTION';
  * so we only match it when a date-cue follows. All other alternatives are
  * self-contained (allow empty suffix → defaults to today).
  *
+ * Phase 1 expansion — adds display-verb prefixes ("הצג את", "תציג", "תן לי",
+ * "אני רוצה לראות") and open-day phrasings ("היום שלי", "מה על הפרק",
+ * "מה מחכה לי", "רשימת הבדיקות שלי") so a worker's natural Hebrew never falls
+ * through to the AI parser as `unknown`.
+ *
  * Captures group 1 = leading phrase, group 2 = suffix (may be empty).
  */
 const MY_INSPECTIONS_DATE_CUE_RE = String.raw`(?:היום|מחר|השבוע|החודש|שבוע\s+הבא|חודש\s+הבא|לשבוע\s+הבא|לחודש\s+הבא|לעוד\s+(?:שבוע|חודש)|(?:ב?)?יום\s+(?:ראשון|שני|שלישי|רביעי|חמישי|שישי)|(?:ב)?שבת|בין\s+\d|ב[־\-]?\s*\d)`;
 export const MY_INSPECTIONS_RE = new RegExp(
-  String.raw`^((?:הבדיקות\s+שלי|בדיקות(?:\s+השטח)?\s+שלי|תראה\s+לי\s+את\s+(?:ה)?בדיקות(?:\s+השטח)?\s+שלי|איזה\s+בדיקות\s+יש\s+לי)|(?:מה\s+יש\s+לי)(?=\s+${MY_INSPECTIONS_DATE_CUE_RE}))(.*)$`,
+  String.raw`^(` +
+  // Direct forms: "הבדיקות שלי", "בדיקות שלי", "בדיקות השטח שלי"
+  String.raw`(?:ה?בדיקות(?:\s+השטח)?\s+שלי|` +
+  // "רשימת הבדיקות שלי" / "רשימה של הבדיקות שלי"
+  String.raw`רשימ[הת]?\s+(?:של\s+)?ה?בדיקות(?:\s+השטח)?\s+שלי|` +
+  // Display verbs: "תראה לי (את) הבדיקות שלי", "הצג (לי) את הבדיקות שלי",
+  // "תציג לי את הבדיקות שלי", "תן לי (את) הבדיקות שלי",
+  // "אני רוצה לראות את הבדיקות שלי"
+  String.raw`(?:תראה\s+לי\s+את\s+|הצג\s+(?:לי\s+)?(?:את\s+)?|תציג\s+לי\s+(?:את\s+)?|תן\s+לי\s+(?:את\s+)?|אני\s+רוצה\s+לראות\s+(?:את\s+)?)(?:ה)?בדיקות(?:\s+השטח)?\s+שלי|` +
+  // "איזה בדיקות יש לי"
+  String.raw`איזה\s+בדיקות\s+יש\s+לי|` +
+  // "היום שלי" / "מה היום שלי"
+  String.raw`(?:מה\s+)?היום\s+שלי|` +
+  // "מה על הפרק" / "מה מחכה לי"
+  String.raw`מה\s+על\s+הפרק|` +
+  String.raw`מה\s+מחכה\s+לי)` +
+  // Ambiguous "מה יש לי" — only with a date cue
+  String.raw`|(?:מה\s+יש\s+לי)(?=\s+${MY_INSPECTIONS_DATE_CUE_RE})` +
+  String.raw`)(.*)$`,
 );
 
 /** True when `trimmed` is either digits or a known picker navigation word. */
@@ -314,6 +342,18 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
     return;
   }
 
+  // Phase 1 parity: EMP_MENU_N list-tap with no active context (worker menu).
+  // Scenario: worker taps item 1 → list_inspections_today clears context → they
+  // tap item 2 from the SAME still-visible list message → payload arrives here
+  // as `EMP_MENU_2` text with cleared context. Without this handler it falls
+  // through to the AI parser which returns "לא הבנתי". Set the awaiting=menu
+  // state and re-dispatch through the normal menu path.
+  if (/^EMP_MENU_\d+$/i.test(text.trim()) && !isManagerMenuUser(user)) {
+    await setContext(user.phone, { awaiting: 'menu' });
+    await continueConversation(user, text.trim(), { awaiting: 'menu' });
+    return;
+  }
+
   if (!getProvider()) {
     await sendTextMessage({ to: user.phone, text: 'שירות ה-AI אינו מוגדר עדיין. נסה שוב מאוחר יותר.' });
     return;
@@ -362,10 +402,38 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   // selections in an inspection flow) are NOT the same pattern and they do not
   // have a persistent manager-root menu to fall back to.
   const trimmedForGuard = text.trim();
-  if (/^[1-9]$/.test(trimmedForGuard) && isManagerMenuUser(user)) {
+
+  // Phase 6 parity — normalize "digit + polite word" and "confirmation + digit"
+  // patterns to a bare digit so the existing guards below still fire. Real-life
+  // manager typing: "2 בבקשה", "כן 2", "אוקי 3". Without this the message goes
+  // to the AI parser which may return `unknown`.
+  const DIGIT_POLITE_RE = /^([1-9])\s+(בבקשה|תודה|תודה\s+רבה)$/;
+  const CONFIRM_DIGIT_RE = /^(?:כן|אישור|בטח|אוקי|אוקיי|סבבה)\s+([1-9])$/;
+  let normalizedDigit: string | null = null;
+  const mDp = trimmedForGuard.match(DIGIT_POLITE_RE);
+  if (mDp) normalizedDigit = mDp[1];
+  else {
+    const mCd = trimmedForGuard.match(CONFIRM_DIGIT_RE);
+    if (mCd) normalizedDigit = mCd[1];
+  }
+  const effectiveGuardText = normalizedDigit ?? trimmedForGuard;
+
+  if (/^[1-9]$/.test(effectiveGuardText) && isManagerMenuUser(user)) {
     await showMenu(user);          // sets awaiting: 'mgr_menu_root' + sends menu text
     // Immediately route the digit as if the user replied to the freshly-shown menu.
-    await continueConversation(user, trimmedForGuard, { awaiting: 'mgr_menu_root' });
+    await continueConversation(user, effectiveGuardText, { awaiting: 'mgr_menu_root' });
+    return;
+  }
+
+  // Phase 1 parity — worker bare-digit guard. Scenario: worker opens menu →
+  // taps item 1 → its flow calls clearContext() → they then type a bare digit
+  // to try picking again. Without this the digit goes to the AI parser which
+  // returns "לא הבנתי". Re-open the worker menu (sets awaiting:'menu') and
+  // route the digit through the standard menu-reply path. Only fires for
+  // digits 1..7 (the worker menu has 7 items) — 8/9 fall through unchanged.
+  if (/^[1-7]$/.test(effectiveGuardText) && !isManagerMenuUser(user)) {
+    await showMenu(user);
+    await continueConversation(user, effectiveGuardText, { awaiting: 'menu' });
     return;
   }
 
@@ -403,12 +471,11 @@ async function routeIntent(
   if (intent.intent === 'unknown' || intent.confidence < CONF_LOW) {
     await auditEvent(user, 'unknown', null, 'SKIPPED', intent.clarification ?? 'unrecognized request');
 
-    // Layer 4 fix: for a manager-menu user with a very short input (≤3 chars),
-    // SHOW the menu directly instead of printing a generic hint. The model correctly
-    // returned 'unknown' for a bare digit (per the Layer 3 system-prompt rule), but
-    // a bare digit for a manager-menu user almost certainly means a menu pick, so we
-    // re-open the menu so they can try again with clear context visible.
-    if (isManagerMenuUser(user) && originalText !== undefined) {
+    // Layer 4 fix: for ANY user with a very short input (≤3 chars), SHOW the
+    // menu directly instead of a generic hint. The bare-digit guards above
+    // already caught the most common case; this catches short non-digit inputs
+    // (e.g. "היי", "ok") that dodged the guards.
+    if (originalText !== undefined) {
       const trimmedInput = originalText.trim();
       if (trimmedInput.length <= 3) {
         await showMenu(user);
@@ -416,13 +483,15 @@ async function routeIntent(
       }
     }
 
-    const mgrSuffix = isManagerMenuUser(user)
-      ? '\nתרצה לראות את התפריט? כתוב "תפריט".'
-      : '';
+    // Phase 1 parity: workers now get the same menu-hint suffix as managers,
+    // so a fall-through "unknown" always ends with a concrete next step.
+    const menuHint = '\nתרצה לראות את התפריט? כתוב "תפריט".';
+    const fallbackExample = isManagerMenuUser(user)
+      ? 'לא הצלחתי להבין את הבקשה. נסה לנסח מחדש, למשל: "צור משימה תיאום ללקוח X" או "הצג את המשימות שלי להיום".'
+      : 'לא הצלחתי להבין את הבקשה. נסה לנסח מחדש, למשל: "הבדיקות שלי היום", "יצאתי לרעננה", או "יש לי בעיה".';
     await sendTextMessage({
       to: user.phone,
-      text: (intent.clarification
-        ?? 'לא הצלחתי להבין את הבקשה. נסה לנסח מחדש, למשל: "צור משימה תיאום ללקוח X" או "הצג את המשימות שלי להיום".') + mgrSuffix,
+      text: (intent.clarification ?? fallbackExample) + menuHint,
     });
     return;
   }
@@ -455,6 +524,27 @@ async function routeIntent(
       text: `${describeIntent(intent)}\nהאם להמשיך? השב "כן" או "לא".`,
     });
     return;
+  }
+
+  // Phase 6 — for high-confidence LIST/QUERY intents where the LLM ALSO
+  // emitted a `clarification` (e.g. "לידים שלי" → unassigned + note that
+  // owner-scope is not supported), surface the clarification as a leading
+  // message so the user still sees the caveat. Executed BEFORE the intent so
+  // the response order reads "note → data".
+  const HIGH_CONF_CLARIFICATION_INTENTS = new Set([
+    'list_open_exceptions',
+    'list_pending_leads',
+    'workers_day_overview',
+    'list_today_field_inspections',
+    'management_snapshot',
+    'search_task',
+  ]);
+  if (
+    intent.clarification &&
+    intent.clarification.trim().length > 0 &&
+    HIGH_CONF_CLARIFICATION_INTENTS.has(intent.intent)
+  ) {
+    await sendTextMessage({ to: user.phone, text: intent.clarification });
   }
 
   // 4. High confidence → execute
@@ -522,15 +612,15 @@ async function continueConversation(
     return;
   }
   if (ctx.awaiting === 'missing_info_disambig') {
-    await handleDisambigReply(user, trimmed, 'missing_info');
+    await handleDisambigReply(user, trimmed, 'missing_info', undefined, ctx.disambigTaskFieldIds);
     return;
   }
   if (ctx.awaiting === 'problem_disambig') {
-    await handleDisambigReply(user, trimmed, 'problem');
+    await handleDisambigReply(user, trimmed, 'problem', undefined, ctx.disambigTaskFieldIds);
     return;
   }
   if (ctx.awaiting === 'status_disambig') {
-    await handleDisambigReply(user, trimmed, 'status', ctx.pendingTransition);
+    await handleDisambigReply(user, trimmed, 'status', ctx.pendingTransition, ctx.disambigTaskFieldIds);
     return;
   }
   if (ctx.awaiting === 'status_choice') {
@@ -801,6 +891,32 @@ async function executeIntent(
       return;
     }
 
+    case 'list_my_inspections': {
+      // Phase 1 worker parity — LLM-parsed "show my inspections" with an
+      // optional dateScope / rangeExpr param. We synthesize a text form that
+      // MY_INSPECTIONS_RE will parse deterministically so we reuse the exact
+      // same range logic as the fast-path regex (single source of truth for
+      // Hebrew date resolution).
+      const dateScope = typeof intent.params?.dateScope === 'string'
+        ? intent.params.dateScope.trim().toLowerCase()
+        : '';
+      const rangeExpr = typeof intent.params?.rangeExpr === 'string'
+        ? intent.params.rangeExpr.trim()
+        : '';
+      let synthesized = 'הבדיקות שלי';
+      if (rangeExpr.length > 0) {
+        synthesized += ' ' + rangeExpr;
+      } else if (dateScope === 'tomorrow') {
+        synthesized += ' מחר';
+      } else if (dateScope === 'week') {
+        synthesized += ' השבוע';
+      } else if (dateScope === 'next_week') {
+        synthesized += ' שבוע הבא';
+      } // else: default (today) — leave suffix empty
+      await handleMyInspectionsFreeText(user, synthesized);
+      return;
+    }
+
     case 'report_missing_info': {
       // D5-T3 free-text intent — if a note was extracted, skip the sub-prompt.
       const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
@@ -860,10 +976,51 @@ async function executeIntent(
       return;
     }
 
+    // D5-T10 Phase 2: worker day-summary via free text (same as menu item 7).
+    case 'day_summary_query':
+      await startDaySummaryFlow(user);
+      return;
+
+    // D5-T10 Phase 2: worker reports missing equipment before going out (general).
+    // Mirrors the menu-item-5 handler in handleWorkerMenuReply.
+    case 'missing_equipment_free': {
+      const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+      const localDate = localJerusalemDate();
+      if (note) {
+        // Construct a minimal ConversationState for handleEquipmentMissingNoteReply
+        // so it can stamp the correct local date on the office alert.
+        const equipCtx: ConversationState = {
+          awaiting: 'equipment_missing_note',
+          equipmentLocalDate: localDate,
+        };
+        await handleEquipmentMissingNoteReply(user, note, equipCtx);
+      } else {
+        await setContext(user.phone, {
+          awaiting: 'equipment_missing_note',
+          equipmentLocalDate: localDate,
+        });
+        await sendTextMessage({ to: user.phone, text: 'איזה ציוד חסר לך?' });
+      }
+      return;
+    }
+
     // D3-T6: Sasha lead-assignment via WhatsApp.
-    case 'assign_lead':
+    // Phase 6 enhancement: when the LLM extracted BOTH a lead reference
+    // (`params.leadRef`) AND a target worker name (`params.assigneeName`) from
+    // a single-sentence request ("לשייך את הליד של יוסי ללירן"), attempt to
+    // pre-populate both picks so Sasha only confirms. Falls through to the
+    // normal multi-step flow if either lookup is ambiguous or empty.
+    case 'assign_lead': {
+      const leadRef = typeof intent.params?.leadRef === 'string' ? intent.params.leadRef.trim() : '';
+      const assigneeName = typeof intent.params?.assigneeName === 'string'
+        ? intent.params.assigneeName.trim() : '';
+      if (leadRef || assigneeName) {
+        const consumed = await tryPrePopulateAssignLead(user, leadRef, assigneeName);
+        if (consumed) return;
+      }
       await startAssignLeadFlow(user);
       return;
+    }
 
     // D2-T11: schedule a new TaskField for an existing Task from WhatsApp.
     case 'schedule_task_field': {
@@ -912,13 +1069,21 @@ async function executeIntent(
       await showMgrSnapshot(user);
       return;
 
-    case 'list_today_field_inspections':
+    case 'list_today_field_inspections': {
       if (!isManagerMenuUser(user)) {
         await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
         return;
       }
+      // count_only: return a numeric count rather than the full picker list.
+      if (intent.params?.count_only === true) {
+        const todayRows = await getTodayFieldInspections(localJerusalemDate());
+        await clearContext(user.phone);
+        await sendTextMessage({ to: user.phone, text: `יש ${todayRows.length} בדיקות שטח היום.` });
+        return;
+      }
       await showMgrTodayInspections(user);
       return;
+    }
 
     case 'list_open_exceptions': {
       if (!isManagerMenuUser(user)) {
@@ -941,7 +1106,15 @@ async function executeIntent(
       const resolvedExFilter: import('../services/managerViews').FieldExceptionFilter =
         exFilterMap[exFilter] ?? 'open_exceptions';
       const localDateEx = localJerusalemDate();
-      const exRows = await getFieldExceptionRows(localDateEx, resolvedExFilter);
+      // Extract optional dateRange from params; validate basic shape.
+      const exDateRange = extractDateRange(intent.params?.dateRange);
+      const exRows = await getFieldExceptionRows(localDateEx, resolvedExFilter, exDateRange ?? undefined);
+      // count_only: return a numeric count rather than the full picker list.
+      if (intent.params?.count_only === true) {
+        await clearContext(user.phone);
+        await sendTextMessage({ to: user.phone, text: `יש ${exRows.length} חריגים פתוחים.` });
+        return;
+      }
       if (exRows.length === 0) {
         await showMgrExceptionsSub(user);
         return;
@@ -972,10 +1145,19 @@ async function executeIntent(
       const leadsFilter = typeof intent.params?.filter === 'string'
         ? intent.params.filter.trim()
         : 'unassigned';
+      // Extract optional dateRange from params.
+      const leadsDateRange = extractDateRange(intent.params?.dateRange);
+      const leadsCountOnly = intent.params?.count_only === true;
       if (leadsFilter === 'escalated') {
-        // Show escalation candidates list
+        // Show escalation candidates list (dateRange not applied to escalated — time-relative query)
         const { findEscalationCandidates } = await import('../services/incomingLeads');
         const escLeads = await findEscalationCandidates(20);
+        // count_only: return numeric count only.
+        if (leadsCountOnly) {
+          await clearContext(user.phone);
+          await sendTextMessage({ to: user.phone, text: `יש ${escLeads.length} לידים שעברו שעה ללא שיוך.` });
+          return;
+        }
         if (escLeads.length === 0) {
           await sendTextMessage({ to: user.phone, text: 'אין לידים שעברו שעה ללא שיוך כרגע.' });
           return;
@@ -996,8 +1178,14 @@ async function executeIntent(
         });
         await sendChunked(user.phone, `לידים שעברו שעה ללא שיוך (${escLeads.length}):\n\n${escLines.join('\n\n')}\n\nבחר מספר לפרטים, או "חזרה".`);
       } else {
-        // Default: unassigned
-        const unassLeads = await findUnassignedLeadsForAssignment(20);
+        // Default: unassigned; pass dateRange when present (scopes on receivedAt per §6.2)
+        const unassLeads = await findUnassignedLeadsForAssignment(20, leadsDateRange ?? undefined);
+        // count_only: return numeric count only.
+        if (leadsCountOnly) {
+          await clearContext(user.phone);
+          await sendTextMessage({ to: user.phone, text: `יש ${unassLeads.length} לידים לא משויכים.` });
+          return;
+        }
         if (unassLeads.length === 0) {
           await sendTextMessage({ to: user.phone, text: 'אין כרגע לידים לא משויכים.' });
           return;
@@ -1030,30 +1218,44 @@ async function executeIntent(
         ? intent.params.workerName.trim()
         : null;
       const localDateW = localJerusalemDate();
+      // Extract optional dateRange from params.
+      const wovDateRange = extractDateRange(intent.params?.dateRange);
+      // Build a display label for the date range shown in messages.
+      const wovLabel = wovDateRange
+        ? `${fmtDDMM(wovDateRange.from)}–${fmtDDMM(wovDateRange.to)}`
+        : `היום (${fmtDDMM(localDateW)})`;
+      // count_only: return the number of workers with field tasks today.
+      if (intent.params?.count_only === true) {
+        const allWorkersForCount = await getAllWorkersDayOverview(localDateW, wovDateRange ?? undefined);
+        const activeWorkers = allWorkersForCount.filter((w) => w.total > 0).length;
+        await clearContext(user.phone);
+        await sendTextMessage({ to: user.phone, text: `יש ${activeWorkers} עובדים בשטח ${wovLabel}.` });
+        return;
+      }
       if (workerName) {
-        // Named worker — find them in today's overview and show detail.
-        const allWorkers = await getAllWorkersDayOverview(localDateW);
+        // Named worker — find them in the overview and show detail.
+        const allWorkers = await getAllWorkersDayOverview(localDateW, wovDateRange ?? undefined);
         const matched = allWorkers.find((w) =>
           w.workerName.includes(workerName) || workerName.includes(w.workerName),
         );
         if (!matched) {
           // Fallback: show the full overview with a note.
           if (allWorkers.length === 0) {
-            await sendTextMessage({ to: user.phone, text: `לא נמצאו בדיקות היום עבור "${workerName}".` });
+            await sendTextMessage({ to: user.phone, text: `לא נמצאו בדיקות עבור "${workerName}" (${wovLabel}).` });
             return;
           }
           const lines = allWorkers.map((r) => `${r.workerName}: ${r.finished}/${r.total} · חריגים ${r.exceptions}`);
           await clearContext(user.phone);
-          await sendChunked(user.phone, `לא מצאתי עובד בשם "${workerName}". סיכום יום — ${fmtDDMM(localDateW)}:\n${lines.join('\n')}`);
+          await sendChunked(user.phone, `לא מצאתי עובד בשם "${workerName}". סיכום — ${wovLabel}:\n${lines.join('\n')}`);
           return;
         }
         // Show detail for the matched worker.
-        const detail = await getWorkerDayDetail(matched.workerId, localDateW);
+        const detail = await getWorkerDayDetail(matched.workerId, localDateW, wovDateRange ?? undefined);
         await clearContext(user.phone);
         if (detail.total === 0) {
           await sendTextMessage({
             to: user.phone,
-            text: `${matched.workerName} — היום (${fmtDDMM(localDateW)}):\n\nאין בדיקות שטח מתוזמנות היום.`,
+            text: `${matched.workerName} — ${wovLabel}:\n\nאין בדיקות שטח מתוזמנות${wovDateRange ? '' : ' היום'}.`,
           });
           return;
         }
@@ -1064,22 +1266,22 @@ async function executeIntent(
             timeHm: r.timeHm,
             siteCity: r.siteCity,
             fieldStatus: r.fieldStatus,
-            dateStr: localDateW,
+            dateStr: wovDateRange ? wovDateRange.from : localDateW,
           };
           return `${i + 1}. ${formatInspectionListRow(rowData)}`;
         });
         const summary = `סיכום: ${detail.finished}/${detail.total} בוצעו, חריגים פתוחים: ${detail.openExceptions}`;
-        await sendChunked(user.phone, `${matched.workerName} — היום (${fmtDDMM(localDateW)}):\n\n${lines.join('\n\n')}\n\n${summary}`);
+        await sendChunked(user.phone, `${matched.workerName} — ${wovLabel}:\n\n${lines.join('\n\n')}\n\n${summary}`);
       } else {
         // All workers table view.
-        const allWorkers = await getAllWorkersDayOverview(localDateW);
+        const allWorkers = await getAllWorkersDayOverview(localDateW, wovDateRange ?? undefined);
         if (allWorkers.length === 0) {
-          await sendTextMessage({ to: user.phone, text: `אין עובדים עם בדיקות היום (${fmtDDMM(localDateW)}).` });
+          await sendTextMessage({ to: user.phone, text: `אין עובדים עם בדיקות (${wovLabel}).` });
           return;
         }
         const lines = allWorkers.map((r) => `${r.workerName}: ${r.finished}/${r.total} · חריגים ${r.exceptions}`);
         await clearContext(user.phone);
-        await sendChunked(user.phone, `סיכום יום — ${fmtDDMM(localDateW)}:\n${lines.join('\n')}`);
+        await sendChunked(user.phone, `סיכום — ${wovLabel}:\n${lines.join('\n')}`);
       }
       return;
     }
@@ -1089,8 +1291,10 @@ async function executeIntent(
         await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
         return;
       }
+      // Phase 5: expanded searchBy enum includes 4 new dimensions.
+      type SearchByDimension = 'customer' | 'worker' | 'product' | 'address' | 'phone' | 'task_id' | 'field_status';
       const searchBy = typeof intent.params?.searchBy === 'string'
-        ? intent.params.searchBy.trim() as 'customer' | 'worker' | 'product'
+        ? intent.params.searchBy.trim() as SearchByDimension
         : null;
       const query = typeof intent.params?.query === 'string'
         ? intent.params.query.trim()
@@ -1108,6 +1312,10 @@ async function executeIntent(
           customer: 'שם לקוח / חלק ממנו:',
           worker: 'שם עובד / חלק ממנו:',
           product: 'מק"ט (קוד מוצר):',
+          address: 'כתובת / עיר / חלק מהכתובת:',
+          phone: 'מספר טלפון / חלק ממנו:',
+          task_id: 'מספר / מזהה בדיקה:',
+          field_status: 'סטטוס שדה (למשל: ASSIGNED, WAITING_FOR_INFO, FINISHED_FIELD):',
         };
         await setContext(user.phone, { awaiting: 'mgr_search_await_query', mgrSearchKind: searchBy });
         await sendTextMessage({ to: user.phone, text: promptMap[searchBy] ?? 'מה לחפש?' });
@@ -1116,6 +1324,22 @@ async function executeIntent(
 
       // Both searchBy and query present — run the search directly.
       if (searchBy && query) {
+        // Hebrew synonym → fieldStatus enum mapping for field_status searches.
+        const FIELD_STATUS_SYNONYMS: Record<string, string> = {
+          'פתוח': 'ASSIGNED',
+          'אושר': 'CONFIRMED',
+          'בדרך': 'EN_ROUTE',
+          'באתר': 'ARRIVED',
+          'ממתין למידע': 'WAITING_FOR_INFO',
+          'חסר מידע': 'WAITING_FOR_INFO',
+          'סיים': 'FINISHED_FIELD',
+          'סיים שדה': 'FINISHED_FIELD',
+          'בעיה': 'HAS_PROBLEM',
+          'יש בעיה': 'HAS_PROBLEM',
+          'בוטל': 'CANCELED',
+          'סירב': 'DECLINED',
+        };
+
         let searchResults: TodayFieldInspectionRow[] = [];
         if (searchBy === 'customer') {
           const { rows } = await import('../db/connection').then(async ({ pool }) => {
@@ -1154,6 +1378,16 @@ async function executeIntent(
           searchResults = await searchTasksByWorkerName(query);
         } else if (searchBy === 'product') {
           searchResults = await searchTasksByProductCode(query);
+        } else if (searchBy === 'address') {
+          searchResults = await searchTasksByAddress(query);
+        } else if (searchBy === 'phone') {
+          searchResults = await searchTasksByPhone(query);
+        } else if (searchBy === 'task_id') {
+          searchResults = await searchTasksByTaskId(query);
+        } else if (searchBy === 'field_status') {
+          // Resolve Hebrew synonyms to enum value; fall back to the raw query.
+          const resolvedStatus = FIELD_STATUS_SYNONYMS[query] ?? query;
+          searchResults = await searchTasksByFieldStatus(resolvedStatus);
         }
 
         if (searchResults.length === 0) {
@@ -1170,9 +1404,8 @@ async function executeIntent(
             fieldStatus: r.fieldStatus,
             workerName: r.workerName,
           };
-          // For product search, include worker in the row; for worker/customer
-          // search, the worker/customer is already the search context.
-          const showWorker = searchBy === 'product';
+          // For product/status/address/phone/task_id search, include worker in the row.
+          const showWorker = searchBy === 'product' || searchBy === 'address' || searchBy === 'phone' || searchBy === 'task_id' || searchBy === 'field_status';
           return `${i + 1}. ${formatInspectionListRow(rowData, showWorker)}`;
         });
 
@@ -1501,6 +1734,44 @@ async function handleMenuRoute(user: ResolvedUser, route: MenuRoute): Promise<vo
 // detail, capture it, write into TaskField, notify the office. Voice arrives
 // as text via D5-T2 so no special path is needed for voice.
 
+/**
+ * Phase 1 parity — build the numbered "which inspection?" prompt shown when the
+ * worker has more than one open TaskField. Includes customer + address + time
+ * for each row and tells the worker they may reply with a number, a name, or
+ * an address. Callers persist `items.map(i => i.taskFieldId)` into
+ * `ConversationState.disambigTaskFieldIds` so a bare digit reply resolves
+ * without another DB round-trip.
+ */
+function buildDisambigPrompt(items: OpenTaskFieldPreview[]): string {
+  const rows = items
+    .map((it, idx) => {
+      const parts: string[] = [];
+      const name = (it.customerName ?? '').trim();
+      parts.push(name.length > 0 ? name : 'לקוח לא ידוע');
+      const addrBits: string[] = [];
+      if (it.siteAddress && it.siteAddress.trim()) addrBits.push(it.siteAddress.trim());
+      if (it.siteCity && it.siteCity.trim()) addrBits.push(it.siteCity.trim());
+      if (addrBits.length > 0) parts.push(addrBits.join(', '));
+      let row = `${idx + 1}. ${parts.join(' — ')}`;
+      if (it.scheduledStartAt) {
+        const hhmm = new Intl.DateTimeFormat('he-IL', {
+          timeZone: 'Asia/Jerusalem',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).format(it.scheduledStartAt);
+        row += ` · ${hhmm}`;
+      }
+      return row;
+    })
+    .join('\n');
+  return (
+    `יש לך ${items.length} בדיקות פתוחות:\n` +
+    rows +
+    '\n\nהשב במספר, בשם הלקוח, או בכתובת האתר. "ביטול" לחזרה.'
+  );
+}
+
 async function startMissingInfoFlow(user: ResolvedUser): Promise<void> {
   const found = await findOpenTaskFieldForWorker(user.id);
   if (found === null) {
@@ -1509,11 +1780,13 @@ async function startMissingInfoFlow(user: ResolvedUser): Promise<void> {
     return;
   }
   if ('ambiguous' in found) {
-    // D2-T5 will implement disambiguation by customer name / site address.
-    await setContext(user.phone, { awaiting: 'missing_info_disambig' });
+    await setContext(user.phone, {
+      awaiting: 'missing_info_disambig',
+      disambigTaskFieldIds: found.items.map((i) => i.taskFieldId),
+    });
     await sendTextMessage({
       to: user.phone,
-      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+      text: buildDisambigPrompt(found.items),
     });
     return;
   }
@@ -1557,10 +1830,13 @@ async function runMissingInfoDirect(user: ResolvedUser, note: string): Promise<v
     return;
   }
   if ('ambiguous' in found) {
-    await setContext(user.phone, { awaiting: 'missing_info_disambig' });
+    await setContext(user.phone, {
+      awaiting: 'missing_info_disambig',
+      disambigTaskFieldIds: found.items.map((i) => i.taskFieldId),
+    });
     await sendTextMessage({
       to: user.phone,
-      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+      text: buildDisambigPrompt(found.items),
     });
     return;
   }
@@ -1582,10 +1858,13 @@ async function startReportProblemFlow(user: ResolvedUser): Promise<void> {
     return;
   }
   if ('ambiguous' in found) {
-    await setContext(user.phone, { awaiting: 'problem_disambig' });
+    await setContext(user.phone, {
+      awaiting: 'problem_disambig',
+      disambigTaskFieldIds: found.items.map((i) => i.taskFieldId),
+    });
     await sendTextMessage({
       to: user.phone,
-      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+      text: buildDisambigPrompt(found.items),
     });
     return;
   }
@@ -1718,10 +1997,13 @@ async function runProblemDirect(
     return;
   }
   if ('ambiguous' in found) {
-    await setContext(user.phone, { awaiting: 'problem_disambig' });
+    await setContext(user.phone, {
+      awaiting: 'problem_disambig',
+      disambigTaskFieldIds: found.items.map((i) => i.taskFieldId),
+    });
     await sendTextMessage({
       to: user.phone,
-      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+      text: buildDisambigPrompt(found.items),
     });
     return;
   }
@@ -1758,10 +2040,13 @@ async function startStatusUpdateFlow(user: ResolvedUser): Promise<void> {
     return;
   }
   if ('ambiguous' in found) {
-    await setContext(user.phone, { awaiting: 'status_disambig' });
+    await setContext(user.phone, {
+      awaiting: 'status_disambig',
+      disambigTaskFieldIds: found.items.map((i) => i.taskFieldId),
+    });
     await sendTextMessage({
       to: user.phone,
-      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+      text: buildDisambigPrompt(found.items),
     });
     return;
   }
@@ -1917,13 +2202,23 @@ async function runAdvanceStatusDirect(
     return;
   }
   if ('ambiguous' in found) {
+    // The hint (if any) matched multiple open TaskFields, OR no hint was given
+    // and the worker has >1 open. Fall back to the full open list so the worker
+    // sees a numbered picker instead of a bare count.
+    const fullList = await findOpenTaskFieldForWorker(user.id);
+    const items =
+      fullList !== null && 'ambiguous' in fullList ? fullList.items : [];
     await setContext(user.phone, {
       awaiting: 'status_disambig',
       pendingTransition: transition,
+      disambigTaskFieldIds: items.map((i) => i.taskFieldId),
     });
     await sendTextMessage({
       to: user.phone,
-      text: `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
+      text:
+        items.length > 0
+          ? buildDisambigPrompt(items)
+          : `יש לך ${found.count} בדיקות פתוחות. כתוב את שם הלקוח או כתובת האתר כדי לציין את הבדיקה.`,
     });
     return;
   }
@@ -1943,6 +2238,7 @@ async function handleDisambigReply(
   trimmed: string,
   flow: DisambigFlow,
   pendingTransition?: FieldStatusTransition,
+  disambigTaskFieldIds?: string[],
 ): Promise<void> {
   if (/^ביטול$/.test(trimmed)) {
     await clearContext(user.phone);
@@ -1952,19 +2248,36 @@ async function handleDisambigReply(
   if (!trimmed) {
     await sendTextMessage({
       to: user.phone,
-      text: 'לא הצלחתי לזהות. נסה שוב או כתוב "ביטול".',
+      text: 'לא הצלחתי לזהות. נסה שוב, השב במספר, או כתוב "ביטול".',
     });
     return;
   }
-  const found = await resolveOpenTaskFieldByHint(user.id, trimmed);
-  if (found === null || 'ambiguous' in found) {
-    await sendTextMessage({
-      to: user.phone,
-      text: 'לא הצלחתי לזהות. נסה שוב או כתוב "ביטול".',
-    });
-    return;
+
+  // Phase 1 parity — numeric pick. If the caller stashed the ordered TaskField
+  // IDs in the awaiting state (all 4 disambig entry points do), a bare digit
+  // 1..N picks the corresponding row without a DB round-trip.
+  let taskFieldId: string | null = null;
+  const idx = /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : NaN;
+  if (
+    Number.isInteger(idx) &&
+    disambigTaskFieldIds &&
+    idx >= 1 &&
+    idx <= disambigTaskFieldIds.length
+  ) {
+    taskFieldId = disambigTaskFieldIds[idx - 1];
   }
-  const taskFieldId = found.taskFieldId;
+
+  if (taskFieldId === null) {
+    const found = await resolveOpenTaskFieldByHint(user.id, trimmed);
+    if (found === null || 'ambiguous' in found) {
+      await sendTextMessage({
+        to: user.phone,
+        text: 'לא הצלחתי לזהות. נסה שוב, השב במספר, או כתוב "ביטול".',
+      });
+      return;
+    }
+    taskFieldId = found.taskFieldId;
+  }
 
   if (flow === 'status') {
     // If a pendingTransition was pre-stored (free-text set_field_status path),
@@ -2730,6 +3043,67 @@ async function safePriorities(): Promise<string[]> {
 
 const AUTH_REJECT_MSG =
   'אין הרשאה — רק סשה או תצפיתני dev יכולים לשייך לידים.';
+
+/**
+ * Phase 6 — pre-populate the assign-lead flow when the LLM extracted both a
+ * lead hint AND a worker name from a single manager sentence. Best-effort:
+ * if either lookup is empty or ambiguous, returns `false` and the caller
+ * falls back to the normal multi-step flow. On success sets the state to
+ * `assign_lead_confirm` so Sasha only types "אישור" / "ביטול".
+ */
+async function tryPrePopulateAssignLead(
+  user: ResolvedUser,
+  leadRef: string,
+  assigneeName: string,
+): Promise<boolean> {
+  if (!isLeadsViewer(user.name)) {
+    await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
+    return true;
+  }
+  const leads = await findUnassignedLeadsForAssignment(50);
+  if (leads.length === 0) return false;
+
+  // Match lead by substring on fromName / subject.
+  const leadRefLower = leadRef.toLowerCase();
+  const matchingLeads = leadRef
+    ? leads.filter((l) => {
+        const name = (l.fromName ?? '').toLowerCase();
+        const subj = (l.subject ?? '').toLowerCase();
+        return name.includes(leadRefLower) || subj.includes(leadRefLower);
+      })
+    : [];
+  if (leadRef && matchingLeads.length !== 1) return false;
+
+  // Match worker by substring on name.
+  const candidates = await findActiveInspectors();
+  const assigneeLower = assigneeName.toLowerCase();
+  const matchingWorkers = assigneeName
+    ? candidates.filter((c) => c.name.toLowerCase().includes(assigneeLower))
+    : [];
+  if (assigneeName && matchingWorkers.length !== 1) return false;
+
+  // Both hints must resolve to exactly one row for a straight-to-confirm jump.
+  if (!(leadRef && assigneeName && matchingLeads.length === 1 && matchingWorkers.length === 1)) {
+    return false;
+  }
+
+  const lead = matchingLeads[0];
+  const worker = matchingWorkers[0];
+  const leadName = lead.fromName ?? '—';
+
+  await setContext(user.phone, {
+    awaiting: 'assign_lead_confirm',
+    assignLeadSelectedLeadId: lead.id,
+    assignLeadSelectedLeadName: leadName,
+    assignLeadSelectedWorkerId: worker.id,
+    assignLeadSelectedWorkerName: worker.name,
+  });
+  await sendTextMessage({
+    to: user.phone,
+    text: `לשייך את הליד של ${leadName} לעובד ${worker.name}? השב "אישור" או "ביטול".`,
+  });
+  return true;
+}
 
 /** Entry-point: triggered by the `assign_lead` AI intent or a direct call. */
 async function startAssignLeadFlow(user: ResolvedUser): Promise<void> {
@@ -3896,6 +4270,32 @@ async function handleScheduleConfirmReply(
 /** Delegate to the shared formatter helper (Bug 2 fix). */
 function mgrFieldStatusHe(status: string): string {
   return inspFieldStatusHe(status);
+}
+
+/**
+ * Extract and validate a dateRange from an arbitrary `params.dateRange` value
+ * emitted by the LLM.
+ *
+ * Validation rules (D5-T11 Phase 4):
+ *  - Must be an object with string `from` and `to`.
+ *  - Both must match YYYY-MM-DD.
+ *  - `from` must be <= `to` (otherwise invalid → return null, fall back to today).
+ * Returns null when absent or invalid — callers fall back to today behavior.
+ */
+function extractDateRange(
+  raw: unknown,
+): import('../services/managerViews').DateRangeParam | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const from = obj['from'];
+  const to   = obj['to'];
+  if (typeof from !== 'string' || typeof to !== 'string') return null;
+  // Basic YYYY-MM-DD format check.
+  const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+  if (!isoRe.test(from) || !isoRe.test(to)) return null;
+  // from must be <= to (half-open window: from=to means empty range, which is valid but useless).
+  if (from > to) return null;
+  return { from, to };
 }
 
 /** Format DD/MM from a YYYY-MM-DD string (no TZ shift). */

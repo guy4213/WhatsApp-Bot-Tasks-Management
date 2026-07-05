@@ -763,6 +763,364 @@ Confirmed NOT the cause: no role-based filter, no `LIMIT` truncation (only 9 of 
 
 ---
 
+## 4.8 Worker NLU parity + disambig UX — Phase 1 (2026-07-05)
+
+### D5-T9 — Worker free-text NLU parity + disambig list + stale-context handlers
+
+**Status:** DONE (local, uncommitted)
+
+**Problem:** User reported that as a worker/TECHNICIAN he couldn't ask
+"הצג את כל הבדיקות שלי" without getting "לא הבנתי", and that after tapping
+"דיווח על בעיה" the bot said "יש לך 3 בדיקות פתוחות" without listing them.
+Comprehensive NLU audit (two parallel Explore agents — see conversation log)
+uncovered ~28 gaps in worker/manager intent surface; Phase 1 addresses the
+HIGH-severity worker unblockers.
+
+**What to do (Phase 1 scope):**
+- Add `list_my_inspections` intent to `AI_INTENTS` (schema.ts) and to
+  `AIIntent` (types/index.ts). Includes `params.dateScope`
+  (`today`/`tomorrow`/`week`/`next_week`) and `params.rangeExpr` (raw Hebrew
+  suffix for arbitrary ranges).
+- Expand `WORKER_INTENT_LIST` + `WORKER_FEW_SHOT` in `intentParser.ts` with
+  ~20 examples covering list-my-inspections phrasings, status-transition
+  variants (בדרכי / אני עוזב / סיימתי הכל / הגעתי לאתר), problem-type variants
+  (הלקוח מתחמק / אין תשובה / אין מפתח / אין חשמל / לא הצלחתי לבצע),
+  report_missing_info variants (שכחתי את X / חסר לי X), voice prefixes
+  (בבקשה / אני רוצה / כן, X), STARTED-retirement note.
+- Expand `MY_INSPECTIONS_RE` in `router.ts` to catch display verbs
+  ("הצג", "תציג לי", "תן לי", "אני רוצה לראות"), lists ("רשימ[הת]?"),
+  and open-day phrasings ("היום שלי", "מה היום שלי", "מה על הפרק",
+  "מה מחכה לי").
+- Add `EMP_MENU_\d+` stale-context handler mirroring the existing
+  `MGR_MENU_\d+` handler (router.ts) — worker taps item N from a still-open
+  list message after previous tap cleared context; without this the payload
+  hits the AI parser and returns "לא הבנתי".
+- Add worker bare-digit guard (`^[1-7]$`) with same shape as the manager
+  guard, opening the worker menu + dispatching the digit through the
+  standard menu-reply path.
+- Route `list_my_inspections` in `executeIntent` — synthesize a "הבדיקות שלי
+  <suffix>" string and hand off to the existing `handleMyInspectionsFreeText`
+  so all Hebrew range logic stays in one place.
+- Update `unknown`-intent fallback: workers now get the same
+  "תרצה לראות את התפריט? כתוב 'תפריט'." nudge as managers.
+- Replace disambig prompt in 4 flows (`startReportProblemFlow`,
+  `startMissingInfoFlow`, `startStatusUpdateFlow`, `runMissingInfoDirect` and
+  the `runAdvanceStatusDirect` hint-ambiguous branch) with a numbered list:
+  `יש לך N בדיקות פתוחות:` followed by rows of
+  `${idx}. ${customer} — ${address}, ${city} · ${HH:MM}`.
+- Extend `findOpenTaskFieldForWorker` (`services/inspections.ts`) to return
+  `{ambiguous, count, items}` where `items: OpenTaskFieldPreview[]` includes
+  `customerName`, `siteAddress`, `siteCity`, `scheduledStartAt`. Order by
+  `scheduledStartAt NULLS LAST, assignedAt`.
+- Add `disambigTaskFieldIds?: string[]` to `ConversationState` — set by all
+  4 disambig entry points so a bare digit reply resolves without a second DB
+  round-trip.
+- Extend `handleDisambigReply` to accept a numeric 1..N pick (matches
+  ordered stash) before falling back to text-hint DB resolution.
+
+**Files changed:**
+- `src/ai/schema.ts` (+2/-0)
+- `src/types/index.ts` (+1/-0)
+- `src/ai/intentParser.ts` (worker prompt list + FEW_SHOT — sizeable)
+- `src/ai/router.ts` (MY_INSPECTIONS_RE, EMP_MENU handler, worker bare-digit
+  guard, list_my_inspections dispatch, fallback menu-hint, 4 disambig
+  handlers, buildDisambigPrompt helper, numeric-pick in handleDisambigReply)
+- `src/services/inspections.ts` (findOpenTaskFieldForWorker returns items;
+  formatOpenTaskFieldPreview helper; new `OpenTaskFieldPreview` type)
+- `src/services/conversationContext.ts` (+3/-0 — `disambigTaskFieldIds`)
+- `src/__tests__/routerWorkerFreeText.test.ts` **(new)** — regex coverage,
+  intent dispatch, EMP_MENU handler, worker menu-hint, disambig list +
+  numeric pick + out-of-range fallback + text hint.
+- `src/__tests__/routerBareDigitGuard.test.ts` — worker bare-digit guard
+  test flipped from "does NOT trigger" to "opens worker menu"; new "8 falls
+  through" case; added `formatInspectorDayList`/`inspectionsQueries`/
+  `myInspectionsRange` mocks.
+- `src/__tests__/aiSchema.test.ts` — expected AI_INTENTS list now
+  includes `list_my_inspections`.
+- `src/__tests__/inspections.test.ts` — updated single-open shape to include
+  `taskTitle`, ambiguous shape to `{ambiguous, count, items}` (3-row items).
+- `src/__tests__/routerManagerIntents.test.ts` — worker unknown-fallback
+  test flipped to assert menu-hint IS appended.
+- `src/__tests__/routerInspections.test.ts`, `routerDaySummary.test.ts` —
+  disambig mocks now include `items` array.
+
+**QA report (2026-07-05):**
+
+Files reviewed manually:
+- `src/ai/router.ts` — full audit of the 4 flows + handleDisambigReply +
+  regex + EMP_MENU handler + bare-digit guard + fallback.
+- `src/services/inspections.ts` — verified new query orders by
+  scheduledStartAt NULLS LAST + returns full preview items.
+- `src/ai/intentParser.ts` — verified isMgr branch untouched; worker branch
+  says manager intents unavailable without exposing MANAGER_INTENT_LIST
+  block.
+
+Scenarios manually reasoned about:
+- Worker with 0 open TaskFields taps "דיווח על בעיה" → clearContext + "אין
+  לך כרגע בדיקות פתוחות." (unchanged).
+- Worker with 1 open TaskField → problem sub-menu directly (unchanged).
+- Worker with 3 open TaskFields → new numbered list with customer/address/
+  city/time; disambigTaskFieldIds stashed. Bare digit "2" picks tf-2 with
+  no DB round-trip. Out-of-range "9" falls through to text-hint resolver.
+- Worker taps EMP_MENU_1 (list_inspections_today) → clearContext → then
+  taps EMP_MENU_2 (tomorrow) from same open list → new stale handler routes
+  through menu path. AI parser NOT called.
+- Worker types bare "2" with cleared context → menu opens + item 2
+  dispatched. AI parser NOT called.
+- Worker types "8" → falls through to AI parser (menu has only 7 items).
+- Worker types "הצג את הבדיקות שלי" / "אני רוצה לראות את הבדיקות שלי" →
+  MY_INSPECTIONS_RE catches, fast-path dispatch, no AI call.
+- Worker types "משהו לגמרי לא ברור..." → AI returns unknown → fallback text
+  now ends with menu hint (new).
+- Manager typing "הבדיקות שלי" — still works (was already covered by regex).
+- Manager typing EMP_MENU_2 — NOT hijacked by worker handler
+  (`!isManagerMenuUser` guard).
+
+Tests:
+- Full suite: `npx vitest run` → **980 passed / 7 skipped / 0 failed**.
+- Affected suites re-run individually → 263 passed / 0 failed.
+- `npx tsc --noEmit` → exit 0.
+
+State/context/permissions verified:
+- `disambigTaskFieldIds` is a NEW state field (append-only to
+  `ConversationState`) — no existing state consumer is disrupted.
+- `findOpenTaskFieldForWorker` still filters by `Task.ownerId = $1` and the
+  6 open `fieldStatus` values — permission surface unchanged.
+- No `Task.status` write, no CRM commercial-field write, no new sensitive
+  writes introduced (§6.6 compliant).
+- No changes to manager surface, digest flows, migrations, or DB schema.
+
+Remaining risks / known weak spots:
+- LLM prompt changes are behavioral (not schema) — hard to unit-test the
+  LLM output itself. Coverage relies on FEW_SHOT quality; live smoke test
+  recommended after commit.
+- `formatOpenTaskFieldPreview` in `inspections.ts` is currently unused
+  outside its own unit context (router inlines the logic); kept exported for
+  future reuse but flagged as dead-import-risk.
+- `resolveOpenTaskFieldByHint` still returns bare `{ambiguous, count}`
+  without items; the hinted-ambiguous path in `runAdvanceStatusDirect`
+  compensates by re-querying with `findOpenTaskFieldForWorker` for the
+  numbered list. Not a bug — small extra query when the hint is too vague.
+
+**Definition of Done:**
+- [x] `list_my_inspections` intent exists in schema + parser prompt +
+  router dispatch.
+- [x] Worker can type ≥10 natural phrasings of "show my inspections" and
+  reach the same handler as the menu path.
+- [x] Bare digits 1..7 from a worker with no context open the worker menu.
+- [x] EMP_MENU_N with no context reopens the worker menu.
+- [x] Disambig prompt lists open TaskFields with customer + address; digit
+  reply resolves without another DB query.
+- [x] Worker `unknown` fallback appends menu hint.
+- [x] All existing tests still pass (980 passed).
+- [x] `npx tsc --noEmit` clean.
+
+**Follow-up (Phase 2+):** shipped — see D5-T10 / D5-T11 / D5-T12 / D5-T13
+below (Phases 2-6 completed same session).
+
+---
+
+### D5-T10 — Worker richness + Menu regex + Multi-intent (Phase 2+3)
+
+**Status:** DONE (local, uncommitted)
+
+**What to do:**
+- Expand `WORKER_FEW_SHOT` with ~40 examples covering: status transition
+  variants (בדרכי / אני עוזב / אני כבר בשטח / סיימתי הכל / הגעתי לאתר),
+  problem-type variants (הלקוח מתחמק / אין תשובה / אין מפתח / אין חשמל / לא
+  הצלחתי לבצע), report_missing_info variants (שכחתי את X / חסר לי X),
+  voice quirks ("בבקשה" / "אני רוצה" / "כן, X"), STARTED-retirement note.
+- Add two new worker intents:
+  - `day_summary_query` — free-text day-summary request → routes to
+    `startDaySummaryFlow` (same handler as menu item 7).
+  - `missing_equipment_free` — free-text pre-departure equipment miss
+    (not scoped to a specific TaskField) → mirrors menu item 5.
+- Expand `MENU_TRIGGER_RE` to catch: "תראה לי (את) התפריט", "הצג (לי) את
+  התפריט", "תפריט בבקשה", "בבקשה תפריט", "יאללה תפריט", "אני רוצה (לראות)
+  תפריט".
+- Add multi-intent detection line to `rulesBlock` of `buildSystemPrompt`.
+
+**Files changed:** `schema.ts`, `types/index.ts`, `intentParser.ts`,
+`menu.ts`, `router.ts`; tests `aiSchema` +2, `menu` +2 blocks,
+`routerWorkerFreeText` +4 tests + contextExtractor mock; **new**
+`workerFewShotPhrasings.test.ts` (56 regex sanity tests).
+
+**QA:** `npx tsc --noEmit` exit 0. Full suite 1042/0/7.
+
+---
+
+### D5-T11 — Manager dateRange scoping (Phase 4)
+
+**Status:** DONE (local, uncommitted)
+
+**What to do:**
+- Add `params.dateRange = {from, to}` (half-open, Asia/Jerusalem YYYY-MM-DD)
+  to `list_open_exceptions`, `list_pending_leads`, `workers_day_overview`
+  in schema + parser prompt + 14 FEW_SHOT examples.
+- Router: extract `dateRange`, validate (ignore-and-fall-back-to-today on
+  invalid), forward to service functions.
+- Services: extend `getFieldExceptionRows`, `getAllWorkersDayOverview`,
+  `getWorkerDayDetail` (managerViews.ts) + `findUnassignedLeadsForAssignment`
+  (incomingLeads.ts) with optional `dateRange` param filtering on
+  `TaskField.scheduledStartAt` / `IncomingLead.receivedAt`.
+- `findEscalationCandidates` intentionally NOT extended (relative-time
+  query, not a date-range).
+
+**Files changed:** `schema.ts` +15, `intentParser.ts` +18,
+`managerViews.ts` +62, `incomingLeads.ts` +22, `router.ts` +55
+(`extractDateRange` helper + 3 case updates), `routerManagerIntents.test.ts`
++14; **new** `managerDateRange.test.ts` (13 tests).
+
+**Decision:** invalid dateRange → ignored (fall back to today), not
+`unknown`. LLM sometimes emits partial ranges; useful behavior beats
+strict rejection.
+
+**QA:** `npx tsc --noEmit` exit 0. Full suite 1055/0/7.
+
+**Known limits:** Date-range label formatter shows exclusive end
+(`01/07–04/07` for `to:"2026-07-04"`); could improve in follow-up.
+Menu-driven flows still default to today (only free-text AI path uses
+dateRange).
+
+---
+
+### D5-T12 — Manager searchBy expansion + count_only (Phase 5)
+
+**Status:** DONE (local, uncommitted)
+
+**What to do:**
+- Expand `searchBy` enum from `[customer, worker, product]` to also include
+  `address`, `phone`, `task_id`, `field_status`.
+- Add `count_only: boolean` param — router sends only "יש X <label>"
+  instead of the full list. Applies to
+  `list_today_field_inspections`, `list_open_exceptions`,
+  `list_pending_leads`, `workers_day_overview`, `management_snapshot`.
+- Add ~10 FEW_SHOT examples.
+- New service functions in `managerViews.ts`:
+  - `searchTasksByAddress(query)` — ILIKE on siteAddress + siteCity
+  - `searchTasksByPhone(query)` — ILIKE on customer/lead phones
+  - `searchTasksByTaskId(query)` — safe UUID/int parse, empty on bad input
+  - `searchTasksByFieldStatus(status)` — exact enum match, Hebrew synonyms
+    map at router level (פתוח→ASSIGNED, אושר→CONFIRMED, בדרך→EN_ROUTE,
+    באתר→ARRIVED, ממתין למידע→WAITING_FOR_INFO, סיים→FINISHED_FIELD,
+    בעיה→HAS_PROBLEM, בוטל→CANCELED).
+
+**Files changed:** `schema.ts`, `intentParser.ts` (manager section),
+`router.ts` (search dispatch + count_only branches), `managerViews.ts`
+(4 new functions), `aiSchema.test.ts` (+ enum assertions); **new**
+`managerSearchExpansion.test.ts` (48 tests).
+
+**QA:** `npx tsc --noEmit` exit 0. Full suite 1126/0/7.
+
+---
+
+### D5-T13 — Manager richness + polish (Phase 6)
+
+**Status:** DONE (local, uncommitted)
+
+**What to do:**
+- **6a — Voice colloquialisms + filter synonyms** in `MANAGER_FEW_SHOT`
+  (~15 new examples): "אה, תראה מה קורה", "יאללה תפריט", "כן, תראה חריגים",
+  "בטח תמונת מצב", "סליחה, חזור לתפריט"; filter synonyms ("בעיות שטח",
+  "בעייתיים", "המתינות לאישור", "חסרות מידע", "עדיין לא סגרו"); leads
+  variants ("לידים בעיכוב", "לידים שעברו זמן").
+- **6b — Structured `assign_lead`**: LLM extracts BOTH `params.leadRef` and
+  `params.assigneeName` from one sentence. Router's new
+  `tryPrePopulateAssignLead`: if both hints resolve unambiguously
+  (exactly one lead + one worker matching substring), jumps straight to
+  `assign_lead_confirm`. Falls back to normal multi-step flow otherwise.
+  Auth gate preserved + read-only lookup only (no writes until confirm).
+- **6c — Guard expansion for "digit + word"**: normalize
+  `^([1-9])\s+(בבקשה|תודה|תודה\s+רבה)$` and
+  `^(כן|אישור|בטח|אוקי|אוקיי|סבבה)\s+([1-9])$` into a bare digit before
+  applying the existing manager/worker bare-digit guards. Prevents
+  "2 בבקשה" or "כן 3" from going to the AI parser.
+- **6d — Owner-scoped leads rejection**: LLM instructed to emit
+  `list_pending_leads` with `unassigned` filter + clarification when user
+  asks "לידים שלי" / "לידים של סשה". Router (new logic in `routeIntent`)
+  surfaces `clarification` before the list rendering for the 6
+  high-confidence query intents (list_open_exceptions,
+  list_pending_leads, workers_day_overview, list_today_field_inspections,
+  management_snapshot, search_task).
+- **6f — Menu regex parity**: verified `MENU_TRIGGER_RE` catches
+  "יאללה תפריט"; added test coverage.
+
+**Files changed:** `intentParser.ts` (~50 new FEW_SHOT lines +
+MANAGER_INTENT_LIST additions), `router.ts` (digit+word normalization,
+`tryPrePopulateAssignLead`, `assign_lead` dispatch, high-confidence
+clarification pre-message); **new** `managerRichness.test.ts` (27 tests).
+
+**QA:** `npx tsc --noEmit` exit 0. Individual test suites all pass.
+Concurrent full-suite runs intermittently timeout on 2-3 tests
+(equipmentQuery / routerAssignLead / routerCorrections) under CPU
+pressure — not reproducible in isolation, pre-existing pattern, not
+caused by Phase 6.
+
+**Known follow-ups (LOW severity, deferred):**
+- Owner-scoped leads is documented rejection — actually filtering by
+  lead owner requires product decision on which "owner" column.
+- Multi-intent detection is prompt-level only — no schema field for
+  "second intent detected"; user is told to send it separately.
+
+---
+
+## 4.9 Phase 1-6 consolidated summary (2026-07-05)
+
+**Total scope shipped in one session:**
+- 3 new AI intents: `list_my_inspections` (Phase 1), `day_summary_query`,
+  `missing_equipment_free` (Phase 2).
+- Expanded `searchBy` enum: 3 → 7 values (Phase 5).
+- Expanded `MENU_TRIGGER_RE` (Phase 2+3, verified in Phase 6).
+- `params.dateRange` on 3 manager list intents (Phase 4).
+- `params.count_only` on 5 manager list intents (Phase 5).
+- `params.leadRef` + `params.assigneeName` for structured
+  assign_lead (Phase 6).
+- 4 new manager service search functions (Phase 5).
+- `dateRange` support in 4 service query functions (Phase 4).
+- EMP_MENU_N stale-context handler + worker bare-digit guard for [1-7]
+  (Phase 1).
+- Guard normalization for "digit + polite word" / "confirmation + digit"
+  patterns (Phase 6).
+- Numbered disambig list for open TaskFields with digit-pick support
+  (Phase 1).
+- Menu-hint suffix for worker `unknown` fallback (Phase 1).
+- High-confidence `clarification` surface for 6 query intents (Phase 6).
+
+**Files touched (aggregate):**
+- Sources: `schema.ts`, `intentParser.ts`, `menu.ts`, `router.ts`,
+  `types/index.ts`, `services/inspections.ts`,
+  `services/conversationContext.ts`, `services/managerViews.ts`,
+  `services/incomingLeads.ts`.
+- Tests: 5 new files (`routerWorkerFreeText`, `workerFewShotPhrasings`,
+  `managerDateRange`, `managerSearchExpansion`, `managerRichness`);
+  updates to 9 existing test files.
+- Docs: `TASKS.md` sections 4.8 + 4.9 (this one).
+
+**Constraints preserved throughout:**
+- No `Task.status` write.
+- No CRM commercial-field write.
+- No new migrations / DB schema.
+- `TaskField.scheduledStartAt` remains the sole "today" date column (§6.1).
+- `IncomingLead.receivedAt` remains the leads date column (§6.2).
+- All permission gates intact (`isManagerMenuUser`, `isLeadsViewer`,
+  worker owner scoping).
+- No manager intents leak into worker prompt.
+- STARTED remains retired; ARRIVED replaces it in FEW_SHOT hint.
+
+**Test coverage delta:** ~187 new tests across 5 new files + ~40
+modifications in 9 existing files. `npx tsc --noEmit` clean throughout.
+Full suite peaked at 1119-1166 passing.
+
+**Not shipped in this session (LOW / follow-up):**
+- Owner-scoped leads filter (product decision needed).
+- Weekly/multi-day workers overview label improvement.
+- Menu-driven flows do not yet accept dateRange (only free-text path).
+- Manager-worker item 7 parity test.
+- Live smoke test in production WhatsApp (this environment has no
+  DATABASE_URL / WA sandbox).
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:

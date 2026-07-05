@@ -108,24 +108,44 @@ export async function writeProblem(params: WriteProblemParams): Promise<void> {
 
 // ── Open-TaskField lookup ────────────────────────────────────────────────────
 
+/** Preview row for a worker's ambiguous open-TaskField picker. Small subset of
+ *  the columns the daily list uses — enough to disambiguate by eye. */
+export interface OpenTaskFieldPreview {
+  taskFieldId: string;
+  customerName: string | null;
+  siteAddress: string | null;
+  siteCity: string | null;
+  scheduledStartAt: Date | null;
+}
+
 export type OpenTaskFieldResult =
   | { taskFieldId: string; customerName: string | null; taskTitle: string | null }
-  | { ambiguous: true; count: number }
+  | { ambiguous: true; count: number; items: OpenTaskFieldPreview[] }
   | null;
 
 /**
  * Find the one open TaskField for a worker (used before prompting for a note /
  * showing the problem sub-menu). Returns:
- *  - `null`                  → no open TaskField at all
- *  - `{ ambiguous, count }`  → more than one open TaskField → caller must
- *                              disambiguate (D2-T5 will fully implement that)
- *  - `{ taskFieldId, customerName }` → exactly one open TaskField, dispatch it.
+ *  - `null`                                   → no open TaskField at all
+ *  - `{ ambiguous, count, items }`            → more than one open TaskField;
+ *                                                the caller shows the numbered
+ *                                                `items` preview so the worker
+ *                                                can pick by number, name, or
+ *                                                address.
+ *  - `{ taskFieldId, customerName, taskTitle }` → exactly one open TaskField.
  *
  * `Task.ownerId` is the CRM column that identifies the assigned worker (verified
  * against `src/services/tasks.ts` — no `assigneeId` column exists on `Task`).
  */
 export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTaskFieldResult> {
-  const result = await pool.query<{ taskFieldId: string; customerName: string | null; taskTitle: string | null }>(
+  const result = await pool.query<{
+    taskFieldId: string;
+    customerName: string | null;
+    taskTitle: string | null;
+    siteAddress: string | null;
+    siteCity: string | null;
+    scheduledStartAt: Date | null;
+  }>(
     `SELECT tf.id            AS "taskFieldId",
             -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
             COALESCE(
@@ -135,8 +155,11 @@ export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTa
               l.company,
               p.client,
               il."fromName"
-            )                AS "customerName",
-            t.title          AS "taskTitle"
+            )                    AS "customerName",
+            t.title              AS "taskTitle",
+            tf."siteAddress"     AS "siteAddress",
+            tf."siteCity"        AS "siteCity",
+            tf."scheduledStartAt" AS "scheduledStartAt"
        FROM "TaskField" tf
        JOIN "Task"           t  ON t.id  = tf."taskId"
        LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
@@ -145,7 +168,7 @@ export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTa
        LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
       WHERE t."ownerId"    = $1
         AND tf."fieldStatus" = ANY($2::text[])
-      ORDER BY tf."assignedAt"`,
+      ORDER BY tf."scheduledStartAt" NULLS LAST, tf."assignedAt"`,
     [userId, OPEN_FIELD_STATUSES],
   );
   if (result.rowCount === 0) return null;
@@ -156,7 +179,14 @@ export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTa
       taskTitle: result.rows[0].taskTitle,
     };
   }
-  return { ambiguous: true, count: result.rowCount ?? result.rows.length };
+  const items: OpenTaskFieldPreview[] = result.rows.map((r) => ({
+    taskFieldId: r.taskFieldId,
+    customerName: r.customerName,
+    siteAddress: r.siteAddress,
+    siteCity: r.siteCity,
+    scheduledStartAt: r.scheduledStartAt,
+  }));
+  return { ambiguous: true, count: items.length, items };
 }
 
 // ── D2-T5: on-demand status transitions (DEPARTED / ARRIVED / FINISHED) ─────
@@ -422,6 +452,36 @@ export async function resolveOpenTaskFieldByHint(
     };
   }
   return { ambiguous: true, count: result.rowCount ?? result.rows.length };
+}
+
+/**
+ * Format the ambiguous-disambig preview list for the worker. Numbered rows of
+ * `{customer} — {address}[, {city}][ · {HH:MM}]`. Empty fields collapse
+ * gracefully so a row is never just "1. —". Pure — safe to unit-test.
+ */
+export function formatOpenTaskFieldPreview(items: OpenTaskFieldPreview[]): string {
+  return items
+    .map((it, idx) => {
+      const parts: string[] = [];
+      const name = (it.customerName ?? '').trim();
+      parts.push(name.length > 0 ? name : 'לקוח לא ידוע');
+      const addrBits: string[] = [];
+      if (it.siteAddress && it.siteAddress.trim()) addrBits.push(it.siteAddress.trim());
+      if (it.siteCity && it.siteCity.trim()) addrBits.push(it.siteCity.trim());
+      if (addrBits.length > 0) parts.push(addrBits.join(', '));
+      let row = `${idx + 1}. ${parts.join(' — ')}`;
+      if (it.scheduledStartAt) {
+        const hhmm = new Intl.DateTimeFormat('he-IL', {
+          timeZone: 'Asia/Jerusalem',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).format(it.scheduledStartAt);
+        row += ` · ${hhmm}`;
+      }
+      return row;
+    })
+    .join('\n');
 }
 
 // ── Office / manager notifications ───────────────────────────────────────────

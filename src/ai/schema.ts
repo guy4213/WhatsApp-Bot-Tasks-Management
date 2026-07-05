@@ -7,6 +7,9 @@ export const AI_INTENTS = [
   'set_field_status',
   'report_problem',
   'report_missing_info',
+  // Phase 1 worker parity — free-text "show me my inspections" with optional
+  // Hebrew date scope. Router dispatches to `handleMyInspectionsFreeText`.
+  'list_my_inspections',
   'help',
   'unknown',
   // D2-T12/T13/T14: correction intents (site metadata / task reassign / inspection type)
@@ -25,6 +28,9 @@ export const AI_INTENTS = [
   'list_pending_leads',          // item 4: leads awaiting assignment
   'workers_day_overview',        // item 5: all-workers or specific-worker day overview
   'search_task',                 // item 6: search by customer / worker / product
+  // D5-T10 Phase 2: new worker free-text intents
+  'day_summary_query',           // worker asks for their day summary via free text (routes to day_summary handler)
+  'missing_equipment_free',      // worker reports missing equipment before going out (general, not task-scoped)
 ] as const;
 
 // Editable fields the model may target with edit_field.
@@ -68,12 +74,29 @@ export const INTENT_JSON_SCHEMA: Record<string, unknown> = {
     params: {
       type: 'object',
       additionalProperties: true,
-      description: 'Intent-specific extras: title, type, dueDate (ISO), priority, filter, ownerId, customerId, leadId, projectId, note, searchBy (customer|worker|product), query (search term), workerName (for workers_day_overview), filter (open|not_confirmed|has_problem|waiting_for_info|not_closed for list_open_exceptions; unassigned|escalated for list_pending_leads)',
+      description: 'Intent-specific extras: title, type, dueDate (ISO), priority, filter, ownerId, customerId, leadId, projectId, note, searchBy (customer|worker|product), query (search term), workerName (for workers_day_overview), filter (open|not_confirmed|has_problem|waiting_for_info|not_closed for list_open_exceptions; unassigned|escalated for list_pending_leads), dateRange (optional local Asia/Jerusalem date window for list_open_exceptions / list_pending_leads / workers_day_overview — {from: YYYY-MM-DD inclusive, to: YYYY-MM-DD exclusive}; when absent the service defaults to today)',
       properties: {
-        searchBy: { type: 'string', enum: ['customer', 'worker', 'product'], description: 'For search_task: the dimension to search by' },
+        searchBy: {
+          type: 'string',
+          enum: ['customer', 'worker', 'product', 'address', 'phone', 'task_id', 'field_status'],
+          description: 'For search_task: the dimension to search by. customer|worker|product (existing) + address (site address/city) | phone (customer phone) | task_id (internal task or task-field UUID/short id) | field_status (ASSIGNED/CONFIRMED/EN_ROUTE/ARRIVED/WAITING_FOR_INFO/NEEDS_MORE_INFO/FINISHED_FIELD/HAS_PROBLEM/DECLINED/CANCELED).',
+        },
         query: { type: 'string', description: 'For search_task: the search term' },
         workerName: { type: 'string', description: 'For workers_day_overview: the specific worker name (omit for all-workers view)' },
         filter: { type: 'string', description: 'For list_open_exceptions: open|not_confirmed|has_problem|waiting_for_info|not_closed. For list_pending_leads: unassigned|escalated' },
+        count_only: {
+          type: 'boolean',
+          description: 'For list_today_field_inspections / list_open_exceptions / list_pending_leads / workers_day_overview / management_snapshot: when true the caller wants ONLY a numeric answer ("יש 47 בדיקות היום"), not the full list. Set true when the user asked "כמה X" or a similar quantitative question. Default false.',
+        },
+        dateRange: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'For list_open_exceptions / list_pending_leads / workers_day_overview: optional local (Asia/Jerusalem) date window. Both from and to are YYYY-MM-DD strings — inclusive of from, exclusive of to (half-open). When absent, service defaults to today.',
+          properties: {
+            from: { type: 'string', description: 'YYYY-MM-DD local (Asia/Jerusalem) inclusive start' },
+            to:   { type: 'string', description: 'YYYY-MM-DD local (Asia/Jerusalem) exclusive end' },
+          },
+        },
       },
     },
     missing_fields: { type: 'array', items: { type: 'string' } },

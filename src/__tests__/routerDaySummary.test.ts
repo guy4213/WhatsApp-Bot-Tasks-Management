@@ -222,7 +222,11 @@ describe('D2-T10 — option 2 (חסר מידע לדוח) hands off to D2-T7', ()
   it('multi-open → routes to missing_info_disambig (D2-T5 disambig flow)', async () => {
     const user = makeUser();
     dayFieldSummary.mockResolvedValueOnce({ finished: [], waitingForInfoCount: 0 });
-    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 3 });
+    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 3, items: [
+      { taskFieldId: 'tf-a', customerName: 'א', siteAddress: null, siteCity: null, scheduledStartAt: null },
+      { taskFieldId: 'tf-b', customerName: 'ב', siteAddress: null, siteCity: null, scheduledStartAt: null },
+      { taskFieldId: 'tf-c', customerName: 'ג', siteAddress: null, siteCity: null, scheduledStartAt: null },
+    ] });
     await pressMenu(user, 7);
     sendTextMessage.mockClear();
 
@@ -330,7 +334,10 @@ describe('D2-T10 — option 4 (בעיה פתוחה) hands off to D2-T8', () => {
   it('multi-open → routes to problem_disambig', async () => {
     const user = makeUser();
     dayFieldSummary.mockResolvedValueOnce({ finished: [], waitingForInfoCount: 0 });
-    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 2 });
+    findOpenTaskFieldForWorker.mockResolvedValueOnce({ ambiguous: true, count: 2, items: [
+      { taskFieldId: 'tf-a', customerName: 'א', siteAddress: null, siteCity: null, scheduledStartAt: null },
+      { taskFieldId: 'tf-b', customerName: 'ב', siteAddress: null, siteCity: null, scheduledStartAt: null },
+    ] });
     await pressMenu(user, 7);
     sendTextMessage.mockClear();
 

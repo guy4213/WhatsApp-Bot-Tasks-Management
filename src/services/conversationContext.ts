@@ -103,6 +103,10 @@ export interface ConversationState {
   problemType?: FieldProblemType;    // chosen problem type awaiting a free-text elaboration
   pendingTransition?: FieldStatusTransition; // D2-T5: the transition the worker asked for via free
                                              // text, held while we disambiguate which TaskField.
+  // Phase 1 worker parity — when a worker has >1 open TaskField and enters a
+  // *_disambig state, we snapshot the ordered TaskField IDs shown to them so
+  // that a bare digit reply (1..N) resolves without re-querying the DB.
+  disambigTaskFieldIds?: string[];
   // D2-T9: the local date of the equipment reminder tap — retained so the
   // downstream office alert can name the morning the miss was reported for.
   equipmentLocalDate?: string;
@@ -166,7 +170,7 @@ export interface ConversationState {
   mgrWorkerNames?: string[];          // worker names (parallel array)
   mgrLeadIds?: string[];              // numbered list of lead IDs for picker
   mgrLeadNames?: string[];            // lead display names (parallel array)
-  mgrSearchKind?: 'customer' | 'worker' | 'product'; // which search type is active
+  mgrSearchKind?: 'customer' | 'worker' | 'product' | 'address' | 'phone' | 'task_id' | 'field_status'; // which search type is active (Phase 5: 4 new dimensions)
   // Multi-action batch pending confirmation (mgr_multi_action_confirm state).
   // Serializable subset of InspectionActionExtractionItem — no imported types
   // to keep the context module free of AI-layer imports.

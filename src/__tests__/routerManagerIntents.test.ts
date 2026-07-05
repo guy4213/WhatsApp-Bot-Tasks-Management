@@ -388,35 +388,36 @@ describe('intent: list_open_exceptions', () => {
     getFieldExceptionRows.mockResolvedValue(exceptionRows);
     mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'open' } }));
     await handleAIMessage(admin, 'תציג את החריגים');
-    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'open_exceptions');
+    // Phase 4: third arg is dateRange (undefined when absent).
+    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'open_exceptions', undefined);
   });
 
   it('with filter=has_problem calls getFieldExceptionRows("has_problem")', async () => {
     getFieldExceptionRows.mockResolvedValue(exceptionRows);
     mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'has_problem' } }));
     await handleAIMessage(admin, 'משימות עם בעיה');
-    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'has_problem');
+    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'has_problem', undefined);
   });
 
   it('with filter=not_confirmed calls getFieldExceptionRows("not_confirmed")', async () => {
     getFieldExceptionRows.mockResolvedValue(exceptionRows);
     mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'not_confirmed' } }));
     await handleAIMessage(admin, 'אילו בדיקות לא אושרו');
-    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'not_confirmed');
+    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'not_confirmed', undefined);
   });
 
   it('with filter=waiting_for_info calls getFieldExceptionRows("waiting_for_info")', async () => {
     getFieldExceptionRows.mockResolvedValue(exceptionRows);
     mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'waiting_for_info' } }));
     await handleAIMessage(admin, 'ממתינות למידע');
-    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'waiting_for_info');
+    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'waiting_for_info', undefined);
   });
 
   it('with filter=not_closed calls getFieldExceptionRows("not_closed")', async () => {
     getFieldExceptionRows.mockResolvedValue(exceptionRows);
     mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'not_closed' } }));
     await handleAIMessage(admin, 'מי לא סגר יום');
-    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'not_closed');
+    expect(getFieldExceptionRows).toHaveBeenCalledWith(expect.any(String), 'not_closed', undefined);
   });
 
   it('sets awaiting to mgr_exceptions_pick_row when rows found', async () => {
@@ -512,7 +513,8 @@ describe('intent: workers_day_overview', () => {
     });
     mockParseIntent(makeIntent('workers_day_overview', { params: { workerName: 'דני' } }));
     await handleAIMessage(admin, 'סיכום של דני');
-    expect(getWorkerDayDetail).toHaveBeenCalledWith('w1', expect.any(String));
+    // Phase 4: third arg is dateRange (undefined when absent).
+    expect(getWorkerDayDetail).toHaveBeenCalledWith('w1', expect.any(String), undefined);
     expect(lastMsg()).toContain('דני');
     expect(lastMsg()).toContain('1/1 בוצעו');
   });
@@ -534,7 +536,8 @@ describe('intent: workers_day_overview', () => {
     getWorkerDayDetail.mockResolvedValue({ inspections: [], finished: 0, total: 0, openExceptions: 0 });
     mockParseIntent(makeIntent('workers_day_overview', { params: { workerName: 'גיא גבאי' } }));
     await handleAIMessage(admin, 'תן לי דאטה על גיא גבאי');
-    expect(getWorkerDayDetail).toHaveBeenCalledWith('w3', expect.any(String));
+    // Phase 4: third arg is dateRange (undefined when absent).
+    expect(getWorkerDayDetail).toHaveBeenCalledWith('w3', expect.any(String), undefined);
     const msg = lastMsg();
     expect(msg).toContain('גיא גבאי');
     expect(msg).toContain('אין בדיקות שטח מתוזמנות היום');
@@ -624,14 +627,18 @@ describe('fallback for manager users', () => {
     expect(msg).toContain('כתוב "תפריט"');
   });
 
-  it('unknown intent for worker does NOT append menu hint', async () => {
+  it('Phase 1 parity — unknown intent for worker ALSO appends menu hint', async () => {
+    // Before Phase 1: only managers got the "כתוב תפריט" nudge on an unknown
+    // intent, workers saw the raw clarification. After Phase 1: workers get
+    // the same nudge so a dead-end "לא הבנתי" always ends with a next step.
     mockParseIntent(makeIntent('unknown', {
       confidence: 0.1,
-      clarification: 'לא הבנתי',
+      clarification: 'לא הבנתי את הבקשה שלך',
     }));
-    await handleAIMessage(worker, 'שאלה מוזרה');
+    // ≥4 chars so the very-short "show menu directly" short-circuit doesn't fire.
+    await handleAIMessage(worker, 'שאלה מוזרה שלגמרי לא ברורה');
     const msg = lastMsg();
     expect(msg).toContain('לא הבנתי');
-    expect(msg).not.toContain('כתוב "תפריט"');
+    expect(msg).toContain('תרצה לראות את התפריט? כתוב "תפריט".');
   });
 });

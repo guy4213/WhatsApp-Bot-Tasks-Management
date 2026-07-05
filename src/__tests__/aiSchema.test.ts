@@ -77,12 +77,15 @@ describe('AI_INTENTS — v2 field-inspector kinds', () => {
       'assign_lead',
       'correct_inspection_type',
       'correct_task_field_site',
+      'day_summary_query',
       'get_task',
       'help',
+      'list_my_inspections',
       'list_open_exceptions',
       'list_pending_leads',
       'list_today_field_inspections',
       'management_snapshot',
+      'missing_equipment_free',
       'open_manager_menu',
       'reassign_task',
       'report_missing_info',
@@ -203,9 +206,94 @@ describe('parseIntentResult — manager intents', () => {
     expect(r.params).toEqual({});
   });
 
+  it('validates search_task with searchBy=address', () => {
+    const r = parseIntentResult({
+      intent: 'search_task', confidence: 0.9,
+      params: { searchBy: 'address', query: 'הרצל' },
+    });
+    expect(r.params.searchBy).toBe('address');
+    expect(r.params.query).toBe('הרצל');
+  });
+
+  it('validates search_task with searchBy=phone', () => {
+    const r = parseIntentResult({
+      intent: 'search_task', confidence: 0.9,
+      params: { searchBy: 'phone', query: '054' },
+    });
+    expect(r.params.searchBy).toBe('phone');
+  });
+
+  it('validates search_task with searchBy=task_id', () => {
+    const r = parseIntentResult({
+      intent: 'search_task', confidence: 0.9,
+      params: { searchBy: 'task_id', query: '12345' },
+    });
+    expect(r.params.searchBy).toBe('task_id');
+  });
+
+  it('validates search_task with searchBy=field_status', () => {
+    const r = parseIntentResult({
+      intent: 'search_task', confidence: 0.9,
+      params: { searchBy: 'field_status', query: 'WAITING_FOR_INFO' },
+    });
+    expect(r.params.searchBy).toBe('field_status');
+    expect(r.params.query).toBe('WAITING_FOR_INFO');
+  });
+
+  it('validates count_only=true for list_today_field_inspections', () => {
+    const r = parseIntentResult({
+      intent: 'list_today_field_inspections', confidence: 0.92,
+      params: { count_only: true },
+    });
+    expect(r.intent).toBe('list_today_field_inspections');
+    expect(r.params.count_only).toBe(true);
+  });
+
+  it('validates count_only=true for list_open_exceptions', () => {
+    const r = parseIntentResult({
+      intent: 'list_open_exceptions', confidence: 0.9,
+      params: { filter: 'open', count_only: true },
+    });
+    expect(r.params.count_only).toBe(true);
+    expect(r.params.filter).toBe('open');
+  });
+
+  it('validates count_only=true for list_pending_leads', () => {
+    const r = parseIntentResult({
+      intent: 'list_pending_leads', confidence: 0.9,
+      params: { filter: 'unassigned', count_only: true },
+    });
+    expect(r.params.count_only).toBe(true);
+  });
+
+  it('validates count_only=true for workers_day_overview', () => {
+    const r = parseIntentResult({
+      intent: 'workers_day_overview', confidence: 0.92,
+      params: { count_only: true },
+    });
+    expect(r.params.count_only).toBe(true);
+  });
+
   it('validates open_manager_menu', () => {
     const r = parseIntentResult({ intent: 'open_manager_menu', confidence: 0.95 });
     expect(r.intent).toBe('open_manager_menu');
+  });
+
+  it('INTENT_JSON_SCHEMA searchBy enum contains all 7 values', () => {
+    const searchByEnum = (INTENT_JSON_SCHEMA as { properties: { params: { properties: { searchBy: { enum: string[] } } } } }).properties.params.properties.searchBy.enum;
+    expect(searchByEnum).toContain('customer');
+    expect(searchByEnum).toContain('worker');
+    expect(searchByEnum).toContain('product');
+    expect(searchByEnum).toContain('address');
+    expect(searchByEnum).toContain('phone');
+    expect(searchByEnum).toContain('task_id');
+    expect(searchByEnum).toContain('field_status');
+    expect(searchByEnum).toHaveLength(7);
+  });
+
+  it('INTENT_JSON_SCHEMA params.properties contains count_only', () => {
+    const props = (INTENT_JSON_SCHEMA as { properties: { params: { properties: Record<string, unknown> } } }).properties.params.properties;
+    expect(props).toHaveProperty('count_only');
   });
 });
 

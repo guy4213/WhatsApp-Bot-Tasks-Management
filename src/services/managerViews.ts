@@ -15,6 +15,16 @@ import { moduleLogger } from '../utils/logger';
 
 const log = moduleLogger('managerViews');
 
+/**
+ * Optional local (Asia/Jerusalem) date window for manager query helpers.
+ * Half-open: `from` inclusive, `to` exclusive — both YYYY-MM-DD strings.
+ * When absent, each function falls back to `localDate` (today).
+ */
+export interface DateRangeParam {
+  from: string;
+  to: string;
+}
+
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
 export interface ManagementSnapshot {
@@ -300,19 +310,32 @@ export interface FieldExceptionRow {
 /**
  * Numbered list of field exception rows for the §3 sub-menu.
  * `localDate` is used for "today" filters (not_confirmed, not_closed).
+ * `dateRange` is an optional half-open window override; when provided the query
+ * filters scheduledStartAt in [dateRange.from, dateRange.to) instead of today.
  */
 export async function getFieldExceptionRows(
   localDate: string,
   filter: FieldExceptionFilter,
+  dateRange?: DateRangeParam,
 ): Promise<FieldExceptionRow[]> {
   let whereClause: string;
-  const params: unknown[] = [localDate];
+  const params: unknown[] = [];
 
-  // Every filter is DAILY — always scope by scheduledStartAt (Asia/Jerusalem).
-  // Shared prefix; each `case` appends its status predicate on top.
-  const scheduledTodayPrefix = `
+  // Build the scheduledStartAt window. When dateRange is provided, use its
+  // from/to (half-open). Otherwise default to the single localDate day window.
+  const scheduledTodayPrefix = dateRange
+    ? (() => {
+        params.push(dateRange.from, dateRange.to);
+        return `
+    tf."scheduledStartAt" >= ($1::date) AT TIME ZONE 'Asia/Jerusalem'
+    AND tf."scheduledStartAt" <  ($2::date) AT TIME ZONE 'Asia/Jerusalem'`;
+      })()
+    : (() => {
+        params.push(localDate);
+        return `
     tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
     AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'`;
+      })();
 
   switch (filter) {
     case 'open_exceptions':
@@ -385,7 +408,7 @@ export async function getFieldExceptionRows(
     params,
   );
 
-  log.info({ localDate, filter, count: rows.length }, 'Loaded field exception rows');
+  log.info({ localDate, filter, dateRange, count: rows.length }, 'Loaded field exception rows');
   return rows;
 }
 
@@ -412,7 +435,16 @@ export interface WorkerDayOverviewRow {
  */
 export async function getAllWorkersDayOverview(
   localDate: string,
+  dateRange?: DateRangeParam,
 ): Promise<WorkerDayOverviewRow[]> {
+  // Build the scheduled date window: use dateRange when provided, else single day.
+  const scheduledJoin = dateRange
+    ? `AND tf."scheduledStartAt" >= ($1::date) AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  ($2::date) AT TIME ZONE 'Asia/Jerusalem'`
+    : `AND tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'`;
+  const queryParams = dateRange ? [dateRange.from, dateRange.to] : [localDate];
+
   const { rows } = await pool.query<{
     workerId: string;
     workerName: string;
@@ -432,16 +464,15 @@ export async function getAllWorkersDayOverview(
      FROM "User" u
      LEFT JOIN "Task" t       ON t."ownerId" = u.id
      LEFT JOIN "TaskField" tf ON tf."taskId" = t.id
-       AND tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
-       AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+       ${scheduledJoin}
      WHERE upper(u.status::text) = 'ACTIVE'
        AND u.name ~ '[א-ת]'
      GROUP BY u.id, u.name
      ORDER BY u.name ASC`,
-    [localDate],
+    queryParams,
   );
 
-  log.info({ localDate, count: rows.length }, 'Loaded all workers day overview');
+  log.info({ localDate, dateRange, count: rows.length }, 'Loaded all workers day overview');
   return rows.map((r) => ({
     workerId: r.workerId,
     workerName: r.workerName,
@@ -460,11 +491,21 @@ export interface WorkerDayDetail {
 
 /**
  * One worker's day detail for "עובדים וסיכומי יום" option 2 → pick worker.
+ * When `dateRange` is provided, scopes scheduledStartAt to [from, to) instead of today.
  */
 export async function getWorkerDayDetail(
   workerId: string,
   localDate: string,
+  dateRange?: DateRangeParam,
 ): Promise<WorkerDayDetail> {
+  // Build the scheduled date window: use dateRange when provided, else single day.
+  const scheduledWhere = dateRange
+    ? `AND tf."scheduledStartAt" >= ($2::date) AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  ($3::date) AT TIME ZONE 'Asia/Jerusalem'`
+    : `AND tf."scheduledStartAt" >= ($2::date)                       AT TIME ZONE 'Asia/Jerusalem'
+       AND tf."scheduledStartAt" <  (($2::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'`;
+  const queryParams = dateRange ? [workerId, dateRange.from, dateRange.to] : [workerId, localDate];
+
   const { rows } = await pool.query<{
     taskFieldId: string;
     taskId: string;
@@ -510,10 +551,9 @@ export async function getWorkerDayDetail(
      LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
      LEFT JOIN "User" u          ON u.id  = t."ownerId"
      WHERE t."ownerId" = $1
-       AND tf."scheduledStartAt" >= ($2::date)                       AT TIME ZONE 'Asia/Jerusalem'
-       AND tf."scheduledStartAt" <  (($2::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+       ${scheduledWhere}
      ORDER BY tf."scheduledStartAt" ASC`,
-    [workerId, localDate],
+    queryParams,
   );
 
   const inspections: TodayFieldInspectionRow[] = rows.map((r) => ({
@@ -534,7 +574,7 @@ export async function getWorkerDayDetail(
     (r) => r.hasOpenProblem || (r.missingReportInfo && r.fieldStatus === 'WAITING_FOR_INFO'),
   ).length;
 
-  log.info({ workerId, localDate, count: rows.length }, 'Loaded worker day detail');
+  log.info({ workerId, localDate, dateRange, count: rows.length }, 'Loaded worker day detail');
   return { inspections, finished, total: rows.length, openExceptions };
 }
 
@@ -594,6 +634,158 @@ export async function searchTasksByWorkerName(
   );
 
   log.info({ query, count: rows.length }, 'Searched tasks by worker name');
+  return rows;
+}
+
+/**
+ * Alias: the type returned by all search helper functions.
+ * All 4 new search functions below return the same TodayFieldInspectionRow shape
+ * as the existing searchTasksByWorkerName / searchTasksByProductCode.
+ */
+export type TaskSearchRow = TodayFieldInspectionRow;
+
+/** Shared SELECT + JOIN block reused by the 4 new search functions below. */
+const SEARCH_SELECT = `
+  SELECT
+    tf.id                                                             AS "taskFieldId",
+    tf."taskId"                                                       AS "taskId",
+    u.name                                                            AS "workerName",
+    COALESCE(
+      c.name,
+      l."fullName",
+      NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+      l.company,
+      p.client,
+      il."fromName"
+    )                                                                 AS "customerName",
+    t.title                                                           AS "taskTitle",
+    to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI')
+                                                                     AS "timeHm",
+    tf."siteCity"                                                     AS "siteCity",
+    tf."fieldStatus"                                                  AS "fieldStatus",
+    tf.family                                                         AS family,
+    it."labelHe"                                                      AS "typeLabelHe"
+  FROM "TaskField" tf
+  JOIN "Task" t             ON t.id  = tf."taskId"
+  JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
+  LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+  LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+  LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+  LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+  LEFT JOIN "User" u          ON u.id  = t."ownerId"`;
+
+/**
+ * Fuzzy search TaskField rows by site address or city (ILIKE '%query%').
+ * Returns up to 20 rows ordered by scheduledStartAt DESC.
+ * No date filter — returns rows across all dates.
+ */
+export async function searchTasksByAddress(
+  query: string,
+): Promise<TaskSearchRow[]> {
+  const { rows } = await pool.query<TaskSearchRow>(
+    `${SEARCH_SELECT}
+     WHERE (tf."siteAddress" ILIKE '%' || $1 || '%'
+        OR  tf."siteCity"    ILIKE '%' || $1 || '%')
+     ORDER BY tf."scheduledStartAt" DESC
+     LIMIT 20`,
+    [query],
+  );
+  log.info({ query, count: rows.length }, 'Searched tasks by address');
+  return rows;
+}
+
+/**
+ * Fuzzy search TaskField rows by customer phone number (ILIKE '%query%').
+ * Searches TaskField.fieldContactPhone (the on-site contact phone stored on the
+ * field visit row). Returns up to 20 rows ordered by scheduledStartAt DESC.
+ * No date filter — returns rows across all dates.
+ */
+export async function searchTasksByPhone(
+  query: string,
+): Promise<TaskSearchRow[]> {
+  const { rows } = await pool.query<TaskSearchRow>(
+    `${SEARCH_SELECT}
+     WHERE tf."fieldContactPhone" ILIKE '%' || $1 || '%'
+     ORDER BY tf."scheduledStartAt" DESC
+     LIMIT 20`,
+    [query],
+  );
+  log.info({ query, count: rows.length }, 'Searched tasks by phone');
+  return rows;
+}
+
+/**
+ * Search TaskField rows by task/task-field ID.
+ * Accepts a UUID (TaskField.id or Task.id) or a short numeric string suffix.
+ * Returns empty gracefully on bad/non-matching input — never throws.
+ * Returns up to 20 rows ordered by scheduledStartAt DESC.
+ */
+export async function searchTasksByTaskId(
+  query: string,
+): Promise<TaskSearchRow[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  // UUID pattern — match against both TaskField.id and Task.id.
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  // Numeric short id — match as substring of the UUID hex string.
+  const numericRe = /^\d+$/;
+
+  try {
+    if (uuidRe.test(trimmed)) {
+      // Exact UUID match: check TaskField.id OR Task.id.
+      const { rows } = await pool.query<TaskSearchRow>(
+        `${SEARCH_SELECT}
+         WHERE tf.id = $1 OR t.id = $1
+         ORDER BY tf."scheduledStartAt" DESC
+         LIMIT 20`,
+        [trimmed],
+      );
+      log.info({ query: trimmed, count: rows.length }, 'Searched tasks by task_id (uuid)');
+      return rows;
+    } else if (numericRe.test(trimmed)) {
+      // Numeric substring — cast to text and LIKE match against both IDs.
+      const { rows } = await pool.query<TaskSearchRow>(
+        `${SEARCH_SELECT}
+         WHERE tf.id::text ILIKE '%' || $1 || '%'
+            OR t.id::text  ILIKE '%' || $1 || '%'
+         ORDER BY tf."scheduledStartAt" DESC
+         LIMIT 20`,
+        [trimmed],
+      );
+      log.info({ query: trimmed, count: rows.length }, 'Searched tasks by task_id (numeric)');
+      return rows;
+    }
+    // Not a UUID and not numeric — return empty gracefully.
+    log.info({ query: trimmed }, 'searchTasksByTaskId: unrecognized format, returning empty');
+    return [];
+  } catch (err) {
+    // Defensive: never throw to the caller, log and return empty.
+    log.warn({ query: trimmed, err }, 'searchTasksByTaskId: query error, returning empty');
+    return [];
+  }
+}
+
+/**
+ * Search TaskField rows by fieldStatus (exact enum match).
+ * Accepts both raw enum values ("WAITING_FOR_INFO") and common Hebrew synonym
+ * mappings which the ROUTER resolves before calling this function.
+ * No date filter — returns up to 50 rows across all dates, ordered by
+ * scheduledStartAt DESC.
+ */
+export async function searchTasksByFieldStatus(
+  status: string,
+): Promise<TaskSearchRow[]> {
+  const trimmed = status.trim();
+  if (!trimmed) return [];
+  const { rows } = await pool.query<TaskSearchRow>(
+    `${SEARCH_SELECT}
+     WHERE tf."fieldStatus" = $1
+     ORDER BY tf."scheduledStartAt" DESC
+     LIMIT 50`,
+    [trimmed],
+  );
+  log.info({ status: trimmed, count: rows.length }, 'Searched tasks by field status');
   return rows;
 }
 
