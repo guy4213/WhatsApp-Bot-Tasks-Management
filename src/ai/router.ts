@@ -5574,8 +5574,20 @@ async function tryPivotToAIIntent(
      intent.transition === 'DEPARTED' ||
      intent.transition === 'ARRIVED' ||
      intent.transition === 'FINISHED');
+  // D5-T19b: while the worker is elaborating a problem type they ALREADY
+  // picked explicitly from the numbered sub-menu (problem_type_note), their
+  // reply can never legitimately be a "new" report_problem — it's the note
+  // for the problem they're already mid-report on. Without this guard, an
+  // elaboration note that itself describes a problem (extremely common —
+  // that's the whole point of the note) gets high-confidence classified as
+  // report_problem by the AI, silently discarding the explicitly-chosen
+  // PROFESSIONAL_ISSUE/OTHER type and the note text itself (see TASKS.md
+  // D5-T19b). Genuine escapes (menu, "my inspections", status changes) are
+  // untouched — only this one narrow, always-false-positive case is excluded.
   const isProblemPivot =
-    intent.intent === 'report_problem' && intent.problem_type !== null;
+    intent.intent === 'report_problem' &&
+    intent.problem_type !== null &&
+    ctx.awaiting !== 'problem_type_note';
 
   if (!isTopLevelPivot && !isStatusPivot && !isProblemPivot) return false;
 

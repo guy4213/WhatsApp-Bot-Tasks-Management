@@ -1653,26 +1653,95 @@ before the full-suite run).
 24h/template fallback and per-alert audit logging remain open follow-ups.
 
 #### D5-T19b — "בעיה מקצועית" (PROFESSIONAL_ISSUE) / OTHER note not saved properly
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** in TC-5.1, when the worker selects
 PROFESSIONAL_ISSUE or OTHER and then types a note, the note is not saved
 correctly.
 
-**What to do:**
-- Reproduce: menu item 4 → sub-menu → pick 6 (PROFESSIONAL_ISSUE) or 7
-  (OTHER) → prompt "פרט בבקשה:" → type note → expected: writeProblem with
-  problemType + note.
-- Trace `handleProblemTypeNoteReply` at `src/ai/router.ts:2029` — it calls
-  `extractNote` then `writeProblem({ taskFieldId, problemType, note, ... })`.
-- Verify `writeProblem` in `src/services/inspections.ts` actually persists
-  `problemNote` (check the UPDATE SQL — is the note column being written?).
-- Verify the manager alert message includes the note verbatim.
-- Add a unit test that seeds `awaiting: 'problem_type_note'` +
-  `problemType='PROFESSIONAL_ISSUE'` and asserts writeProblem receives the
-  note.
+**Investigation.** `handleProblemTypeNoteReply` (router.ts) and `writeProblem`
+(`src/services/inspections.ts`) were both verified correct in isolation — the
+`UPDATE ... SET "problemNote" = $3` writes the note fine, and there was
+already a passing unit test for this exact scenario. So the note loss does
+NOT happen inside the note-capture handler itself.
 
-**Priority:** URGENT — data-integrity bug.
+**Actual root cause:** the D5-T16 (2026-07-05) "universal AI-first pivot"
+escape hatch (`tryPivotToAIIntent`, router.ts). `'problem_type_note'` is one
+of the `TEXT_CAPTURE_PIVOT_STATES` — while the worker is typing their
+elaboration note, the message is first run through the LLM; if it classifies
+with high confidence as a top-level intent, the current capture is dropped
+and the message is re-dispatched as a brand-new intent instead. One of the
+pivot conditions was:
+```js
+const isProblemPivot =
+  intent.intent === 'report_problem' && intent.problem_type !== null;
+```
+An elaboration note **describing a problem** (the entire point of the note —
+e.g. "לא ניתן לבצע מדידה בגלל עבודות בנייה במקום") is exactly the kind of
+text the LLM classifies as `report_problem` with high confidence. So typing
+the note itself triggered the pivot:
+- The already-chosen `problemType` (PROFESSIONAL_ISSUE/OTHER, picked from the
+  numbered sub-menu) and `taskFieldId` were discarded (`clearContext`).
+- The message was re-dispatched as a **fresh** `report_problem` intent →
+  `runProblemDirect(user, problemType, note)`, where `problemType` is
+  whatever the LLM *re-guessed* from the note text alone (frequently a
+  different type than what the worker explicitly picked), and `note` comes
+  from a fresh `intent.params.note` extraction (may differ from, or be empty
+  relative to, the actual typed text).
+- Worse: if the worker had more than one open `TaskField`, `runProblemDirect`
+  hits the ambiguous branch → `problem_disambig` → after picking which
+  TaskField, `handleDisambigReply`'s `flow === 'problem'` branch reopens the
+  **entire 7-item problem-type sub-menu from scratch** — the worker's
+  problemType choice AND their typed note are both silently lost; they must
+  restart the whole flow with no explanation.
+
+**Fix (scope agreed with user — preserve genuine mid-flow escapes):**
+Removing `'problem_type_note'` from `TEXT_CAPTURE_PIVOT_STATES` entirely was
+rejected — that would also disable legitimate escapes (typing "תפריט" or
+"הבדיקות שלי" while elaborating a problem note must keep working). Instead,
+narrowed `isProblemPivot` to exclude this one specific state:
+```js
+const isProblemPivot =
+  intent.intent === 'report_problem' &&
+  intent.problem_type !== null &&
+  ctx.awaiting !== 'problem_type_note';
+```
+Rationale: once the worker has explicitly picked PROFESSIONAL_ISSUE/OTHER
+from the numbered sub-menu, nothing they type next can legitimately be a
+"new" `report_problem` — it is, by definition, the note for the
+problem-report already in progress. `isTopLevelPivot` (menu, "my
+inspections", search, etc.) and `isStatusPivot` (status changes) are
+untouched — those remain valid escapes mid-note.
+
+**Files changed:**
+- `src/ai/router.ts` — `isProblemPivot` condition in `tryPivotToAIIntent`.
+
+**Files changed (tests):**
+- `src/__tests__/routerFreeTextAwait.test.ts` — 2 new tests in the "D5-T16 —
+  universal AI-first pivot" describe block:
+  1. Regression: an elaboration note in `problem_type_note` that the LLM
+     classifies as `report_problem` (different guessed type) does NOT pivot
+     — `writeProblem` is called with the worker's ORIGINALLY chosen
+     `problemType` and the actual typed note. Fails against the old code.
+  2. A genuine top-level escape (`open_manager_menu`, high confidence) from
+     `problem_type_note` still pivots normally (`clearContext` called,
+     `writeProblem` NOT called) — proves the fix didn't regress legitimate
+     mid-flow escapes.
+
+**Tests run:** `npx tsc --noEmit` clean. Full suite `npx vitest run` — 1137
+passed / 7 skipped / 0 failed (same pre-existing worker-pool OOM noted in
+X-T15a, unrelated to this change).
+
+**Scope note:** the same theoretical exposure (`isProblemPivot` not scoped to
+a particular state) could in principle also misfire from other note-capture
+states (e.g. `missing_info_note`) if a note happens to read like a problem
+description — not fixed here (out of scope; no report of it occurring, and
+`report_missing_info`/`WAITING_FOR_INFO` have no matching pivot condition at
+all, so they were never exposed the way `problem_type_note` was). Flag as a
+follow-up if it's ever reported.
+
+**Priority:** URGENT — data-integrity bug. Root cause was a routing/pivot
+bug, not a data-write bug.
 
 #### D5-T19c — Localize fieldStatus enums shown to user (FINISHED_FIELD → "הסתיים בשטח")
 **Status:** OPEN

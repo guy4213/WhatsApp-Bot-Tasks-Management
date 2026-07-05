@@ -451,4 +451,59 @@ describe('D5-T16 — universal AI-first pivot from text-capture states', () => {
     // Note went through.
     expect(writeMissingInfo).toHaveBeenCalled();
   });
+
+  // D5-T19b regression: an elaboration note for a problem type the worker
+  // ALREADY picked explicitly from the numbered sub-menu must never be
+  // hijacked as a "new" report_problem pivot — even when the note itself
+  // describes a problem (which is the whole point of the note, so the LLM
+  // classifying it as report_problem is the common case, not an edge case).
+  it('problem_type_note: elaboration note classified as report_problem does NOT pivot — writes with the ORIGINALLY chosen problemType', async () => {
+    parseIntentMock.mockReset().mockResolvedValue({
+      // The LLM sees a problem description and confidently (mis)classifies
+      // it as a fresh report_problem with its OWN guessed type — different
+      // from what the worker already picked (PROFESSIONAL_ISSUE).
+      intent: 'report_problem', confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: { note: 'עבודות בנייה מונעות מדידה' },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: 'CANNOT_PERFORM',
+    });
+    extractNote.mockResolvedValueOnce(null); // falls back to raw text
+
+    await sendWithCtx(
+      { awaiting: 'problem_type_note', taskFieldId: 'tf-8', problemType: 'PROFESSIONAL_ISSUE' },
+      'לא ניתן לבצע מדידה בגלל עבודות בנייה במקום',
+    );
+
+    // Pivot did NOT clear the capture context and re-dispatch as a fresh
+    // report_problem — the note capture ran instead.
+    expect(writeProblem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskFieldId: 'tf-8',
+        problemType: 'PROFESSIONAL_ISSUE', // the worker's original choice, NOT 'CANNOT_PERFORM'
+        note: 'לא ניתן לבצע מדידה בגלל עבודות בנייה במקום',
+      }),
+    );
+  });
+
+  it('problem_type_note: a genuine top-level escape (e.g. "פתח תפריט") still pivots normally', async () => {
+    parseIntentMock.mockReset().mockResolvedValue({
+      intent: 'open_manager_menu', confidence: 0.97,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+
+    await sendWithCtx(
+      { awaiting: 'problem_type_note', taskFieldId: 'tf-9', problemType: 'OTHER' },
+      'תראה לי את התפריט הראשי',
+    );
+
+    // The pivot fired: context was cleared and dispatched as a new intent
+    // instead of being captured as the problem note.
+    expect(clearContext).toHaveBeenCalled();
+    expect(writeProblem).not.toHaveBeenCalled();
+  });
 });
