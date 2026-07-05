@@ -521,4 +521,15 @@ describe('getMyFieldInspectionsToday', () => {
     const rows = await getMyFieldInspectionsToday(USER_ID, LOCAL_DATE);
     expect(rows).toHaveLength(0);
   });
+
+  // D5-T19o — parity with the free-text "הבדיקות שלי" path
+  // (getMyInspectionsInRange / getInspectionsForWorkerOnDate), both of which
+  // already exclude CANCELED/DECLINED. Without this filter, menu item 7 and
+  // free-text "הבדיקות שלי" could disagree on row count for the same day.
+  it('excludes CANCELED / DECLINED rows (parity with getMyInspectionsInRange)', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await getMyFieldInspectionsToday(USER_ID, LOCAL_DATE);
+    const [sql] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/tf\."fieldStatus"\s+NOT IN\s+\('CANCELED','DECLINED'\)/);
+  });
 });

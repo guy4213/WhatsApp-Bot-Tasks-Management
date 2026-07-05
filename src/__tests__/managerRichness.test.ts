@@ -474,6 +474,30 @@ describe('Phase 6c — guard expansion for "digit + word" inputs', () => {
     await handleAIMessage(makeAdmin(), 'תודה 5');
     expect(parseIntentMock).toHaveBeenCalled();
   });
+
+  // D5-T19m — QA report TC-8.3 claimed "2 בבקשה" / "כן 2" / "אוקי 4" are NOT
+  // intercepted live. The tests above only exercise the FRESH-message path
+  // (getContext pinned to null via mockResolvedValue). The realistic live
+  // scenario is a manager who is ALREADY looking at the menu — i.e. an
+  // active `mgr_menu_root` context already stored — and then replies with a
+  // polite/confirmation-prefixed digit. Restore the stateful ctxStore-backed
+  // implementation (undoing the `mockResolvedValue(null)` pin from earlier
+  // tests in this file) to reproduce that scenario faithfully.
+  it('"2 בבקשה" from an ACTIVE mgr_menu_root context still dispatches item 2 (no AI parser)', async () => {
+    getContext.mockImplementation(async () => ctxStore);
+    ctxStore = { awaiting: 'mgr_menu_root' };
+    await handleAIMessage(makeAdmin(), '2 בבקשה');
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    expect(msgLog.some((m) => /בדיקות שטח להיום/.test(m))).toBe(true);
+  });
+
+  it('"אוקי 3" from an ACTIVE mgr_menu_root context still dispatches item 3', async () => {
+    getContext.mockImplementation(async () => ctxStore);
+    ctxStore = { awaiting: 'mgr_menu_root' };
+    await handleAIMessage(makeAdmin(), 'אוקי 3');
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    expect(msgLog.some((m) => /חריגים ודיווחים/.test(m))).toBe(true);
+  });
 });
 
 // ── 6d: Owner-scoped leads phrasing (documented rejection) ────────────────────

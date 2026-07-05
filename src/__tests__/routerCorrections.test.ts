@@ -127,8 +127,10 @@ vi.mock('../services/chatHistory', () => ({
 }));
 
 vi.mock('../ai/provider', () => ({ getProvider: () => ({ name: 'test' }) }));
+const parseIntentMock = vi.fn().mockRejectedValue(new Error('unused'));
 vi.mock('../ai/intentParser', () => ({
-  parseIntent: vi.fn().mockRejectedValue(new Error('unused')),
+  parseIntent: (...a: unknown[]) => parseIntentMock(...a),
+  buildSystemPrompt: vi.fn().mockReturnValue(''),
 }));
 vi.mock('../utils/auditLog', () => ({
   writeAuditLog: vi.fn().mockResolvedValue('audit-id'),
@@ -223,6 +225,7 @@ beforeEach(() => {
   extractNote.mockReset(); extractNote.mockResolvedValue(null);
   listInspectionTypes.mockReset(); listInspectionTypes.mockResolvedValue([]);
   getTaskFieldForCorrection.mockReset(); getTaskFieldForCorrection.mockResolvedValue(null);
+  parseIntentMock.mockReset(); parseIntentMock.mockRejectedValue(new Error('unused'));
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
   sendListMessage.mockReset(); sendListMessage.mockResolvedValue(undefined);
   setContext.mockClear();
@@ -775,5 +778,113 @@ describe('D2-T14 — correct_inspection_type', () => {
     expect(text).toContain('גהות');
     // Only the matching type should appear.
     expect(text).not.toContain('רעש – סביבתי');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D5-T19l: extended mid-flow pivot — task-hint ENTRY states now escape too
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// correct_site_pick_task / reassign_pick_task / correct_type_pick_task /
+// correct_type_await_search are the "type a free-text task reference" states
+// that begin the D2-T12/T13/T14 correction flows. Nothing has been selected
+// yet at that point, so a confident top-level pivot (e.g. "תראה לי את
+// התפריט") should escape cleanly instead of being fed into the resolver as
+// literal search text — matching the D5-T16 pivot already applied to
+// mgr_search_await_query.
+
+describe('D5-T19l — mid-flow pivot from task-hint ENTRY states', () => {
+  it('correct_site_pick_task: confident "open menu" pivots — does NOT call resolveOpenTaskFieldByHint', async () => {
+    await driveIntent(makeWorker(), {
+      intent: 'correct_task_field_site', confidence: 1, task_reference: null,
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    expect(ctxStore?.awaiting).toBe('correct_site_pick_task');
+    sendTextMessage.mockClear();
+
+    parseIntentMock.mockReset().mockResolvedValue({
+      intent: 'open_manager_menu', confidence: 0.97,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+
+    await sendMessage(makeWorker(), 'תראה לי את התפריט הראשי');
+
+    expect(clearContext).toHaveBeenCalled();
+    expect(resolveOpenTaskFieldByHint).not.toHaveBeenCalled();
+  });
+
+  it('correct_site_pick_task: a plain name still resolves as a task-hint (non-regression)', async () => {
+    await driveIntent(makeWorker(), {
+      intent: 'correct_task_field_site', confidence: 1, task_reference: null,
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: 'כהן' });
+
+    // Short single-word hint (≤6 chars, no space) — skips the LLM pivot check
+    // entirely (same short-token guard as the existing note-state tests).
+    await sendMessage(makeWorker(), 'כהן');
+
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    expect(resolveOpenTaskFieldByHint).toHaveBeenCalledWith('u-worker', 'כהן');
+    expect(ctxStore?.awaiting).toBe('correct_site_await_value');
+  });
+
+  it('reassign_pick_task: confident "my inspections" pivots — does NOT call resolveTask', async () => {
+    await driveIntent(makeManager(), {
+      intent: 'reassign_task', confidence: 1, task_reference: null,
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: true,
+      transition: null, problem_type: null,
+    });
+    expect(ctxStore?.awaiting).toBe('reassign_pick_task');
+    sendTextMessage.mockClear();
+
+    parseIntentMock.mockReset().mockResolvedValue({
+      intent: 'open_manager_menu', confidence: 0.97,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+
+    await sendMessage(makeManager(), 'תראה לי את התפריט הראשי');
+
+    expect(clearContext).toHaveBeenCalled();
+    expect(resolveTask).not.toHaveBeenCalled();
+  });
+
+  it('correct_type_pick_task: confident pivot escapes; low-confidence reply still resolves as a task hint', async () => {
+    await driveIntent(makeWorker(), {
+      intent: 'correct_inspection_type', confidence: 1, task_reference: null,
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: true, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    expect(ctxStore?.awaiting).toBe('correct_type_pick_task');
+    sendTextMessage.mockClear();
+    clearContext.mockClear(); // driveIntent's "כן" reply to intent_confirm already called this once
+
+    // Below CONF_HIGH → no pivot, falls through to the task-hint resolver.
+    parseIntentMock.mockReset().mockResolvedValue({
+      intent: 'search_task', confidence: 0.4,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-2', customerName: 'מזרחי דוד' });
+
+    await sendMessage(makeWorker(), 'מזרחי דוד כתובת חדשה');
+
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(resolveOpenTaskFieldByHint).toHaveBeenCalledWith('u-worker', 'מזרחי דוד כתובת חדשה');
   });
 });

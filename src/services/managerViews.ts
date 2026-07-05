@@ -242,6 +242,12 @@ export async function getTodayFieldInspections(
  * SQL shape: identical to getTodayFieldInspections plus `AND t."ownerId" = $2`.
  * The localDate param ($1) drives the Asia/Jerusalem day window; userId ($2)
  * filters to the requesting user. Does NOT use assignedAt or finishedAt.
+ *
+ * Excludes CANCELED / DECLINED (D5-T19o parity fix) — matches the free-text
+ * "הבדיקות שלי" path (`getMyInspectionsInRange`) and the worker's own
+ * "today" list (`getInspectionsForWorkerOnDate`), both of which already
+ * excluded these non-actionable statuses. Without this, menu item 7 and
+ * free-text "הבדיקות שלי" could disagree on row count for the same day.
  */
 export async function getMyFieldInspectionsToday(
   userId: string,
@@ -290,6 +296,7 @@ export async function getMyFieldInspectionsToday(
      WHERE tf."scheduledStartAt" >= ($1::date)                       AT TIME ZONE 'Asia/Jerusalem'
        AND tf."scheduledStartAt" <  (($1::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
        AND t."ownerId" = $2
+       AND tf."fieldStatus" NOT IN ('CANCELED','DECLINED')
      ORDER BY tf."scheduledStartAt" ASC`,
     [localDate, userId],
   );

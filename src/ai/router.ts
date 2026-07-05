@@ -218,11 +218,27 @@ const TEXT_CAPTURE_PIVOT_STATES: Set<AwaitingKind> = new Set<AwaitingKind>([
   'inspection_need_info_note',
   'pre_reminder_need_info_note',
   'mgr_search_await_query',
+  // D5-T19l — "task/customer hint" ENTRY states: the user has just started a
+  // correction/reassign flow and is asked for a free-text reference (name /
+  // address / task id) to look up a task. Nothing has been selected yet, so
+  // pivoting away loses no in-progress state — same shape as
+  // `mgr_search_await_query` above, just missed when D5-T16 first shipped.
+  // Without this, typing "תפריט" or another top-level request here was fed
+  // straight into the task-hint resolver as literal search text instead of
+  // being recognized, leaving the user stuck without "ביטול".
+  'correct_site_pick_task',
+  'reassign_pick_task',
+  'correct_type_pick_task',
+  'correct_type_await_search',
   // NOTE: schedule_await_time / schedule_await_duration / correct_site_*
-  // states are deliberately EXCLUDED — the user is deep in a specific
-  // multi-step flow and their reply is meant as a value (date / minutes /
-  // corrected address). Pivoting mid-flow would cause more accidental
-  // exits than intentional ones.
+  // (except pick_task above) / correct_site_confirm_extracted /
+  // correct_type_pick_from_list / correct_type_confirm / *_disambig / any
+  // *_confirm state are deliberately EXCLUDED — the user is deep in a
+  // specific multi-step flow (or has already narrowed to a specific
+  // candidate) and their reply is meant as a value (date / minutes /
+  // corrected address / yes-no confirmation) or a list-refine search.
+  // Pivoting mid-flow there would cause more accidental exits than
+  // intentional ones.
 ]);
 
 // Nav words a numeric picker will accept without escaping to AI: pure digits,
@@ -3161,7 +3177,7 @@ async function safePriorities(): Promise<string[]> {
 // After assignLead() the D3-T3 poller picks up the new ownerId automatically.
 
 const AUTH_REJECT_MSG =
-  'אין הרשאה — רק סשה או תצפיתני dev יכולים לשייך לידים.';
+  'אין הרשאה לשייך לידים. אם אתה חושב שזה נחוץ, פנה למנהל המערכת.';
 
 /**
  * Phase 6 — pre-populate the assign-lead flow when the LLM extracted both a

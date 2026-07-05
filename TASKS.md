@@ -2137,7 +2137,7 @@ falls through to free-text capture, menu item 5 opens the sub-menu).
 **Priority:** IMPORTANT — pairs with D5-T19d.
 
 #### D5-T19l — Extended pivot experience (mid-flow escape without "ביטול")
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What to do:** D5-T16 already added `TEXT_CAPTURE_PIVOT_STATES` for
 note-capture states. Extend the concept to any state where the user
@@ -2150,11 +2150,56 @@ too restrictive.
 note captures — those should still capture the answer, not pivot away
 from a legitimate free-text response. Balance carefully.
 
+**Investigation:** reviewed every `AwaitingKind` not already in either
+`TEXT_CAPTURE_PIVOT_STATES` or `NUMERIC_PICKER_AWAITING` (the two existing
+escape mechanisms). Found 4 states that are structurally identical to
+`mgr_search_await_query` (already in the pivot list) but were missed when
+D5-T16 first shipped: `correct_site_pick_task`, `reassign_pick_task`,
+`correct_type_pick_task`, `correct_type_await_search`. All four are
+flow-ENTRY states — the user has just been asked "לאיזו בדיקה/משימה
+הכוונה?" and hasn't selected/committed anything yet. Before this fix,
+typing "תפריט" or any other top-level request there was fed straight into
+`resolveOpenTaskFieldByHint` / `resolveTask` as literal search text (a
+guaranteed "not found" or a wrong search), leaving the user stuck without
+typing "ביטול" — exactly the complaint pattern the task describes.
+
+**Deliberately did NOT extend to:** `correct_site_await_value` /
+`schedule_await_time` / `schedule_await_duration` (existing exclusions,
+still value-prompts) — nor to `correct_site_confirm_extracted` /
+`correct_type_pick_from_list` / `correct_type_confirm` / `*_disambig`
+states / any `*_confirm` state / `mgr_*_action` states (own AI-first
+path). Those either narrow to a specific already-selected candidate
+(pivoting would discard real progress), are yes/no confirmations, or are
+list-refine search loops where free text is itself the filter — same
+reasoning the original D5-T16 comment already used, just reworded to
+cover the fuller state list. This mirrors the D5-T19b lesson: keep the
+pivot scoped to states where nothing is lost by escaping, not "any state
+that isn't explicitly a value prompt."
+
+**Files affected:** `src/ai/router.ts` (`TEXT_CAPTURE_PIVOT_STATES` — 4
+states added, header comment updated to list the new exclusions
+explicitly).
+
+**Files changed (tests):** `src/__tests__/routerCorrections.test.ts` —
+named the previously-anonymous `parseIntent` mock (`parseIntentMock`) so
+tests can control confidence per-case, added a `beforeEach` reset for it,
+and added a new `D5-T19l` describe block (4 tests): confident pivot from
+`correct_site_pick_task` (does not call `resolveOpenTaskFieldByHint`),
+non-regression for a plain-name reply in the same state (still resolves
+normally), confident pivot from `reassign_pick_task` (does not call
+`resolveTask`), and `correct_type_pick_task` low-confidence reply still
+resolving as a task hint (non-regression). Verified non-vacuous: reverted
+the 4-state addition, confirmed the 2 pivot-assertion tests fail, then
+restored the fix.
+
+**Tests run:** `npx tsc --noEmit` clean; `routerCorrections.test.ts`
+29/29 pass; full suite 1168 passed, 7 skipped, 0 failed.
+
 **Priority:** IMPORTANT — UX; balance carefully with D5-T16 regression
 tests.
 
 #### D5-T19m — Verify "digit + polite word" (D5-T13 6c) actually works live
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** in TC-8.3, "2 בבקשה" / "כן 2" / "אוקי 4"
 were NOT intercepted despite the Phase 6 guard (D5-T13). Either the
@@ -2168,11 +2213,40 @@ regex is broken or the guard was refactored/moved by a later phase.
 - If they don't work, fix — the tests in `managerRichness.test.ts` should
   cover this and should still pass. Investigate why live differs.
 
+**Investigation:** `DIGIT_POLITE_RE`/`CONFIRM_DIGIT_RE` (router.ts:447-448)
+are intact and correct. The existing Phase 6c tests
+(`managerRichness.test.ts`) all call `getContext.mockResolvedValue(null)`,
+which *pins* the mock to always return `null` — they only exercise the
+FRESH-message path (no active context). TC-8.3's real-life failure report
+implies the manager already has an active `mgr_menu_root` context (they're
+looking at a just-shown menu) when they reply "2 בבקשה". Traced that path:
+`continueConversation` → `mgr_menu_root` is in `NUMERIC_PICKER_AWAITING` →
+`looksLikeNumericPickerInput('2 בבקשה')` is `false` (not a bare digit/nav
+word) → context is cleared and `handleAIMessage(user, text)` is re-invoked
+→ this time `getContext` returns `null` → the digit-polite normalization at
+the top of `handleAIMessage` fires correctly → item 2 dispatches. No code
+defect found; confirmed correct by a new test using the *stateful*
+`ctxStore`-backed `getContext` implementation (restoring it via
+`mockImplementation`, since earlier tests in the same file had pinned it to
+`null`) with `ctxStore = { awaiting: 'mgr_menu_root' }` pre-set — this is
+the actual live shape of the scenario, not the fresh-message shape the
+older tests covered. Verified the new tests are non-vacuous: temporarily
+broke `DIGIT_POLITE_RE` to a never-matching pattern and confirmed all 3
+now-added assertions fail, then restored the original regex.
+
+**Files changed (tests):** `src/__tests__/managerRichness.test.ts` (2 new
+tests under "Phase 6c" — `"2 בבקשה"` and `"אוקי 3"` from an ACTIVE
+`mgr_menu_root` context, not a fresh/null one).
+
+**Tests run:** `npx tsc --noEmit` clean; `managerRichness.test.ts` 29/29
+pass; full suite 1164 passed, 7 skipped, 0 failed at the time (see D5-T19l for the final Part-3 count after all 5 tasks).
+
 **Priority:** IMPORTANT — feature that was tested green but reportedly
-fails live.
+fails live. Conclusion: code was already correct; the gap was in test
+coverage (fresh-message-only), now closed.
 
 #### D5-T19n — Rephrase "תצפיתני DEV" auth-rejection message to user-friendly text
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** the current rejection message
 "אין הרשאה — רק סשה או תצפיתני dev יכולים לשייך לידים." leaks internal
@@ -2185,10 +2259,35 @@ Suggest new copy in the AUTH_REJECT_MSG constant in `src/ai/router.ts:3084`.
 Also — should be paired with D5-T19i (widening the allowlist) so the
 rejection is even RARER.
 
+**Implementation:** replaced `AUTH_REJECT_MSG` in `src/ai/router.ts` with
+"אין הרשאה לשייך לידים. אם אתה חושב שזה נחוץ, פנה למנהל המערכת." — a
+close variant of the suggested copy (dropped the "לך" that the suggestion
+had after "אין", i.e. "אין לך הרשאה" → "אין הרשאה") so the message still
+contains "אין הרשאה" as one contiguous phrase, since ~15 existing tests
+across the suite assert `.toContain('אין הרשאה')` and "אין לך הרשאה" does
+NOT contain that substring contiguously ("לך" splits it). Caught this by
+actually running the full affected-test batch rather than trusting a
+static grep for the word "הרשאה" — one test
+(`routerAssignLead.test.ts`) failed on the first attempt with the literal
+suggested copy, which is what surfaced the gap. No more internal names
+("סשה", "תצפיתני dev") leaked to end users either way. All 5 call sites
+(assign-lead flow) pick it up automatically since they reference the
+constant. Already paired with D5-T19i (Part 2), which widened the
+allowlist so this rejection fires less often in the first place.
+
+**Files affected:** `src/ai/router.ts` (`AUTH_REJECT_MSG` constant only).
+
+**Files changed (tests):** none — the final copy preserves the
+`.toContain('אין הרשאה')` substring every existing test relies on.
+
+**Tests run:** `npx tsc --noEmit` clean; `routerAssignLead.test.ts` +
+9 other manager/assign-lead files re-run clean after the wording fix;
+full suite 1164 passed, 7 skipped, 0 failed at the time (see D5-T19l for the final Part-3 count after all 5 tasks).
+
 **Priority:** UX.
 
 #### D5-T19o — Verify menu item 7 vs free-text "הבדיקות שלי" parity for managers who are also workers
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** TC-16.3 needs verification — a manager who
 is also assigned as a worker on TaskFields should see the same
@@ -2204,7 +2303,46 @@ is also assigned as a worker on TaskFields should see the same
 - Add a parity test that seeds a manager + 3 TaskFields owned by them,
   then asserts both paths return the same 3 rows.
 
-**Priority:** UX consistency.
+**Investigation — found a real parity bug:** both paths filter
+`Task.ownerId = user.id` and the same Asia/Jerusalem `scheduledStartAt`
+day window, but they disagreed on **status filtering**:
+- Menu item 7 → `getMyFieldInspectionsToday` (managerViews.ts) — NO status
+  filter at all (includes CANCELED/DECLINED rows).
+- Free text (bare "הבדיקות שלי", defaults to today) →
+  `getMyInspectionsInRange` (myInspectionsRange.ts) — excludes
+  `fieldStatus IN ('CANCELED','DECLINED')`.
+
+The exclusion in `getMyInspectionsInRange` is also what the WORKER's own
+"1. הבדיקות שלי להיום" menu item uses
+(`getInspectionsForWorkerOnDate` in inspectionsQueries.ts already excludes
+CANCELED/DECLINED) — so item 7's *personal* list was the odd one out, not
+the free-text path. A manager who is also a worker with a CANCELED or
+DECLINED TaskField scheduled today would see a different row count
+depending on which of the two paths they used.
+
+**Implementation:** added `AND tf."fieldStatus" NOT IN ('CANCELED','DECLINED')`
+to `getMyFieldInspectionsToday`'s query in `managerViews.ts`, matching both
+`getMyInspectionsInRange` and `getInspectionsForWorkerOnDate`. Updated the
+function's doc comment to record the parity rule and why it matters.
+
+**Files affected:** `src/services/managerViews.ts`
+(`getMyFieldInspectionsToday` SQL + doc comment).
+
+**Files changed (tests):** `src/__tests__/managerViews.test.ts` (new test
+in the `getMyFieldInspectionsToday` describe block asserting the SQL
+contains the `NOT IN ('CANCELED','DECLINED')` clause — mirrors the
+existing equivalent assertion in `myInspectionsRange.test.ts` for
+`getMyInspectionsInRange`). A true row-level "same 3 rows" integration
+test isn't practical against the mocked `pool.query` unit-test style used
+throughout this codebase (no real DB in the test env); the SQL-clause
+assertion is the established pattern here for proving query-shape parity
+(see the pre-existing `getMyFieldInspectionsToday` tests asserting
+`ownerId = $2`, the `scheduledStartAt` window, etc. the same way).
+
+**Tests run:** `npx tsc --noEmit` clean; `managerViews.test.ts` full file
+re-run clean; full suite 1164 passed, 7 skipped, 0 failed at the time (see D5-T19l for the final Part-3 count).
+
+**Priority:** UX consistency. Real (if minor) bug fixed, not just verified.
 
 ---
 
