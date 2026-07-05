@@ -45,6 +45,7 @@ import {
   notifyOfficeMissingInfo,
   notifyOfficeProblem,
   notifyOfficeMissingEquipment,
+  notifyOfficeCallbackRequest,
   dayFieldSummary,
   confirmInspection,
   declineInspection,
@@ -54,7 +55,6 @@ import {
   type AdvanceTransition,
   type OpenTaskFieldPreview,
 } from '../services/inspections';
-import { getManagersForBroadcast } from '../services/pendingActions';
 import { getInspectionsForWorkerOnDate } from '../services/inspectionsQueries';
 import {
   getMyInspectionsInRange,
@@ -1867,6 +1867,20 @@ async function startMissingInfoFlow(user: ResolvedUser): Promise<void> {
   await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
 }
 
+/**
+ * D5-T19a: honest office-alert confirmation. `notifyOffice*` / `notifyOfficeMissingEquipment`
+ * return `Promise<boolean>` — true only if the WhatsApp message actually
+ * reached at least one manager. Never tell the worker "the manager/office
+ * was notified" without checking this first (e.g. every manager may be
+ * outside the 24h WhatsApp window, or none may be configured).
+ */
+function officeNotifiedText(sent: boolean, kind: 'manager' | 'office'): string {
+  if (sent) {
+    return kind === 'manager' ? 'עדכנתי. המנהל קיבל התראה.' : 'עדכנתי. המשרד קיבל התראה.';
+  }
+  return 'עדכנתי במערכת, אך לא הצלחתי להתריע כרגע — כדאי לוודא ידנית מול המשרד.';
+}
+
 async function handleMissingInfoNoteReply(
   user: ResolvedUser,
   raw: string,
@@ -1887,9 +1901,9 @@ async function handleMissingInfoNoteReply(
   const extracted = await extractNote(rawTrimmed, 'missing_info_note');
   const note = extracted ?? rawTrimmed;
   await writeMissingInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
-  await notifyOfficeMissingInfo(ctx.taskFieldId);
+  const sent = await notifyOfficeMissingInfo(ctx.taskFieldId);
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 /** Direct dispatch used by the D5-T3 free-text intent — no menu step. */
@@ -1911,8 +1925,8 @@ async function runMissingInfoDirect(user: ResolvedUser, note: string): Promise<v
     return;
   }
   await writeMissingInfo({ taskFieldId: found.taskFieldId, note, updatedBy: user.id });
-  await notifyOfficeMissingInfo(found.taskFieldId);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+  const sent = await notifyOfficeMissingInfo(found.taskFieldId);
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 // ── D2-T8: "Report a problem" flow (7-item numbered sub-menu) ────────────────
@@ -2021,9 +2035,9 @@ async function handleProblemTypeChoiceReply(
     note: null,
     updatedBy: user.id,
   });
-  await notifyOfficeProblem(ctx.taskFieldId);
+  const sent = await notifyOfficeProblem(ctx.taskFieldId);
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'manager') });
 }
 
 async function handleProblemTypeNoteReply(
@@ -2050,9 +2064,9 @@ async function handleProblemTypeNoteReply(
     note,
     updatedBy: user.id,
   });
-  await notifyOfficeProblem(ctx.taskFieldId);
+  const sent = await notifyOfficeProblem(ctx.taskFieldId);
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'manager') });
 }
 
 /** Direct dispatch used by the D5-T3 free-text intent — no menu step. */
@@ -2083,8 +2097,8 @@ async function runProblemDirect(
     note,
     updatedBy: user.id,
   });
-  await notifyOfficeProblem(found.taskFieldId);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+  const sent = await notifyOfficeProblem(found.taskFieldId);
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'manager') });
 }
 
 // ── D2-T5 / D2-T6: on-demand status transitions + finished follow-up ────────
@@ -2449,14 +2463,14 @@ async function handleEquipmentMissingNoteReply(
   const extracted = await extractNote(rawTrimmed, 'equipment_missing_note');
   const note = extracted ?? rawTrimmed;
   const localDate = ctx.equipmentLocalDate ?? localJerusalemDate();
-  await notifyOfficeMissingEquipment({
+  const sent = await notifyOfficeMissingEquipment({
     userId: user.id,
     userName: user.name,
     note,
     localDate,
   });
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 // ── D2-T3: inspection-card button taps + follow-up state handlers ───────────
@@ -2536,9 +2550,9 @@ async function handleInspectionDeclineReasonReply(
   const extracted = await extractNote(rawTrimmed, 'decline_reason');
   const reason = extracted ?? rawTrimmed;
   await declineInspection({ taskFieldId: ctx.taskFieldId, reason, updatedBy: user.id });
-  await notifyOfficeDeclined(ctx.taskFieldId, reason);
+  const sent = await notifyOfficeDeclined(ctx.taskFieldId, reason);
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 async function handleInspectionNeedInfoNoteReply(
@@ -2560,9 +2574,9 @@ async function handleInspectionNeedInfoNoteReply(
   const extracted = await extractNote(rawTrimmed, 'missing_info_note');
   const note = extracted ?? rawTrimmed;
   await requestMoreInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
-  await notifyOfficeNeedsMoreInfo(ctx.taskFieldId, note);
+  const sent = await notifyOfficeNeedsMoreInfo(ctx.taskFieldId, note);
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 // ── D2-T15: pre-inspection 60-minute reminder button taps ──────────────────
@@ -2660,9 +2674,9 @@ async function handlePreReminderNeedInfoNoteReply(
   const extracted = await extractNote(rawTrimmed, 'missing_info_note');
   const note = extracted ?? rawTrimmed;
   await requestMoreInfo({ taskFieldId: ctx.taskFieldId, note, updatedBy: user.id });
-  await notifyOfficeNeedsMoreInfo(ctx.taskFieldId, note);
+  const sent = await notifyOfficeNeedsMoreInfo(ctx.taskFieldId, note);
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 // ── D2-T10: on-demand worker day summary (menu item 7) ─────────────────────
@@ -2783,26 +2797,9 @@ async function handleCallbackCustomerNoteReply(user: ResolvedUser, raw: string):
   // AI extraction: strip polite prefixes. Falls back to raw if no provider / low confidence.
   const extracted = await extractNote(rawTrimmed, 'field_notes');
   const note = extracted ?? rawTrimmed;
-  const workerName = user.name ?? '—';
-  const alert =
-    `בקשת חזרה ללקוח\n` +
-    `עובד: ${workerName}\n` +
-    `${note}\n` +
-    `לטיפול המשרד.`;
-  const managers = await getManagersForBroadcast();
-  if (managers.length === 0) {
-    log.warn({ userId: user.id }, 'callback_customer: no managers configured; alert not sent');
-  } else {
-    await Promise.allSettled(
-      managers.map((m) =>
-        sendTextMessage({ to: m.phone, text: alert }).catch((err) => {
-          log.error({ err, userId: user.id, managerId: m.id }, 'callback alert send failed');
-        }),
-      ),
-    );
-  }
+  const sent = await notifyOfficeCallbackRequest({ userId: user.id, userName: user.name, note });
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+  await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
 }
 
 // ── Deterministic digest follow-up commands (buttons + exact text) ──────────────
@@ -5674,9 +5671,9 @@ async function tryDispatchWorkerIntentInline(
       const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
       if (note) {
         await writeMissingInfo({ taskFieldId, note, updatedBy: user.id });
-        await notifyOfficeMissingInfo(taskFieldId);
+        const sent = await notifyOfficeMissingInfo(taskFieldId);
         await clearContext(user.phone);
-        await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+        await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
       } else {
         await setContext(user.phone, { awaiting: 'missing_info_note', taskFieldId });
         await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
@@ -5688,9 +5685,9 @@ async function tryDispatchWorkerIntentInline(
       const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
       if (problemType) {
         await writeProblem({ taskFieldId, problemType, note: note || null, updatedBy: user.id });
-        await notifyOfficeProblem(taskFieldId);
+        const sent = await notifyOfficeProblem(taskFieldId);
         await clearContext(user.phone);
-        await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+        await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'manager') });
       } else {
         await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
         await sendProblemTypeMenu(user.phone);
@@ -5706,9 +5703,9 @@ async function tryDispatchWorkerIntentInline(
     const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
     if (problemType) {
       await writeProblem({ taskFieldId, problemType, note: note || null, updatedBy: user.id });
-      await notifyOfficeProblem(taskFieldId);
+      const sent = await notifyOfficeProblem(taskFieldId);
       await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+      await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'manager') });
     } else {
       await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
       await sendProblemTypeMenu(user.phone);
@@ -5721,9 +5718,9 @@ async function tryDispatchWorkerIntentInline(
     const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
     if (note) {
       await writeMissingInfo({ taskFieldId, note, updatedBy: user.id });
-      await notifyOfficeMissingInfo(taskFieldId);
+      const sent = await notifyOfficeMissingInfo(taskFieldId);
       await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+      await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });
     } else {
       await setContext(user.phone, { awaiting: 'missing_info_note', taskFieldId });
       await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });

@@ -75,8 +75,9 @@ vi.mock('../services/taskFieldCorrections', () => ({
 const advanceFieldStatusMock = vi.fn().mockResolvedValue(undefined);
 const writeMissingInfoMock = vi.fn().mockResolvedValue(undefined);
 const writeProblemMock = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeMissingInfoMock = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeProblemMock = vi.fn().mockResolvedValue(undefined);
+// D5-T19a: notifyOffice* return Promise<boolean> — default to true (happy path).
+const notifyOfficeMissingInfoMock = vi.fn().mockResolvedValue(true);
+const notifyOfficeProblemMock = vi.fn().mockResolvedValue(true);
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: vi.fn().mockResolvedValue(null),
   resolveOpenTaskFieldByHint: vi.fn().mockResolvedValue(null),
@@ -86,13 +87,13 @@ vi.mock('../services/inspections', () => ({
   writeProblem: (...a: unknown[]) => writeProblemMock(...a),
   notifyOfficeMissingInfo: (...a: unknown[]) => notifyOfficeMissingInfoMock(...a),
   notifyOfficeProblem: (...a: unknown[]) => notifyOfficeProblemMock(...a),
-  notifyOfficeMissingEquipment: vi.fn().mockResolvedValue(undefined),
+  notifyOfficeMissingEquipment: vi.fn().mockResolvedValue(true),
   dayFieldSummary: vi.fn().mockResolvedValue({ finished: [], waitingForInfoCount: 0 }),
   confirmInspection: vi.fn().mockResolvedValue(undefined),
   declineInspection: vi.fn().mockResolvedValue(undefined),
   requestMoreInfo: vi.fn().mockResolvedValue(undefined),
-  notifyOfficeDeclined: vi.fn().mockResolvedValue(undefined),
-  notifyOfficeNeedsMoreInfo: vi.fn().mockResolvedValue(undefined),
+  notifyOfficeDeclined: vi.fn().mockResolvedValue(true),
+  notifyOfficeNeedsMoreInfo: vi.fn().mockResolvedValue(true),
 }));
 
 // tasks service

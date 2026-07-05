@@ -71,8 +71,9 @@ const findOpenTaskFieldForWorker = vi.fn();
 const resolveOpenTaskFieldByHint = vi.fn().mockResolvedValue(null);
 const writeMissingInfo = vi.fn().mockResolvedValue(undefined);
 const writeProblem = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeMissingInfo = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeProblem = vi.fn().mockResolvedValue(undefined);
+// D5-T19a: notifyOffice* return Promise<boolean> (true = actually delivered).
+const notifyOfficeMissingInfo = vi.fn().mockResolvedValue(true);
+const notifyOfficeProblem = vi.fn().mockResolvedValue(true);
 vi.mock('../services/inspections', async () => {
   const actual: object = await vi.importActual('../services/inspections');
   return {
@@ -85,13 +86,13 @@ vi.mock('../services/inspections', async () => {
     writeProblem: (...a: unknown[]) => writeProblem(...a),
     notifyOfficeMissingInfo: (...a: unknown[]) => notifyOfficeMissingInfo(...a),
     notifyOfficeProblem: (...a: unknown[]) => notifyOfficeProblem(...a),
-    notifyOfficeMissingEquipment: vi.fn().mockResolvedValue(undefined),
+    notifyOfficeMissingEquipment: vi.fn().mockResolvedValue(true),
     dayFieldSummary: vi.fn().mockResolvedValue({ finished: [], waitingForInfoCount: 0 }),
     confirmInspection: vi.fn().mockResolvedValue(undefined),
     declineInspection: vi.fn().mockResolvedValue(undefined),
     requestMoreInfo: vi.fn().mockResolvedValue(undefined),
-    notifyOfficeDeclined: vi.fn().mockResolvedValue(undefined),
-    notifyOfficeNeedsMoreInfo: vi.fn().mockResolvedValue(undefined),
+    notifyOfficeDeclined: vi.fn().mockResolvedValue(true),
+    notifyOfficeNeedsMoreInfo: vi.fn().mockResolvedValue(true),
   };
 });
 
@@ -217,8 +218,9 @@ beforeEach(() => {
   resolveOpenTaskFieldByHint.mockReset().mockResolvedValue(null);
   writeMissingInfo.mockReset().mockResolvedValue(undefined);
   writeProblem.mockReset().mockResolvedValue(undefined);
-  notifyOfficeMissingInfo.mockReset().mockResolvedValue(undefined);
-  notifyOfficeProblem.mockReset().mockResolvedValue(undefined);
+  // D5-T19a: notifyOffice* return Promise<boolean> — default to true (happy path).
+  notifyOfficeMissingInfo.mockReset().mockResolvedValue(true);
+  notifyOfficeProblem.mockReset().mockResolvedValue(true);
   getMyInspectionsInRange.mockReset().mockResolvedValue([]);
   getAllMyInspections.mockReset().mockResolvedValue([]);
 });

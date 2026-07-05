@@ -1548,27 +1548,109 @@ identified 15 items in a written report. Split into 4 work batches
 ### Batch A — URGENT (investigation + fix)
 
 #### D5-T19a — Manager notifications: verify actual send + DB log + 24h window handling
-**Status:** OPEN
+**Status:** DONE (local, uncommitted) — partial scope, see below
 
 **What the QA report said:** in several flows the bot says "נשלחה הודעה
 למנהל" but it's unclear whether the WhatsApp message actually reaches the
 manager. Relevant flows: report_problem, missing_info, missing_equipment,
 day summary/exceptions alerts.
 
-**What to do:**
-- Trace `broadcastToManagers` in `src/services/inspections.ts:553` end-to-end:
-  fetches managers via `getManagersForBroadcast()`, sends via `sendTextMessage`.
-- Verify each recipient path is exercised in the affected flows (writeProblem,
-  writeMissingInfo, writeMissingEquipment, etc).
-- Verify that a DB audit-log row is written for each broadcast.
-- Verify Meta 24h window handling: outside the window, `sendTextMessage`
-  should fall back to a template (or fail visibly + log). Trace the code
-  and confirm.
-- Add integration test (or live smoke script) that mocks/asserts
-  managers-list resolution + sender call + audit-log insert.
+**Investigation findings (confirmed by tracing + tests):**
+1. `broadcastToManagers` (`src/services/inspections.ts`) used a per-item
+   `.catch()` inside `Promise.allSettled(...)`, which swallowed every send
+   rejection into a resolved value — so `Promise.allSettled` always saw
+   `'fulfilled'`, and the function returned `true` whenever `managers.length >
+   0`, regardless of whether any `sendTextMessage` call actually succeeded.
+2. Every caller in `router.ts` (13 sites) ignored the return value entirely and
+   unconditionally sent "עדכנתי. המנהל/המשרד קיבל התראה." to the worker — even
+   when zero managers were configured or every send failed.
+3. A 14th, undiscovered instance of the same bug: `handleCallbackCustomerNoteReply`
+   (D2-T10 "צריך לחזור ללקוח") had its own **inline duplicate** of the same
+   broken pattern (direct `getManagersForBroadcast` + swallowed `.catch()`),
+   not going through `broadcastToManagers` at all.
+4. DB audit-log: confirmed a `WhatsappAuditLog` row **is** written on failure
+   (`sender.ts::writeSendFailure`, `executionStatus='FAILED'`) after all
+   retries are exhausted — but there is no success-path row, and no
+   correlation to a specific manager-alert broadcast/taskFieldId.
+5. 24h-window / template fallback: **not implemented** (confirmed out of
+   scope for this fix, tracked as a follow-up below). `sendTextMessage` is
+   documented (file header, `sender.ts`) as free-form-only, valid solely
+   inside the 24h WhatsApp service window; there is no fallback to
+   `sendTemplateMessage` when a manager is outside that window — the send
+   just fails (correctly detected as a failure by the fix below, but not
+   auto-retried via a template).
+
+**Fix implemented (scope: 1-3 above):**
+- `broadcastToManagers` rewritten to award `Promise.allSettled` results
+  properly (no per-item `.catch()`), count actual `'fulfilled'` sends, and
+  return `true` only if `sentCount > 0`. Logs each failed recipient plus a
+  summary warning when every send fails.
+- All 5 `notifyOffice*` functions (`notifyOfficeMissingInfo`,
+  `notifyOfficeProblem`, `notifyOfficeDeclined`, `notifyOfficeNeedsMoreInfo`,
+  `notifyOfficeMissingEquipment`) now return `Promise<boolean>` instead of
+  `Promise<void>` — true only if at least one manager actually received the
+  alert.
+- New `notifyOfficeCallbackRequest` extracted from the inline duplicate in
+  `handleCallbackCustomerNoteReply` — same `broadcastToManagers`-backed
+  contract, removing the 14th duplicate instance of the bug.
+- `src/ai/router.ts`: added `officeNotifiedText(sent, kind)` helper; all 14
+  call sites now check the boolean and send an honest failure message
+  ("עדכנתי במערכת, אך לא הצלחתי להתריע כרגע — כדאי לוודא ידנית מול המשרד.")
+  instead of blindly claiming delivery. Removed the now-dead direct
+  `getManagersForBroadcast` import from `router.ts` (only used by the
+  now-removed inline duplicate).
+
+**Files changed:**
+- `src/services/inspections.ts` — `broadcastToManagers` rewrite, 5 `notifyOffice*`
+  signatures → `Promise<boolean>`, new `notifyOfficeCallbackRequest`.
+- `src/ai/router.ts` — `officeNotifiedText` helper + 14 call sites updated
+  (13 existing `notifyOffice*` calls + the extracted callback-request flow).
+
+**Files changed (tests):**
+- `src/__tests__/inspections.test.ts` — added return-value assertions to every
+  existing `notifyOffice*` happy-path test; added 2 new regression tests
+  (`notifyOfficeMissingInfo` returns `false` when every manager send rejects,
+  `true` when at least one of several succeeds) — these fail against the old
+  implementation; added `notifyOfficeCallbackRequest` coverage.
+- `src/__tests__/routerDaySummary.test.ts` — rewrote the "צריך לחזור ללקוח"
+  tests to assert on `notifyOfficeCallbackRequest` instead of raw
+  `getManagersForBroadcast`/`sendTextMessage`-per-manager (matches the new
+  architecture); the "no managers" test now asserts the **honest failure
+  copy**, not the old false-positive success text.
+- 8 other router test files (`routerInspections`, `routerWorkerFreeText`,
+  `routerCorrections`, `routerFreeTextAwait`, `routerPreReminderTap`,
+  `managerRichness`, `managerSearchExpansion`, `managerDateRange`,
+  `detailViewAIContext`, `routerAssignLead`, `routerLeadsDisplay`,
+  `routerScheduleTaskField`, `routerBareDigitGuard`, `interactiveButtons`,
+  `routerManagerMenu`) — updated `notifyOffice*` mock defaults from
+  `mockResolvedValue(undefined)` to `mockResolvedValue(true)` (several had a
+  `beforeEach` that reset the mock back to `undefined` even after the
+  top-level default was fixed — found by running the suite, not by
+  inspection alone).
+
+**Tests run:** `npx tsc --noEmit` clean. Full suite `npx vitest run` —
+1135 passed / 7 skipped / 0 failed (same pre-existing worker-pool OOM after
+all tests complete, noted in X-T15a — not caused by this change; re-ran the
+18 directly-affected files individually first and confirmed 0 failures
+before the full-suite run).
+
+**Scope NOT done (follow-ups):**
+- **24h-window / template fallback** — still not implemented. When every
+  manager is outside the WhatsApp service window, the worker now correctly
+  sees the honest "לא הצלחתי להתריע" message (fixed), but the alert is not
+  auto-retried via an approved template. Needs a Meta-approved template +
+  error-code detection in `deliver()` (`sender.ts`) — larger, separate
+  change; not attempted here per the scoping agreed with the user.
+- **Per-broadcast audit-log row** — still relies solely on the generic
+  failure-only `WhatsappAuditLog` row in `sender.ts`; no explicit
+  success/failure row scoped to `broadcastToManagers` + `taskFieldId`. Not
+  in scope for this fix.
+- D5-T19b/c (note-saving bug, raw-enum display) — separate open items,
+  untouched by this change.
 
 **Priority:** URGENT — the user has no visibility into whether the bot's
-"עדכנתי, המנהל קיבל התראה" claim is truthful.
+"עדכנתי, המנהל קיבל התראה" claim is truthful. Core false-positive bug fixed;
+24h/template fallback and per-alert audit logging remain open follow-ups.
 
 #### D5-T19b — "בעיה מקצועית" (PROFESSIONAL_ISSUE) / OTHER note not saved properly
 **Status:** OPEN

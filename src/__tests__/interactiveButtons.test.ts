@@ -99,15 +99,15 @@ vi.mock('../services/inspections', () => ({
   writeFieldNotes:              vi.fn().mockResolvedValue(undefined),
   writeMissingInfo:             vi.fn().mockResolvedValue(undefined),
   writeProblem:                 vi.fn().mockResolvedValue(undefined),
-  notifyOfficeMissingInfo:      vi.fn().mockResolvedValue(undefined),
-  notifyOfficeProblem:          vi.fn().mockResolvedValue(undefined),
-  notifyOfficeMissingEquipment: vi.fn().mockResolvedValue(undefined),
+  notifyOfficeMissingInfo:      vi.fn().mockResolvedValue(true),
+  notifyOfficeProblem:          vi.fn().mockResolvedValue(true),
+  notifyOfficeMissingEquipment: vi.fn().mockResolvedValue(true),
   dayFieldSummary:              vi.fn().mockResolvedValue({ finished: [], waitingForInfoCount: 0 }),
   confirmInspection:            vi.fn().mockResolvedValue(undefined),
   declineInspection:            vi.fn().mockResolvedValue(undefined),
   requestMoreInfo:              vi.fn().mockResolvedValue(undefined),
-  notifyOfficeDeclined:         vi.fn().mockResolvedValue(undefined),
-  notifyOfficeNeedsMoreInfo:    vi.fn().mockResolvedValue(undefined),
+  notifyOfficeDeclined:         vi.fn().mockResolvedValue(true),
+  notifyOfficeNeedsMoreInfo:    vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('../services/tasks', () => ({

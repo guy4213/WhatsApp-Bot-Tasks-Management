@@ -7,8 +7,10 @@
  *  - Option 1 (הכל בוצע): acknowledge + clear, NO DB write.
  *  - Option 2 (חסר מידע לדוח): hand off to D2-T7 missing_info_note (or
  *    disambig when multiple TaskFields are open).
- *  - Option 3 (צריך לחזור ללקוח): light flow — prompt for note, broadcast
- *    to managers via getManagersForBroadcast, no DB write.
+ *  - Option 3 (צריך לחזור ללקוח): light flow — prompt for note, notify the
+ *    office via notifyOfficeCallbackRequest, no DB write. The worker ack
+ *    reflects actual delivery (D5-T19a) — honest failure copy when nobody
+ *    was actually reached.
  *  - Option 4 (בעיה פתוחה): hand off to D2-T8 problem_type_choice (or
  *    disambig).
  *  - Invalid choice → resend menu with "בחר מספר תקין:" prefix, keep
@@ -24,8 +26,11 @@ const advanceFieldStatus = vi.fn().mockResolvedValue(undefined);
 const writeFieldNotes = vi.fn().mockResolvedValue(undefined);
 const writeMissingInfo = vi.fn().mockResolvedValue(undefined);
 const writeProblem = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeMissingInfo = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeProblem = vi.fn().mockResolvedValue(undefined);
+// D5-T19a: notifyOffice* return Promise<boolean> (true = actually delivered
+// to a manager) — default to the happy path; tests override per-case.
+const notifyOfficeMissingInfo = vi.fn().mockResolvedValue(true);
+const notifyOfficeProblem = vi.fn().mockResolvedValue(true);
+const notifyOfficeCallbackRequest = vi.fn().mockResolvedValue(true);
 const dayFieldSummary = vi.fn();
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: (...a: unknown[]) => findOpenTaskFieldForWorker(...a),
@@ -36,6 +41,7 @@ vi.mock('../services/inspections', () => ({
   writeProblem: (...a: unknown[]) => writeProblem(...a),
   notifyOfficeMissingInfo: (...a: unknown[]) => notifyOfficeMissingInfo(...a),
   notifyOfficeProblem: (...a: unknown[]) => notifyOfficeProblem(...a),
+  notifyOfficeCallbackRequest: (...a: unknown[]) => notifyOfficeCallbackRequest(...a),
   dayFieldSummary: (...a: unknown[]) => dayFieldSummary(...a),
 }));
 
@@ -110,8 +116,10 @@ beforeEach(() => {
   writeFieldNotes.mockReset(); writeFieldNotes.mockResolvedValue(undefined);
   writeMissingInfo.mockReset(); writeMissingInfo.mockResolvedValue(undefined);
   writeProblem.mockReset(); writeProblem.mockResolvedValue(undefined);
-  notifyOfficeMissingInfo.mockReset(); notifyOfficeMissingInfo.mockResolvedValue(undefined);
-  notifyOfficeProblem.mockReset(); notifyOfficeProblem.mockResolvedValue(undefined);
+  // D5-T19a: notifyOffice* return Promise<boolean> — default to true (happy path).
+  notifyOfficeMissingInfo.mockReset(); notifyOfficeMissingInfo.mockResolvedValue(true);
+  notifyOfficeProblem.mockReset(); notifyOfficeProblem.mockResolvedValue(true);
+  notifyOfficeCallbackRequest.mockReset(); notifyOfficeCallbackRequest.mockResolvedValue(true);
   dayFieldSummary.mockReset();
   getManagersForBroadcast.mockReset(); getManagersForBroadcast.mockResolvedValue([]);
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
@@ -241,13 +249,10 @@ describe('D2-T10 — option 2 (חסר מידע לדוח) hands off to D2-T7', ()
 // ── Option 3: צריך לחזור ללקוח → light callback handler ─────────────────────
 
 describe('D2-T10 — option 3 (צריך לחזור ללקוח) light alert-only flow', () => {
-  it('prompts for note → broadcasts to managers → clears; NO DB write', async () => {
+  it('prompts for note → notifies office → clears; NO DB write', async () => {
     const user = makeUser();
     dayFieldSummary.mockResolvedValueOnce({ finished: [], waitingForInfoCount: 0 });
-    getManagersForBroadcast.mockResolvedValueOnce([
-      { id: 'm-1', phone: '9720500000001' },
-      { id: 'm-2', phone: '9720500000002' },
-    ]);
+    notifyOfficeCallbackRequest.mockResolvedValueOnce(true);
     await pressMenu(user, 7);
     sendTextMessage.mockClear();
 
@@ -258,7 +263,7 @@ describe('D2-T10 — option 3 (צריך לחזור ללקוח) light alert-only 
     expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('לאיזה לקוח צריך לחזור');
     expect(ctxStore).toMatchObject({ awaiting: 'callback_customer_note' });
 
-    // Reply with note → broadcast + ack
+    // Reply with note → notify + ack
     sendTextMessage.mockClear();
     await handleAIMessage(user, 'משה כהן — לתאם בדיקה חוזרת');
 
@@ -268,25 +273,26 @@ describe('D2-T10 — option 3 (צריך לחזור ללקוח) light alert-only 
     expect(writeFieldNotes).not.toHaveBeenCalled();
     expect(advanceFieldStatus).not.toHaveBeenCalled();
 
-    // Broadcast to BOTH managers
-    const managerSends = sendTextMessage.mock.calls.filter(
-      (c) => c[0].to === '9720500000001' || c[0].to === '9720500000002',
-    );
-    expect(managerSends).toHaveLength(2);
-    for (const call of managerSends) {
-      expect(call[0].text).toContain('בקשת חזרה ללקוח');
-      expect(call[0].text).toContain(user.name);
-      expect(call[0].text).toContain('משה כהן — לתאם בדיקה חוזרת');
-    }
-    // Worker ack
+    // Office alert dispatched with the correct worker + note
+    expect(notifyOfficeCallbackRequest).toHaveBeenCalledWith({
+      userId: user.id,
+      userName: user.name,
+      note: 'משה כהן — לתאם בדיקה חוזרת',
+    });
+
+    // Worker ack — honest success copy since the alert actually went out
     expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
     expect(ctxStore).toBeNull();
   });
 
-  it('no managers configured → still ACKs + clears (no crash)', async () => {
+  // D5-T19a regression: previously the worker was told "המשרד קיבל התראה"
+  // (the manager was notified) even when delivery failed entirely (e.g. no
+  // MANAGER/ADMIN configured, or every send rejected). The ack must now be
+  // honest about whether the alert actually reached anyone.
+  it('notification fails to reach any manager → honest failure copy, still clears (no crash)', async () => {
     const user = makeUser();
     dayFieldSummary.mockResolvedValueOnce({ finished: [], waitingForInfoCount: 0 });
-    getManagersForBroadcast.mockResolvedValueOnce([]);
+    notifyOfficeCallbackRequest.mockResolvedValueOnce(false);
     await pressMenu(user, 7);
 
     const { handleAIMessage } = await loadRouter();
@@ -294,7 +300,11 @@ describe('D2-T10 — option 3 (צריך לחזור ללקוח) light alert-only 
     sendTextMessage.mockClear();
     await handleAIMessage(user, 'לחזור ללקוח X');
 
-    expect(sendTextMessage).toHaveBeenCalledWith({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+    expect(sendTextMessage).toHaveBeenCalledWith({
+      to: user.phone,
+      text: 'עדכנתי במערכת, אך לא הצלחתי להתריע כרגע — כדאי לוודא ידנית מול המשרד.',
+    });
+    expect(sendTextMessage).not.toHaveBeenCalledWith({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
     expect(ctxStore).toBeNull();
   });
 

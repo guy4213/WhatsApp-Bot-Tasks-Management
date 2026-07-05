@@ -246,7 +246,7 @@ describe('notifyOfficeMissingInfo', () => {
       { id: 'm-2', name: 'סשה', phone: '972500000002' },
     ]);
 
-    await notifyOfficeMissingInfo('tf-abc');
+    const result = await notifyOfficeMissingInfo('tf-abc');
 
     expect(sendTextMessage).toHaveBeenCalledTimes(2);
     const bodies = sendTextMessage.mock.calls.map((c) => c[0].text);
@@ -256,9 +256,11 @@ describe('notifyOfficeMissingInfo', () => {
     expect(bodies[0]).toContain('משה כהן');
     expect(bodies[0]).toContain('הרצליה');
     expect(bodies[0]).toContain('חסר מספר היתר בנייה');
+    // D5-T19a: returns true only when at least one manager actually received it.
+    expect(result).toBe(true);
   });
 
-  it('logs a warning + no-ops when no active managers are configured', async () => {
+  it('logs a warning + no-ops when no active managers are configured — returns false', async () => {
     poolQuery.mockResolvedValueOnce({
       rowCount: 1,
       rows: [{
@@ -267,8 +269,56 @@ describe('notifyOfficeMissingInfo', () => {
       }],
     });
     getManagersForBroadcast.mockResolvedValueOnce([]);
-    await notifyOfficeMissingInfo('tf-abc');
+    const result = await notifyOfficeMissingInfo('tf-abc');
     expect(sendTextMessage).not.toHaveBeenCalled();
+    expect(result).toBe(false);
+  });
+
+  // D5-T19a regression: previously `broadcastToManagers` swallowed every send
+  // failure via a per-item `.catch()` and returned `true` whenever any manager
+  // was *configured* — never checking whether the message actually arrived.
+  // A caller (router.ts) that trusted that return value told the worker "the
+  // manager was notified" even when every single send failed.
+  it('returns false when every manager send rejects (e.g. outside the 24h WhatsApp window)', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{
+        workerName: 'דני', familyLabelHe: 'רעש', customerName: null,
+        siteCity: null, missingReportInfoNote: 'x', problemType: null, problemNote: null,
+      }],
+    });
+    getManagersForBroadcast.mockResolvedValueOnce([
+      { id: 'm-1', name: 'יורם', phone: '972500000001' },
+      { id: 'm-2', name: 'סשה', phone: '972500000002' },
+    ]);
+    sendTextMessage.mockRejectedValue(new Error('WhatsApp API error 400: outside 24h window'));
+
+    const result = await notifyOfficeMissingInfo('tf-abc');
+
+    expect(sendTextMessage).toHaveBeenCalledTimes(2);
+    expect(result).toBe(false);
+  });
+
+  it('returns true when at least one manager send succeeds, even if another fails', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{
+        workerName: 'דני', familyLabelHe: 'רעש', customerName: null,
+        siteCity: null, missingReportInfoNote: 'x', problemType: null, problemNote: null,
+      }],
+    });
+    getManagersForBroadcast.mockResolvedValueOnce([
+      { id: 'm-1', name: 'יורם', phone: '972500000001' },
+      { id: 'm-2', name: 'סשה', phone: '972500000002' },
+    ]);
+    sendTextMessage
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('WhatsApp API error 400'));
+
+    const result = await notifyOfficeMissingInfo('tf-abc');
+
+    expect(sendTextMessage).toHaveBeenCalledTimes(2);
+    expect(result).toBe(true);
   });
 });
 
@@ -428,7 +478,7 @@ describe('notifyOfficeProblem', () => {
       { id: 'm-1', name: 'יורם', phone: '972500000001' },
     ]);
 
-    await notifyOfficeProblem('tf-x');
+    const result = await notifyOfficeProblem('tf-x');
 
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
     const body = sendTextMessage.mock.calls[0][0].text;
@@ -440,6 +490,7 @@ describe('notifyOfficeProblem', () => {
     expect(body).toContain('בעיה מקצועית'); // the Hebrew label for PROFESSIONAL_ISSUE
     expect(body).toContain('לא ניתן לבצע מדידה');
     expect(body).toContain('לטיפול מנהל.');
+    expect(result).toBe(true);
   });
 });
 
@@ -453,7 +504,7 @@ describe('notifyOfficeMissingEquipment', () => {
     ]);
     const { notifyOfficeMissingEquipment } = await import('../services/inspections');
 
-    await notifyOfficeMissingEquipment({
+    const result = await notifyOfficeMissingEquipment({
       userId: 'u-1',
       userName: 'דני',
       note: 'חסר מד רעש',
@@ -469,6 +520,7 @@ describe('notifyOfficeMissingEquipment', () => {
       expect(body).toContain('חסר מד רעש');
       expect(body).toContain('לטיפול המשרד.');
     }
+    expect(result).toBe(true);
   });
 
   it('degrades gracefully when userName is null (worker fallback "—")', async () => {
@@ -488,7 +540,7 @@ describe('notifyOfficeMissingEquipment', () => {
     expect(sendTextMessage.mock.calls[0][0].text).toContain('שם עובד: —');
   });
 
-  it('no-ops when no MANAGER/ADMIN is configured (logs a warning, does not throw)', async () => {
+  it('no-ops when no MANAGER/ADMIN is configured (logs a warning, does not throw) — returns false', async () => {
     getManagersForBroadcast.mockResolvedValue([]);
     const { notifyOfficeMissingEquipment } = await import('../services/inspections');
 
@@ -499,7 +551,7 @@ describe('notifyOfficeMissingEquipment', () => {
         note: 'חסר',
         localDate: '2026-07-01',
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
     expect(sendTextMessage).not.toHaveBeenCalled();
   });
 });
@@ -568,7 +620,7 @@ describe('notifyOfficeDeclined', () => {
     ]);
     const { notifyOfficeDeclined } = await import('../services/inspections');
 
-    await notifyOfficeDeclined('tf-x', 'הרכב במוסך');
+    const result = await notifyOfficeDeclined('tf-x', 'הרכב במוסך');
 
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
     const body = sendTextMessage.mock.calls[0][0].text;
@@ -579,6 +631,7 @@ describe('notifyOfficeDeclined', () => {
     expect(body).toContain('רעננה');
     expect(body).toContain('סיבה: הרכב במוסך');
     expect(body).toContain('יש לשבץ מחדש.');
+    expect(result).toBe(true);
   });
 });
 
@@ -601,7 +654,7 @@ describe('notifyOfficeNeedsMoreInfo', () => {
     ]);
     const { notifyOfficeNeedsMoreInfo } = await import('../services/inspections');
 
-    await notifyOfficeNeedsMoreInfo('tf-y', 'צריך אישור כניסה');
+    const result = await notifyOfficeNeedsMoreInfo('tf-y', 'צריך אישור כניסה');
 
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
     const body = sendTextMessage.mock.calls[0][0].text;
@@ -610,5 +663,46 @@ describe('notifyOfficeNeedsMoreInfo', () => {
     expect(body).toContain('משה כהן');
     expect(body).toContain('צריך אישור כניסה');
     expect(body).toContain('לטיפול המשרד.');
+    expect(result).toBe(true);
+  });
+});
+
+// D5-T19a: callback_customer alert extracted out of router.ts into a proper
+// notifyOffice* wrapper (was previously a raw duplicated broadcast inline in
+// the router, with the same "always claims success" bug).
+describe('notifyOfficeCallbackRequest', () => {
+  it('broadcasts a callback-request alert with worker + note', async () => {
+    getManagersForBroadcast.mockResolvedValueOnce([
+      { id: 'm-1', name: 'יורם', phone: '972500000001' },
+    ]);
+    const { notifyOfficeCallbackRequest } = await import('../services/inspections');
+
+    const result = await notifyOfficeCallbackRequest({
+      userId: 'u-1',
+      userName: 'דני',
+      note: 'משה כהן — לתאם בדיקה חוזרת',
+    });
+
+    expect(sendTextMessage).toHaveBeenCalledTimes(1);
+    const body = sendTextMessage.mock.calls[0][0].text;
+    expect(body).toContain('בקשת חזרה ללקוח');
+    expect(body).toContain('דני');
+    expect(body).toContain('משה כהן — לתאם בדיקה חוזרת');
+    expect(body).toContain('לטיפול המשרד.');
+    expect(result).toBe(true);
+  });
+
+  it('returns false when no managers are configured', async () => {
+    getManagersForBroadcast.mockResolvedValueOnce([]);
+    const { notifyOfficeCallbackRequest } = await import('../services/inspections');
+
+    const result = await notifyOfficeCallbackRequest({
+      userId: 'u-1',
+      userName: 'דני',
+      note: 'הערה',
+    });
+
+    expect(sendTextMessage).not.toHaveBeenCalled();
+    expect(result).toBe(false);
   });
 });

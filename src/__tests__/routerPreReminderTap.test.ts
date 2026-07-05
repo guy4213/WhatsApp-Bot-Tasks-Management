@@ -25,15 +25,16 @@ const resolveOpenTaskFieldByHint = vi.fn();
 const writeFieldNotes = vi.fn().mockResolvedValue(undefined);
 const writeMissingInfo = vi.fn().mockResolvedValue(undefined);
 const writeProblem = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeMissingInfo = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeProblem = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeMissingEquipment = vi.fn().mockResolvedValue(undefined);
+// D5-T19a: notifyOffice* return Promise<boolean> (true = actually delivered).
+const notifyOfficeMissingInfo = vi.fn().mockResolvedValue(true);
+const notifyOfficeProblem = vi.fn().mockResolvedValue(true);
+const notifyOfficeMissingEquipment = vi.fn().mockResolvedValue(true);
 const dayFieldSummary = vi.fn().mockResolvedValue({ finished: [], waitingForInfoCount: 0 });
 const confirmInspection = vi.fn().mockResolvedValue(undefined);
 const declineInspection = vi.fn().mockResolvedValue(undefined);
 const requestMoreInfo = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeDeclined = vi.fn().mockResolvedValue(undefined);
-const notifyOfficeNeedsMoreInfo = vi.fn().mockResolvedValue(undefined);
+const notifyOfficeDeclined = vi.fn().mockResolvedValue(true);
+const notifyOfficeNeedsMoreInfo = vi.fn().mockResolvedValue(true);
 
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: (...a: unknown[]) => findOpenTaskFieldForWorker(...a),
@@ -222,7 +223,8 @@ beforeEach(() => {
   sendListMessage.mockResolvedValue(undefined);
   advanceFieldStatus.mockResolvedValue(undefined);
   requestMoreInfo.mockResolvedValue(undefined);
-  notifyOfficeNeedsMoreInfo.mockResolvedValue(undefined);
+  // D5-T19a: notifyOffice* return Promise<boolean> — default to true (happy path).
+  notifyOfficeNeedsMoreInfo.mockResolvedValue(true);
 });
 afterEach(() => { vi.restoreAllMocks(); });
 

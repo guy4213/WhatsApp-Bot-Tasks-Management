@@ -13,10 +13,14 @@
  * TaskFields the message is about.
  *
  * The manager-side alert is sent by `notifyOfficeMissingInfo` /
- * `notifyOfficeProblem` — these broadcast to every active MANAGER/ADMIN via the
- * existing `getManagersForBroadcast()` helper, which is how the rest of the
- * codebase addresses "the office". If no manager is configured, the write still
- * succeeds (`managerNotifiedAt` set by the write helpers); we log a warning.
+ * `notifyOfficeProblem` (and the sibling `notifyOffice*` functions) — these
+ * broadcast to every active MANAGER/ADMIN via the existing
+ * `getManagersForBroadcast()` helper, which is how the rest of the codebase
+ * addresses "the office". The DB write always succeeds regardless
+ * (`managerNotifiedAt` set by the write helpers) — but every `notifyOffice*`
+ * function returns `Promise<boolean>`: true only if the WhatsApp message
+ * actually reached at least one manager. Callers (router.ts) MUST check this
+ * before telling the worker "the manager was notified" — see D5-T19a.
  *
  * NOTE: read helpers (digest lookups etc.) live in `inspectionsQueries.ts`,
  * owned by D2-T4 in parallel — do NOT merge that surface into this file.
@@ -282,12 +286,13 @@ export async function requestMoreInfo(params: RequestMoreInfoParams): Promise<vo
   log.info({ taskFieldId, updatedBy }, 'requestMoreInfo: NEEDS_MORE_INFO written');
 }
 
-/** §6 office alert on button 2 (DECLINED). Broadcast to every MANAGER/ADMIN. */
-export async function notifyOfficeDeclined(taskFieldId: string, reason: string): Promise<void> {
+/** §6 office alert on button 2 (DECLINED). Broadcast to every MANAGER/ADMIN.
+ *  Returns true only if at least one manager actually received the message. */
+export async function notifyOfficeDeclined(taskFieldId: string, reason: string): Promise<boolean> {
   const ctx = await loadAlertContext(taskFieldId);
   if (!ctx) {
     log.warn({ taskFieldId }, 'notifyOfficeDeclined: TaskField not found');
-    return;
+    return false;
   }
   const worker   = ctx.workerName    ?? '—';
   const family   = ctx.familyLabelHe ?? '—';
@@ -298,15 +303,16 @@ export async function notifyOfficeDeclined(taskFieldId: string, reason: string):
     `${LABELS.WORKER}: ${worker} · ${LABELS.TYPE}: ${family} · ${LABELS.CUSTOMER}: ${customer}${city}\n` +
     `סיבה: ${reason}\n` +
     `יש לשבץ מחדש.`;
-  await broadcastToManagers(text, taskFieldId);
+  return broadcastToManagers(text, taskFieldId);
 }
 
-/** §6 office alert on button 3 (NEEDS_MORE_INFO). Broadcast to every MANAGER/ADMIN. */
-export async function notifyOfficeNeedsMoreInfo(taskFieldId: string, note: string): Promise<void> {
+/** §6 office alert on button 3 (NEEDS_MORE_INFO). Broadcast to every MANAGER/ADMIN.
+ *  Returns true only if at least one manager actually received the message. */
+export async function notifyOfficeNeedsMoreInfo(taskFieldId: string, note: string): Promise<boolean> {
   const ctx = await loadAlertContext(taskFieldId);
   if (!ctx) {
     log.warn({ taskFieldId }, 'notifyOfficeNeedsMoreInfo: TaskField not found');
-    return;
+    return false;
   }
   const worker   = ctx.workerName    ?? '—';
   const family   = ctx.familyLabelHe ?? '—';
@@ -317,7 +323,7 @@ export async function notifyOfficeNeedsMoreInfo(taskFieldId: string, note: strin
     `${LABELS.WORKER}: ${worker} · ${LABELS.TYPE}: ${family} · ${LABELS.CUSTOMER}: ${customer}${city}\n` +
     `${note}\n` +
     `לטיפול המשרד.`;
-  await broadcastToManagers(text, taskFieldId);
+  return broadcastToManagers(text, taskFieldId);
 }
 
 export interface AdvanceFieldStatusParams {
@@ -547,34 +553,46 @@ async function loadAlertContext(taskFieldId: string): Promise<AlertContext | nul
   return result.rowCount === 0 ? null : result.rows[0];
 }
 
-/** Broadcast a Hebrew alert to every active MANAGER/ADMIN. Warns + returns
- *  false when no recipient is configured — the caller's DB write is already
- *  durable, so no-op is safe. */
-async function broadcastToManagers(text: string, taskFieldId: string): Promise<boolean> {
+/** Broadcast a Hebrew alert to every active MANAGER/ADMIN. Returns true only
+ *  when at least one manager actually received the message — NOT merely
+ *  "a manager is configured". `sendTextMessage` throws after Meta rejects/
+ *  exhausts retries (e.g. the recipient is outside the 24h WhatsApp service
+ *  window); a caller that ignored that would tell the worker "the manager
+ *  was notified" when nothing was actually delivered. Individual failures
+ *  are logged but do not stop the other recipients from being tried. */
+async function broadcastToManagers(text: string, contextId: string): Promise<boolean> {
   const managers = await getManagersForBroadcast();
   if (managers.length === 0) {
     log.warn(
-      { taskFieldId },
+      { contextId },
       'office recipient not configured; alert not sent (no active MANAGER/ADMIN with a phone)',
     );
     return false;
   }
-  await Promise.allSettled(
-    managers.map((m) =>
-      sendTextMessage({ to: m.phone, text }).catch((err) => {
-        log.error({ err, taskFieldId, managerId: m.id }, 'manager alert send failed');
-      }),
-    ),
+  const results = await Promise.allSettled(
+    managers.map((m) => sendTextMessage({ to: m.phone, text })),
   );
-  return true;
+  let sentCount = 0;
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      sentCount += 1;
+    } else {
+      log.error({ err: r.reason, contextId, managerId: managers[i].id }, 'manager alert send failed');
+    }
+  });
+  if (sentCount === 0) {
+    log.warn({ contextId, managerCount: managers.length }, 'manager alert: every send failed');
+  }
+  return sentCount > 0;
 }
 
-/** §8 office alert: worker reported a missing detail for the final report. */
-export async function notifyOfficeMissingInfo(taskFieldId: string): Promise<void> {
+/** §8 office alert: worker reported a missing detail for the final report.
+ *  Returns true only if at least one manager actually received the message. */
+export async function notifyOfficeMissingInfo(taskFieldId: string): Promise<boolean> {
   const ctx = await loadAlertContext(taskFieldId);
   if (!ctx) {
     log.warn({ taskFieldId }, 'notifyOfficeMissingInfo: TaskField not found');
-    return;
+    return false;
   }
   const worker   = ctx.workerName    ?? '—';
   const family   = ctx.familyLabelHe ?? '—';
@@ -586,7 +604,7 @@ export async function notifyOfficeMissingInfo(taskFieldId: string): Promise<void
     `${LABELS.WORKER}: ${worker} · ${LABELS.TYPE}: ${family} · ${LABELS.CUSTOMER}: ${customer}${city}\n` +
     `${note}\n` +
     `לטיפול המשרד.`;
-  await broadcastToManagers(text, taskFieldId);
+  return broadcastToManagers(text, taskFieldId);
 }
 
 const PROBLEM_TYPE_LABELS_HE: Record<FieldProblemType, string> = {
@@ -617,12 +635,13 @@ export async function dayFieldSummary(
   return getFieldSummaryForWorkerOnDate(userId, localDate);
 }
 
-/** §9 manager alert: worker reported a problem on the inspection. */
-export async function notifyOfficeProblem(taskFieldId: string): Promise<void> {
+/** §9 manager alert: worker reported a problem on the inspection.
+ *  Returns true only if at least one manager actually received the message. */
+export async function notifyOfficeProblem(taskFieldId: string): Promise<boolean> {
   const ctx = await loadAlertContext(taskFieldId);
   if (!ctx) {
     log.warn({ taskFieldId }, 'notifyOfficeProblem: TaskField not found');
-    return;
+    return false;
   }
   const worker   = ctx.workerName    ?? '—';
   const family   = ctx.familyLabelHe ?? '—';
@@ -635,7 +654,7 @@ export async function notifyOfficeProblem(taskFieldId: string): Promise<void> {
     `${LABELS.WORKER}: ${worker} · ${LABELS.TYPE}: ${family} · ${LABELS.CUSTOMER}: ${customer}${city}\n` +
     `סוג בעיה: ${typeHe}${detail}\n` +
     `לטיפול מנהל.`;
-  await broadcastToManagers(text, taskFieldId);
+  return broadcastToManagers(text, taskFieldId);
 }
 
 // ── D2-T9: equipment reminder — missing-equipment alert to managers ─────────
@@ -649,16 +668,15 @@ export async function notifyOfficeProblem(taskFieldId: string): Promise<void> {
  * Broadcast a Hebrew alert to every active MANAGER/ADMIN: worker reported
  * they are missing equipment for today's inspections. No `TaskField` context
  * is written — the equipment reminder is a per-worker daily roll-up, not a
- * per-inspection event. If no manager is configured we log a warning and
- * no-op (the note is not persisted on the worker's TaskField either, so
- * there's nothing durable to reference — matches the §10 spec).
+ * per-inspection event. Returns true only if at least one manager actually
+ * received the message (see `broadcastToManagers` for why this matters).
  */
 export async function notifyOfficeMissingEquipment(input: {
   userId: string;
   userName: string | null;
   note: string;
   localDate: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const { userId, userName, note, localDate } = input;
   const worker = userName ?? '—';
   const text =
@@ -667,19 +685,26 @@ export async function notifyOfficeMissingEquipment(input: {
     `${LABELS.DATE}: ${localDate}\n` +
     `${note}\n` +
     `לטיפול המשרד.`;
-  const managers = await getManagersForBroadcast();
-  if (managers.length === 0) {
-    log.warn(
-      { userId },
-      'notifyOfficeMissingEquipment: no MANAGER/ADMIN with a phone; alert not sent',
-    );
-    return;
-  }
-  await Promise.allSettled(
-    managers.map((m) =>
-      sendTextMessage({ to: m.phone, text }).catch((err) => {
-        log.error({ err, userId, managerId: m.id }, 'missing-equipment alert send failed');
-      }),
-    ),
-  );
+  return broadcastToManagers(text, userId);
+}
+
+/**
+ * Broadcast a Hebrew alert to every active MANAGER/ADMIN: worker asked for a
+ * customer callback (D2-T10 "callback_customer" sub-flow — alert-only, no
+ * `TaskField`/DB write per spec). Returns true only if at least one manager
+ * actually received the message (see `broadcastToManagers`).
+ */
+export async function notifyOfficeCallbackRequest(input: {
+  userId: string;
+  userName: string | null;
+  note: string;
+}): Promise<boolean> {
+  const { userId, userName, note } = input;
+  const worker = userName ?? '—';
+  const text =
+    `בקשת חזרה ללקוח\n` +
+    `עובד: ${worker}\n` +
+    `${note}\n` +
+    `לטיפול המשרד.`;
+  return broadcastToManagers(text, userId);
 }
