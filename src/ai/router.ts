@@ -189,6 +189,38 @@ const NUMERIC_PICKER_AWAITING: Set<AwaitingKind> = new Set<AwaitingKind>([
   'mgr_search_pick_task',
 ]);
 
+/**
+ * D5-T16 — TEXT-CAPTURE awaiting states where a mid-flow AI-first pivot is
+ * checked. When the user types a NEW top-level intent instead of the expected
+ * note/answer, `tryPivotToAIIntent` clears the capture and dispatches the
+ * intent. States NOT listed here are either:
+ *  - numeric-picker states (handled by the older `NUMERIC_PICKER_AWAITING`
+ *    escape hatch above),
+ *  - `mgr_*_action` states (they own their own AI-first path via
+ *    `tryDispatchWorkerIntentInline` — do NOT pivot-check here or we
+ *    double-invoke the LLM), or
+ *  - text-refine loops like `correct_type_pick_from_list` where free text is a
+ *    search filter over the catalog and escaping would break the loop.
+ */
+const TEXT_CAPTURE_PIVOT_STATES: Set<AwaitingKind> = new Set<AwaitingKind>([
+  // "Note" states — user is expected to type a short free-text answer. If
+  // they type a top-level intent instead (mid-flow pivot), escape.
+  'missing_info_note',
+  'problem_type_note',
+  'finished_notes',
+  'callback_customer_note',
+  'equipment_missing_note',
+  'inspection_decline_reason',
+  'inspection_need_info_note',
+  'pre_reminder_need_info_note',
+  'mgr_search_await_query',
+  // NOTE: schedule_await_time / schedule_await_duration / correct_site_*
+  // states are deliberately EXCLUDED — the user is deep in a specific
+  // multi-step flow and their reply is meant as a value (date / minutes /
+  // corrected address). Pivoting mid-flow would cause more accidental
+  // exits than intentional ones.
+]);
+
 // Nav words a numeric picker will accept without escaping to AI: pure digits,
 // Hebrew/English navigation vocabulary, or interactive button/list payload IDs
 // (CONFIRM_*, MGR_MENU_*, ACTION_*) that arrive from tapped WhatsApp buttons.
@@ -583,6 +615,35 @@ async function continueConversation(
     await clearContext(user.phone);
     await handleAIMessage(user, text);
     return;
+  }
+
+  // ── D5-T16 (2026-07-05): Universal AI-first pivot escape hatch ──────────
+  // Applies to text-capture states where the user's answer is a free-text note
+  // (missing_info_note, equipment_missing_note, decline_reason, correct-*
+  // value prompts, schedule intake, etc.). If they type a NEW top-level intent
+  // instead of the expected note, they are pivoting mid-flow. Escape the
+  // current capture and route through the main AI parser. The AI decides; if
+  // it's uncertain, the AI asks (via `clarification`) rather than the bot
+  // forcing a confusing capture.
+  //
+  // Policy: AI-first, no regex intent-detection. Deterministic MENU_TRIGGER_RE
+  // matches (an unambiguous menu request like "תפריט" / "יאללה תפריט") short-
+  // circuit for zero latency, but any other decision goes through
+  // `tryPivotToAIIntent` which runs the LLM and only escapes on a HIGH-confidence
+  // top-level intent from a curated allow-list.
+  //
+  // `mgr_*_action` states are EXCLUDED — they already have their own AI-first
+  // path via `tryDispatchWorkerIntentInline` inside `handleMgrActionFreeText`
+  // (D5-T15). Duplicating the pivot check here would double-invoke the LLM
+  // on every message.
+  if (TEXT_CAPTURE_PIVOT_STATES.has(ctx.awaiting)) {
+    if (MENU_TRIGGER_RE.test(trimmed)) {
+      await clearContext(user.phone);
+      await handleAIMessage(user, text);
+      return;
+    }
+    const pivoted = await tryPivotToAIIntent(user, text, ctx);
+    if (pivoted) return;
   }
 
   // ── Numbered menu + digest-settings flows (these states carry NO AI intent) ──
@@ -5435,6 +5496,103 @@ async function handleMgrTaskActionReply(
 }
 
 /**
+ * D5-T16 — Universal AI-first pivot detector for TEXT-CAPTURE / non-numeric
+ * awaiting states (missing_info_note, equipment_missing_note, decline_reason,
+ * schedule/correction value prompts, notes fields, etc.).
+ *
+ * Runs `parseIntent` and, when the LLM returns a HIGH-confidence top-level
+ * intent from the curated allow-list below, clears the current context and
+ * dispatches through the fresh AI path — letting the user pivot mid-flow
+ * without needing to type "ביטול" first. Returns `true` when the pivot was
+ * consumed (caller must not run the state's own capture handler).
+ *
+ * The allow-list is narrow ON PURPOSE. It only includes intents that a user
+ * could not plausibly be typing as an ANSWER to any current capture prompt:
+ *   - open_manager_menu — "תפריט" (already caught by MENU_TRIGGER_RE, kept
+ *     here for completeness / voice-transcribed variants).
+ *   - management_snapshot / list_today_field_inspections /
+ *     list_open_exceptions / list_pending_leads / workers_day_overview /
+ *     search_task — top-level manager dashboards. A worker capturing "טופס
+ *     דגימה" as their missing-info note would never accidentally match these.
+ *   - list_my_inspections — "הבדיקות שלי היום".
+ *   - set_field_status with an explicit transition (DEPARTED / ARRIVED /
+ *     FINISHED) — the classic pivot ("יצאתי" / "הגעתי" / "סיימתי").
+ *   - report_problem with a decisive problem_type — a clear worker pivot.
+ *   - schedule_task_field / assign_lead — top-level office actions.
+ *
+ * Notes-esque intents (report_missing_info, set_field_status without a
+ * transition, help, unknown) are DELIBERATELY excluded because they overlap
+ * with legitimate capture data. The confidence threshold is 0.85 (the
+ * router's `CONF_HIGH`) so borderline phrasings stay in the capture.
+ */
+async function tryPivotToAIIntent(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+): Promise<boolean> {
+  if (!getProvider()) return false;
+
+  // Cheap guard: obviously very short "answer" tokens (single word ≤6 chars)
+  // are almost never a top-level intent — skip the AI call to keep capture
+  // latency low.
+  const trimmed = text.trim();
+  if (trimmed.length <= 6 && !/\s/.test(trimmed)) return false;
+
+  let intent: AIIntentResult | undefined;
+  try {
+    const [allowedTypes, allowedPriorities, history] = await Promise.all([
+      getAllowedTaskTypes(),
+      safePriorities(),
+      getHistory(user.phone),
+    ]);
+    intent = await parseIntent(text, { user, allowedTypes, allowedPriorities, history });
+  } catch {
+    // parseIntent may transiently fail (no provider, network, etc.). We do
+    // NOT log here because this path fires on EVERY text-capture message —
+    // logging every miss would flood stderr. Silently fall back to the
+    // capture-state handler.
+    return false;
+  }
+
+  if (!intent || typeof intent.confidence !== 'number') return false;
+  if (intent.confidence < CONF_HIGH) return false;
+
+  const PIVOT_INTENTS: readonly string[] = [
+    'open_manager_menu',
+    'management_snapshot',
+    'list_today_field_inspections',
+    'list_open_exceptions',
+    'list_pending_leads',
+    'workers_day_overview',
+    'search_task',
+    'list_my_inspections',
+    'schedule_task_field',
+    'assign_lead',
+  ];
+  const isTopLevelPivot = PIVOT_INTENTS.includes(intent.intent);
+  const isStatusPivot =
+    intent.intent === 'set_field_status' &&
+    (intent.transition === 'DEPARTED' ||
+     intent.transition === 'ARRIVED' ||
+     intent.transition === 'FINISHED');
+  const isProblemPivot =
+    intent.intent === 'report_problem' && intent.problem_type !== null;
+
+  if (!isTopLevelPivot && !isStatusPivot && !isProblemPivot) return false;
+
+  log.info(
+    { fromState: ctx.awaiting, toIntent: intent.intent, confidence: intent.confidence },
+    'tryPivotToAIIntent: user pivoted mid-flow — clearing capture and dispatching',
+  );
+  await clearContext(user.phone);
+  // We already parsed the intent — don't re-parse. Skip the entry-point
+  // guards and route the parsed intent directly through `routeIntent`.
+  await appendTurn(user.phone, 'user', text);
+  await routeIntent(user, intent, text);
+  return true;
+}
+
+/**
  * D5-T15 — worker-intent inline dispatcher used INSIDE the detail-view
  * (`mgr_*_action` states) BEFORE the correction/reassign extractor runs.
  *
@@ -5468,7 +5626,30 @@ async function tryDispatchWorkerIntentInline(
     log.warn({ err }, 'tryDispatchWorkerIntentInline: parseIntent failed — falling back to extractor');
     return false;
   }
-  if (intent.confidence < CONF_LOW) return false;
+
+  // D5-T15 policy — AI-driven, not regex. Inside the detail view we bias
+  // heavily toward the worker intent path. The LLM knows the user's intent
+  // even for vague phrases; when it's uncertain it must return a clarification
+  // and we surface it, letting the AI drive the conversation. We only give up
+  // on the worker path when the LLM confidence is very low (<0.4).
+  const CONF_WORKER_INLINE = 0.4;
+  if (intent.confidence < CONF_WORKER_INLINE) return false;
+
+  // Helper: surface an LLM clarification when the intent is recognized but a
+  // required sub-field (transition / problem_type / note) is missing.
+  const showAIClarification = async (defaultMsg: string): Promise<void> => {
+    const msg = (intent.clarification && intent.clarification.trim().length > 0)
+      ? intent.clarification.trim()
+      : defaultMsg;
+    // Keep the awaiting state so the user's next reply lands back in
+    // handleMgrActionFreeText with the same TaskField context.
+    await setContext(user.phone, {
+      awaiting: 'mgr_today_action',
+      mgrSelectedTaskFieldId: taskFieldId,
+      mgrSelectedTaskId: intent.task_reference ?? undefined,
+    });
+    await sendTextMessage({ to: user.phone, text: msg });
+  };
 
   // set_field_status — DEPARTED/ARRIVED/FINISHED are direct; WAITING_FOR_INFO
   // and HAS_PROBLEM open the note / problem-type prompt on the current TF.
@@ -5476,6 +5657,15 @@ async function tryDispatchWorkerIntentInline(
     const transition = intent.transition ?? null;
     if (transition === 'DEPARTED' || transition === 'ARRIVED' || transition === 'FINISHED') {
       await performTransition(user, taskFieldId, transition);
+      return true;
+    }
+    // No specific transition named. AI-first policy: prefer the LLM's own
+    // clarification ("לאיזה סטטוס לעדכן?"). If the LLM didn't provide one,
+    // fall back to a helpful default that names the three options.
+    if (transition === null) {
+      await showAIClarification(
+        'לאיזה סטטוס לעדכן את הבדיקה? כתוב "יצאתי", "הגעתי", או "סיימתי".',
+      );
       return true;
     }
     if (transition === 'WAITING_FOR_INFO') {
@@ -5610,6 +5800,18 @@ async function handleMgrActionFreeText(
 
   // ── Fallback: low confidence or nothing extracted ──────────────────────────
   if (confidence < CONF_LOW || actions.length === 0) {
+    // D5-T15 (AI-first): if the correction extractor rejected the message,
+    // give the LLM a second chance to interpret it as a WORKER intent
+    // (set_field_status / report_problem / report_missing_info) — the same
+    // path used in `tryDispatchWorkerIntentInline`. The extractor is
+    // intentionally narrow (only corrections); the general parser is
+    // broader.
+    const consumedAsWorkerIntent = await tryDispatchWorkerIntentInline(user, text, taskFieldId);
+    if (consumedAsWorkerIntent) return;
+
+    // Fully unrecognized — surface the extractor's clarification (which is
+    // often descriptive of what the user meant, e.g. "ההודעה מתייחסת לשינוי
+    // סטטוס"). Keep the action state alive so the user can rephrase.
     await setContext(user.phone, {
       awaiting: ctx.awaiting,
       mgrSelectedTaskFieldId: taskFieldId,

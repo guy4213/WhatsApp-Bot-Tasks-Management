@@ -1103,6 +1103,8 @@ VALUES
 | **14** | **dateScope="all"** | **`תציג את כל הבדיקות שלי מכל הזמנים` returns full list, no "לא הצלחתי" error** |
 | **14** | **AI-first fallback** | **Unknown range in regex → delegated to AI, not error** |
 | **15** | **Worker intent in detail-view** | **Typing "יצאתי" / "הגעתי" / "סיימתי" / "הלקוח לא ענה" in the detail view of a specific inspection dispatches on THAT inspection, no "לא זוהתה פעולה ברורה"** |
+| **15b** | **AI-first for vague status** | **"שנה סטטוס" (no target) → AI clarification "לאיזה סטטוס לעדכן?", not a 4-item menu** |
+| **16** | **Universal pivot from any note-capture** | **In `missing_info_note` / `equipment_missing_note` / `decline_reason` / etc., typing "תפריט" / "יצאתי" / "מה יש היום" pivots to that intent instead of being captured as the note** |
 
 ---
 

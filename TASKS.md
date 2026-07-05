@@ -1233,6 +1233,165 @@ worker intents in the detail view.
 
 ---
 
+### D5-T15b — AI-first flexibility for vague / colloquial intents inside detail view (2026-07-05 iteration)
+
+**Status:** DONE (local, uncommitted)
+
+**Problem reported live (2nd iteration):** the previous D5-T15 fix only
+handled explicit transitions ("יצאתי" / "הגעתי" / "סיימתי"). When the user
+said "שנה סטטוס" / "נכון תשנה סטטוס" (colloquial: "change status" without
+naming which one), the LLM either returned low confidence or set
+`transition=null`, and the correction extractor's rejection ("ההודעה
+מתייחסת לשינוי סטטוס ולא לעדכון פרטי אתר") reached the user with a menu
+prompting for 1/2/3/4 corrections — a dead-end for someone trying to update
+status. User pushback: "AI INTENT - לבצע פעולות בטקסט חופשי או הקלטה
+שמומרת לטקסט חופשי אם יש לו אי הבנות לAI שישאל" = AI must understand free-
+text/voice, and if uncertain, the AI must ASK (via `clarification`), not
+fall back to a menu of 4 unrelated actions.
+
+**Approach — AI-first, no regex:**
+- Reject any regex-based keyword detection ("סטטוס" + verb) — the user
+  explicitly asked NOT to add regex fallbacks.
+- Have the LLM emit `set_field_status` with `transition=null` and a clear
+  Hebrew `clarification` for vague phrasings, INSTEAD OF returning
+  `unknown`. Prompt updates:
+  - `WORKER_INTENT_LIST`: added a "VAGUE STATUS PHRASES" clause telling the
+    model to emit `set_field_status` with `transition=null` and a Hebrew
+    clarification when the user asks to change/update status without
+    naming the target ("שנה סטטוס", "עדכן סטטוס", "אני רוצה לשנות סטטוס",
+    "נכון תשנה סטטוס", "אפשר לעדכן סטטוס", "צריך לעדכן סטטוס").
+  - `WORKER_FEW_SHOT`: added 6 examples for the vague-status pattern, each
+    emitting `transition=null` + `clarification="לאיזה סטטוס לעדכן?"`.
+- Router `tryDispatchWorkerIntentInline`:
+  - Removed the regex-based deterministic pre-check (per the user's
+    directive).
+  - When `set_field_status` intent arrives with `transition=null`, surface
+    the LLM's `clarification` (falling back to a helpful default text if
+    the model omitted one). Keeps the action context alive so the user's
+    next reply routes back into the same handler with the same TaskField.
+  - Confidence threshold for the worker-inline path stays at `0.4` (biased
+    toward the worker path inside the detail view; the LLM can always ask
+    a clarification instead of committing).
+- Router `handleMgrActionFreeText` (fallback branch when correction
+  extractor rejected):
+  - Removed the regex clarification-string matching (kept from previous
+    iteration).
+  - Now RE-INVOKES `tryDispatchWorkerIntentInline` as a "second chance" —
+    the general parser is broader than the correction extractor and may
+    recognize the worker intent that the extractor rejected. If it also
+    fails, the extractor's clarification is shown as-is (letting the LLM
+    drive the next turn).
+
+**Files changed:**
+- `src/ai/intentParser.ts` — updated `WORKER_INTENT_LIST` set_field_status
+  line + added 6 new FEW_SHOT examples for vague status phrases.
+- `src/ai/router.ts` — `tryDispatchWorkerIntentInline` removed regex
+  pre-check + added AI-clarification handling for `transition=null` case;
+  `handleMgrActionFreeText` fallback now retries worker-intent path.
+- `src/__tests__/detailViewAIContext.test.ts` — +2 new tests:
+  - "vague שנה סטטוס → surfaces AI clarification, no menu fallback"
+  - "correction-extractor rejection re-tries as worker intent (second chance)"
+
+**QA:** `npx tsc --noEmit` exit 0. All 46 tests in
+`detailViewAIContext.test.ts` pass; 206/206 across 6 affected suites.
+
+**Live user impact:** "שנה סטטוס" / "נכון תשנה סטטוס" / "אני רוצה לעדכן
+סטטוס" now trigger the AI's clarification "לאיזה סטטוס לעדכן?" — the AI is
+asking, not the bot fallbacking. Any explicit transition in the reply
+completes the flow on the same TaskField.
+
+**Philosophy locked in for future phases:** no regex intent detection.
+AI-first everywhere. When AI is uncertain, AI asks (via `clarification`).
+
+---
+
+### D5-T16 — Universal AI-first pivot escape from text-capture states (2026-07-05 iteration)
+
+**Status:** DONE (local, uncommitted)
+
+**Problem reported live (3rd iteration):** the user pointed out that the
+AI-first policy was only applied to `mgr_*_action` states inside D5-T15.
+Every OTHER text-capture state (missing_info_note, equipment_missing_note,
+inspection_decline_reason, etc.) still forced the user's reply into the
+capture, even if they had clearly pivoted to a new intent
+("שנה סטטוס", "יאללה תפריט", "יצאתי לאתר"). The user's clarification:
+"AI בעל עדיפות אם לא נבחר סעיף בתפריט. שיהיה התייחסות לטקסט חופשי יותר
+בבקשה" = AI has priority when the user didn't pick a menu item; make
+free-text handling universal.
+
+**Fix — universal pivot check:**
+- New `TEXT_CAPTURE_PIVOT_STATES` set listing all text-capture awaiting
+  states where a mid-flow pivot is allowed:
+  - Note states: `missing_info_note`, `problem_type_note`,
+    `finished_notes`, `callback_customer_note`, `equipment_missing_note`,
+    `inspection_decline_reason`, `inspection_need_info_note`,
+    `pre_reminder_need_info_note`.
+  - Search: `mgr_search_await_query`.
+  - Deliberately EXCLUDED: `schedule_await_time` /
+    `schedule_await_duration` / `correct_site_await_value` /
+    `correct_site_confirm_extracted` — the user is deep in a specific
+    multi-step flow; their reply is meant as a value (date, minutes,
+    corrected address), not a free-text note. Pivoting would cause
+    accidental exits.
+  - Also excluded: `mgr_*_action` (they already have their own AI-first
+    path via `tryDispatchWorkerIntentInline` in D5-T15).
+- New `tryPivotToAIIntent(user, text, ctx)` helper — runs `parseIntent`
+  and only escapes when the LLM returns a HIGH-confidence (`≥ CONF_HIGH =
+  0.85`) top-level intent from a curated allow-list:
+  - `open_manager_menu`, `management_snapshot`,
+    `list_today_field_inspections`, `list_open_exceptions`,
+    `list_pending_leads`, `workers_day_overview`, `search_task`
+    (top-level manager dashboards).
+  - `list_my_inspections`.
+  - `schedule_task_field`, `assign_lead` (top-level office actions).
+  - `set_field_status` with an explicit transition (DEPARTED / ARRIVED /
+    FINISHED).
+  - `report_problem` with a decisive `problem_type`.
+  - Intentionally EXCLUDED: `report_missing_info`, `set_field_status`
+    without a transition, `help`, `unknown` — these overlap with
+    legitimate capture data (e.g. "טופס דגימה" could be misinterpreted
+    as report_missing_info).
+- Cheap short-token guard: single words ≤6 chars with no whitespace skip
+  the LLM call entirely — most legitimate notes ("מדד", "בטריות",
+  "טופס") are short and clearly answers, not pivots. Full-sentence
+  pivots ("רגע יצאתי כבר לאתר") pass the guard and reach the LLM.
+- `MENU_TRIGGER_RE` deterministic pre-check (זה נשמר בכל מקום כי מנוע
+  התפריט הוא unambiguous UX contract, לא intent detection).
+
+**Files changed:**
+- `src/ai/router.ts` — `TEXT_CAPTURE_PIVOT_STATES` set (+15 lines);
+  `tryPivotToAIIntent` (+80 lines); guarded pivot block inside
+  `continueConversation` (+22 lines).
+- `src/__tests__/routerFreeTextAwait.test.ts` — expose `parseIntentMock`
+  for controllable per-test behavior; +2 tests:
+  - LOW-confidence intent → stays in capture (no false pivot).
+  - Short single-word note → skips the LLM check entirely.
+
+**Constraints preserved:**
+- All existing text-capture flows still work (regression suites pass).
+- Multi-step flows (schedule, correct-site) explicitly excluded from
+  pivot — no accidental exits.
+- Silent try/catch on `parseIntent` — this path runs on every text-
+  capture message; noisy `log.warn` would flood stderr in test/dev.
+- Confidence threshold `CONF_HIGH` = 0.85 keeps borderline phrasings in
+  the capture (biases toward "user answered our question" over "user
+  pivoted").
+
+**QA:** `npx tsc --noEmit` exit 0. Full suite **1132 passed / 0 failed
+/ 7 skipped**.
+
+**Live user impact:** the user can now say "תפריט" / "יצאתי" / "מה יש
+היום" / "הבדיקות שלי" mid-capture from ANY note state, and the bot
+recognizes the pivot instead of writing the pivot text as a note. If the
+AI is uncertain, it asks via `clarification` — never forces a confusing
+capture.
+
+**Philosophy applied universally:** AI-first when the user did not pick a
+menu number. Regex only for the deterministic menu trigger (an
+unambiguous UX contract). All intent detection routed through the LLM.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:

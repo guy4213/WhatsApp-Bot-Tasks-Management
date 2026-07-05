@@ -81,8 +81,10 @@ vi.mock('../services/chatHistory', () => ({
 }));
 
 vi.mock('../ai/provider', () => ({ getProvider: () => ({ name: 'test' }) }));
+const parseIntentMock = vi.fn().mockRejectedValue(new Error('unused'));
 vi.mock('../ai/intentParser', () => ({
-  parseIntent: vi.fn().mockRejectedValue(new Error('unused')),
+  parseIntent: (...a: unknown[]) => parseIntentMock(...a),
+  buildSystemPrompt: vi.fn().mockReturnValue(''),
 }));
 vi.mock('../utils/auditLog', () => ({
   writeAuditLog: vi.fn().mockResolvedValue('audit-id'),
@@ -404,5 +406,47 @@ describe('Priority-2 free-text await handlers call extractNote', () => {
     );
     // Should advance to duration state
     expect(ctxStore?.awaiting).toBe('schedule_await_duration');
+  });
+});
+
+// ── D5-T16: Universal AI-first pivot from text-capture states ───────────────
+
+describe('D5-T16 — universal AI-first pivot from text-capture states', () => {
+  it('missing_info_note: LOW confidence intent → stays in capture (no false pivot)', async () => {
+    // Verifies the pivot check does NOT fire on a plausible free-text note
+    // that the LLM did not confidently classify as a top-level intent.
+    parseIntentMock.mockReset().mockResolvedValue({
+      intent: 'set_field_status', confidence: 0.3,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: 'DEPARTED', problem_type: null,
+    });
+    // Longer than 6 chars so the short-token guard doesn't shortcut.
+    await sendWithCtx(
+      { awaiting: 'missing_info_note', taskFieldId: 'tf-1' },
+      'טופס דגימה של יוסי',
+    );
+
+    // parseIntent was invoked but pivot did NOT fire (below CONF_HIGH).
+    expect(parseIntentMock).toHaveBeenCalled();
+    // Note capture went through → writeMissingInfo was called.
+    expect(writeMissingInfo).toHaveBeenCalled();
+  });
+
+  it('missing_info_note: short single-word notes skip the LLM check entirely', async () => {
+    parseIntentMock.mockReset();
+
+    // Short single word like "מדד" (≤6 chars, no space) — the pivot check
+    // short-circuits (never calls parseIntent) so we don't pay LLM latency
+    // for a trivially-obvious note.
+    await sendWithCtx(
+      { awaiting: 'missing_info_note', taskFieldId: 'tf-1' },
+      'מדד',
+    );
+
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    // Note went through.
+    expect(writeMissingInfo).toHaveBeenCalled();
   });
 });

@@ -1101,6 +1101,78 @@ describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
     expect(extractInspectionActionsMock).toHaveBeenCalled();
   });
 
+  it('AI-first — vague "שנה סטטוס" (transition=null) surfaces AI clarification, no menu fallback', async () => {
+    seedActionCtx('mgr_today_action');
+    // The LLM recognizes the intent as set_field_status but the user did NOT
+    // name a specific transition. Per the AI-first policy: emit
+    // transition=null + a Hebrew clarification, and the router shows the
+    // clarification to the user (keeping the action context alive).
+    parseIntentMock.mockResolvedValue({
+      intent: 'set_field_status', confidence: 0.9,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: 'לאיזה סטטוס לעדכן? כתוב "יצאתי", "הגעתי", או "סיימתי".',
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    await handleAIMessage(manager, 'שנה סטטוס');
+    // No write.
+    expect(advanceFieldStatusMock).not.toHaveBeenCalled();
+    // No fallback to "לא הבנתי — כתוב 1/2/3/4".
+    const allText = sendTextMessage.mock.calls
+      .map((c) => (c[0] as { text: string }).text)
+      .join('\n');
+    expect(allText).not.toContain('לא הבנתי — כתוב 1/2/3/4');
+    // The LLM's clarification IS shown.
+    expect(allText).toContain('לאיזה סטטוס לעדכן');
+    // The correction extractor was NOT called (worker intent consumed the message).
+    expect(extractInspectionActionsMock).not.toHaveBeenCalled();
+  });
+
+  it('AI-first — correction-extractor rejection re-tries as worker intent (second chance)', async () => {
+    seedActionCtx('mgr_today_action');
+    // First path: worker intent inline returns false (LLM returned unknown /
+    // low confidence). Extractor is then called — it rejects the message.
+    // The fallback then RE-INVOKES the worker intent path with a fresh
+    // parseIntent mock, which this time recognizes the phrase as a worker
+    // intent (simulating a subsequent turn where the LLM commits to the
+    // intent). We verify that the fallback does NOT surface the extractor's
+    // "לא הבנתי — 1/2/3/4" and instead the worker-inline path handles it.
+    let callCount = 0;
+    parseIntentMock.mockImplementation(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        // First call from tryDispatchWorkerIntentInline — below threshold.
+        return {
+          intent: 'set_field_status', confidence: 0.3,
+          task_reference: null, field: null, new_value: null, params: {},
+          missing_fields: [], clarification: null,
+          requires_confirmation: false, requires_manager_approval: false,
+          transition: null, problem_type: null,
+        };
+      }
+      // Second call from the extractor-fallback branch — commits to
+      // the transition (imagine the user restated more clearly).
+      return {
+        intent: 'set_field_status', confidence: 0.95,
+        task_reference: null, field: null, new_value: null, params: {},
+        missing_fields: [], clarification: null,
+        requires_confirmation: false, requires_manager_approval: false,
+        transition: 'DEPARTED', problem_type: null,
+      };
+    });
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [], confidence: 0.2, clarification: 'ההודעה מתייחסת לשינוי סטטוס',
+    });
+    await handleAIMessage(manager, 'תעדכן את הסטטוס');
+    // On the SECOND parseIntent call the worker-inline path found DEPARTED →
+    // performTransition should have fired.
+    expect(advanceFieldStatusMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      transition: 'DEPARTED',
+      updatedBy: manager.id,
+    });
+  });
+
   it('low-confidence parseIntent → falls through to extractor (regression check)', async () => {
     seedActionCtx('mgr_today_action');
     parseIntentMock.mockResolvedValue({
