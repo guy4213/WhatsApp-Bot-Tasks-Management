@@ -1538,6 +1538,321 @@ these clearly-named CONFIRM phrasings.
 
 ---
 
+## 4.10 QA findings from live-testing (2026-07-05, evening session)
+
+The user performed a comprehensive live QA against the WhatsApp bot and
+identified 15 items in a written report. Split into 4 work batches
+(A/B/C/D) grouped by severity. **Each item below is an OPEN task** — status
+`OPEN` until fixed and QA'd.
+
+### Batch A — URGENT (investigation + fix)
+
+#### D5-T19a — Manager notifications: verify actual send + DB log + 24h window handling
+**Status:** OPEN
+
+**What the QA report said:** in several flows the bot says "נשלחה הודעה
+למנהל" but it's unclear whether the WhatsApp message actually reaches the
+manager. Relevant flows: report_problem, missing_info, missing_equipment,
+day summary/exceptions alerts.
+
+**What to do:**
+- Trace `broadcastToManagers` in `src/services/inspections.ts:553` end-to-end:
+  fetches managers via `getManagersForBroadcast()`, sends via `sendTextMessage`.
+- Verify each recipient path is exercised in the affected flows (writeProblem,
+  writeMissingInfo, writeMissingEquipment, etc).
+- Verify that a DB audit-log row is written for each broadcast.
+- Verify Meta 24h window handling: outside the window, `sendTextMessage`
+  should fall back to a template (or fail visibly + log). Trace the code
+  and confirm.
+- Add integration test (or live smoke script) that mocks/asserts
+  managers-list resolution + sender call + audit-log insert.
+
+**Priority:** URGENT — the user has no visibility into whether the bot's
+"עדכנתי, המנהל קיבל התראה" claim is truthful.
+
+#### D5-T19b — "בעיה מקצועית" (PROFESSIONAL_ISSUE) / OTHER note not saved properly
+**Status:** OPEN
+
+**What the QA report said:** in TC-5.1, when the worker selects
+PROFESSIONAL_ISSUE or OTHER and then types a note, the note is not saved
+correctly.
+
+**What to do:**
+- Reproduce: menu item 4 → sub-menu → pick 6 (PROFESSIONAL_ISSUE) or 7
+  (OTHER) → prompt "פרט בבקשה:" → type note → expected: writeProblem with
+  problemType + note.
+- Trace `handleProblemTypeNoteReply` at `src/ai/router.ts:2029` — it calls
+  `extractNote` then `writeProblem({ taskFieldId, problemType, note, ... })`.
+- Verify `writeProblem` in `src/services/inspections.ts` actually persists
+  `problemNote` (check the UPDATE SQL — is the note column being written?).
+- Verify the manager alert message includes the note verbatim.
+- Add a unit test that seeds `awaiting: 'problem_type_note'` +
+  `problemType='PROFESSIONAL_ISSUE'` and asserts writeProblem receives the
+  note.
+
+**Priority:** URGENT — data-integrity bug.
+
+#### D5-T19c — Localize fieldStatus enums shown to user (FINISHED_FIELD → "הסתיים בשטח")
+**Status:** OPEN
+
+**What the QA report said:** in search-by-status results and other display
+paths, the bot returns raw enums like `FINISHED_FIELD` instead of the
+Hebrew label.
+
+**What to do:**
+- Hebrew label table exists at `src/ai/inspectionFormatters.ts:38`.
+- Find all display sites that emit raw fieldStatus without applying the
+  labels. Suspect files:
+  - Search result formatters in `src/services/managerViews.ts` (Phase 5).
+  - `src/ai/router.ts` search dispatch path (Phase 5).
+  - Possibly `formatMyInspectionsRange` if it emits raw.
+- Route all user-facing status renderings through the existing label map.
+- Grep for `fieldStatus` in string interpolation / template literals and
+  wrap with label lookup.
+
+**Priority:** URGENT — user-visible polish. Also affects search results.
+
+### Batch B — URGENT (product-level fixes)
+
+#### D5-T19d — `missing_equipment_free` routes to missing_info flow instead of equipment flow
+**Status:** OPEN
+
+**What the QA report said:** phrases like "אין לי בטריות" / "חסר לי מזרן"
+sometimes ask "מה חסר לדוח?" instead of "איזה ציוד חסר?".
+
+**What to do:**
+- Trace `case 'missing_equipment_free'` in
+  `src/ai/router.ts` (added in D5-T10) and verify it calls
+  `handleEquipmentMissingNoteReply` with a fresh context, NOT
+  `handleMissingInfoNoteReply`.
+- Check that the LLM prompt clearly distinguishes:
+  - `missing_equipment_free` — pre-departure / general equipment
+  - `report_missing_info` — missing info for the FINAL REPORT of a specific TaskField
+- Verify the notification service used is `notifyOfficeMissingEquipment`,
+  not `notifyOfficeMissingInfo`.
+- Add a test with mocked LLM returning `missing_equipment_free` intent
+  and assert the equipment-alert service is called.
+
+**Priority:** URGENT — flow confusion.
+
+#### D5-T19e — Customer search returns empty despite matching data
+**Status:** OPEN
+
+**What the QA report said:** "חפש בדיקה של חיים" / "חפש בדיקה של מעיין
+שפירא" returned no results, even though matches should exist. Field-status
+search DOES work, so the search dispatch works — just customer/name search
+is broken.
+
+**What to do:**
+- Trace `searchTasksByCustomerName` (should exist in
+  `src/services/managerViews.ts`). Check the query:
+  - Does it ILIKE-match against the 6-source COALESCE'd customer name
+    (Customer / Lead / IncomingLead / Project / fromName)?
+  - Does it JOIN Task→TaskField correctly?
+  - Any WHERE filter that would exclude legitimate rows (e.g. only "open"
+    statuses)?
+- Verify router dispatch for `searchBy=customer` hits the right function.
+- Add integration test with a seeded row and a matching search term.
+
+**Priority:** URGENT — a core manager feature.
+
+#### D5-T19f — Exceptions by date range shows generic menu instead of filtered list
+**Status:** OPEN
+
+**What the QA report said:** "חריגים של אתמול" opens a generic exceptions
+menu instead of showing yesterday's exceptions. The dateRange param from
+D5-T11 (Phase 4) seems not to reach the query.
+
+**What to do:**
+- Trace router `list_open_exceptions` dispatch (Phase 4 D5-T11).
+- Verify `params.dateRange` is extracted, forwarded to
+  `getFieldExceptionRows`, and the query actually filters on the range.
+- Check the LLM prompt still includes the dateRange examples added in
+  D5-T11.
+- Verify the manager dashboard `count_only` (Phase 5) does NOT hijack the
+  dispatch when the LLM emits both `dateRange` AND `count_only=false`.
+- Add integration test with mocked LLM emitting dateRange and assert the
+  service is called with the range.
+
+**Priority:** URGENT — Phase 4 regression / incomplete plumbing.
+
+### Batch C — URGENT + IMPORTANT (features)
+
+#### D5-T19g — `list_today_field_inspections` (manager) needs dateRange support
+**Status:** OPEN
+
+**What the QA report said:** admin's "משימות של השבוע" / "משימות של אתמול"
+/ "בין תאריכים" isn't supported — Phase 4 added dateRange to
+list_open_exceptions / list_pending_leads / workers_day_overview but NOT
+to list_today_field_inspections (which stays today-only per its name).
+
+**What to do:**
+- Rename semantics: the intent is "manager sees field inspections in a
+  date range" — today is just the default. Consider renaming to
+  `list_field_inspections` OR adding a dedicated `list_field_inspections_range`.
+- Cleaner path: extend the existing `list_today_field_inspections` with
+  `params.dateRange` (default = today), matching the Phase 4 pattern.
+- Update the LLM prompt + FEW_SHOT.
+- Update service `getTodayFieldInspections` to accept a dateRange param.
+- Add tests.
+
+**Priority:** URGENT — the user labeled this "צריך לטפל דחוף".
+
+#### D5-T19h — Exception filter phrasings ("בעיות שטח" / "חסר מידע") don't trigger filter — show generic menu
+**Status:** OPEN
+
+**What the QA report said:** in TC-9.3, filter synonyms added in Phase 6
+(D5-T13) don't actually cause the router to apply the filter — it falls
+back to the generic exceptions menu.
+
+**What to do:**
+- Reproduce with each Phase-6 phrase: "בעיות שטח", "בעייתיים",
+  "בדיקות בעייתיות", "המתינות לאישור", "חסרות מידע", "עדיין לא סגרו".
+- Trace the LLM output — is it emitting `list_open_exceptions` with the
+  correct `params.filter`, or falling to `unknown` / `open_manager_menu`?
+- If the LLM is returning the correct intent but the router shows the
+  menu, check `showMgrExceptionsSub` — it may be defaulting to the
+  sub-menu instead of executing the filter.
+- Verify the D5-T13 FEW_SHOT examples are actually in
+  `src/ai/intentParser.ts`.
+
+**Priority:** URGENT — Phase 6 feature that doesn't work end-to-end.
+
+#### D5-T19i — Allow ADMIN / MANAGER to assign leads (currently only Sasha + dev observers)
+**Status:** OPEN
+
+**What the QA report said:** the auth gate on `startAssignLeadFlow` /
+`tryPrePopulateAssignLead` rejects any user who is not in `isLeadsViewer`
+(Sasha + dev observers). The user requests: ADMIN / MANAGER should also
+be allowed.
+
+**What to do:**
+- Broaden the auth check in `startAssignLeadFlow` (router.ts:3086) and
+  `tryPrePopulateAssignLead` (Phase 6):
+  - Currently: `if (!isLeadsViewer(user.name))` → reject.
+  - New: allow when `isLeadsViewer(user.name) || user.role === 'ADMIN' || user.role === 'MANAGER'`.
+- Verify the CRM writes: assign_lead writes `IncomingLead.ownerId` —
+  is this an ADMIN-permitted action per §6.6? Confirm with the source of
+  truth before shipping. Per CLAUDE.md §6.5, "Sasha / lead assigners" is
+  the current allowlist; the user is now explicitly extending this to
+  ADMIN/MANAGER.
+- Rephrase auth rejection message (from "אין הרשאה — רק סשה או תצפיתני
+  dev יכולים לשייך לידים." to something user-friendly — see D5-T19n
+  below).
+- Update `src/services/specialUsers.ts` if we need a new "lead assigners"
+  concept.
+- Tests: add auth-pass tests for ADMIN + MANAGER, auth-reject for
+  TECHNICIAN.
+
+**Priority:** URGENT — permission gate blocking real users.
+
+### Batch D — IMPORTANT + UX
+
+#### D5-T19j — Structured "missing info" sub-menu (top of D2-T7 flow)
+**Status:** OPEN
+
+**What to do:** before prompting for free-text "מה חסר לדוח?", show a
+numbered sub-menu of common missing items ("טופס דגימה" / "מדד" / "שעה" /
+"מספר היתר" / "פרטי אתר" / "שם איש קשר / מתכנן" / "אחר — כתיבה חופשית").
+Route options 1-6 to a preset note text; option 7 falls back to the
+existing free-text prompt.
+
+**Files affected:** `src/ai/menu.ts` (new sub-menu constant),
+`src/ai/router.ts` (`startMissingInfoFlow` shows the sub-menu first),
+`src/services/conversationContext.ts` (new awaiting kind
+`missing_info_choice`).
+
+**Priority:** IMPORTANT — UX polish.
+
+#### D5-T19k — Structured "missing equipment" sub-menu
+**Status:** OPEN
+
+**What to do:** same pattern as D5-T19j. Suggested items:
+"בטריות" / "מכשיר מדידה" / "מזרן" / "מד רעש/קרינה" / "טופס בדיקה" / "אחר".
+
+**Files affected:** `menu.ts` + `router.ts` + `conversationContext.ts`.
+
+**Priority:** IMPORTANT — pairs with D5-T19d.
+
+#### D5-T19l — Extended pivot experience (mid-flow escape without "ביטול")
+**Status:** OPEN
+
+**What to do:** D5-T16 already added `TEXT_CAPTURE_PIVOT_STATES` for
+note-capture states. Extend the concept to any state where the user
+clearly asked for a new top-level intent (excluding value-prompt states
+like schedule_await_time to prevent accidental exits). Review the current
+allow-list; the user's report explicitly calls out this pattern being
+too restrictive.
+
+**Trade-off note:** the user warns not to be too aggressive on internal
+note captures — those should still capture the answer, not pivot away
+from a legitimate free-text response. Balance carefully.
+
+**Priority:** IMPORTANT — UX; balance carefully with D5-T16 regression
+tests.
+
+#### D5-T19m — Verify "digit + polite word" (D5-T13 6c) actually works live
+**Status:** OPEN
+
+**What the QA report said:** in TC-8.3, "2 בבקשה" / "כן 2" / "אוקי 4"
+were NOT intercepted despite the Phase 6 guard (D5-T13). Either the
+regex is broken or the guard was refactored/moved by a later phase.
+
+**What to do:**
+- Verify the DIGIT_POLITE_RE / CONFIRM_DIGIT_RE regexes in `router.ts` still
+  fire (they were added in D5-T13 6c).
+- Test with each of: "2 בבקשה", "2 תודה", "כן 2", "אישור 3", "אוקי 4",
+  "בטח 1", "סבבה 5".
+- If they don't work, fix — the tests in `managerRichness.test.ts` should
+  cover this and should still pass. Investigate why live differs.
+
+**Priority:** IMPORTANT — feature that was tested green but reportedly
+fails live.
+
+#### D5-T19n — Rephrase "תצפיתני DEV" auth-rejection message to user-friendly text
+**Status:** OPEN
+
+**What the QA report said:** the current rejection message
+"אין הרשאה — רק סשה או תצפיתני dev יכולים לשייך לידים." leaks internal
+terminology and isn't user-friendly.
+
+**What to do:** replace with something like:
+"אין לך הרשאה לשייך לידים. אם אתה חושב שזה נחוץ, פנה למנהל המערכת."
+Suggest new copy in the AUTH_REJECT_MSG constant in `src/ai/router.ts:3084`.
+
+Also — should be paired with D5-T19i (widening the allowlist) so the
+rejection is even RARER.
+
+**Priority:** UX.
+
+#### D5-T19o — Verify menu item 7 vs free-text "הבדיקות שלי" parity for managers who are also workers
+**Status:** OPEN
+
+**What the QA report said:** TC-16.3 needs verification — a manager who
+is also assigned as a worker on TaskFields should see the same
+"personal" list via both:
+- Menu item 7 → `mgr_my_inspections_today` action.
+- Free text "הבדיקות שלי" → `handleMyInspectionsFreeText` (or the LLM
+  intent `list_my_inspections`).
+
+**What to do:**
+- Trace both flows.
+- Confirm they use the same worker-owner-scoped query (Task.ownerId =
+  user.id).
+- Add a parity test that seeds a manager + 3 TaskFields owned by them,
+  then asserts both paths return the same 3 rows.
+
+**Priority:** UX consistency.
+
+---
+
+**Execution plan:** Batches A → B → C → D, sequential. After each batch:
+`npx tsc --noEmit`, run affected suites, update this section's Status
+fields, produce a QA report, then move to the next batch. The user will
+verify the fixes live in one final pass ("אבדוק את הכל בסוף בבת אחת").
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:
