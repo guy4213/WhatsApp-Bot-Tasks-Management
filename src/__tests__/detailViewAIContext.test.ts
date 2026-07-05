@@ -978,7 +978,9 @@ describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
     // path already consumed the message.
     expect(extractInspectionActionsMock).not.toHaveBeenCalled();
     // The "לא זוהתה פעולה ברורה" fallback must NOT appear.
-    const allText = sendTextMessage.mock.calls.map((c: [{ text: string }]) => c[0].text).join('\n');
+    const allText = sendTextMessage.mock.calls
+      .map((c) => (c[0] as { text: string }).text)
+      .join('\n');
     expect(allText).not.toContain('לא זוהתה פעולה ברורה');
   });
 
@@ -1015,8 +1017,8 @@ describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
       updatedBy: manager.id,
     });
     // FINISHED opens the 4-option follow-up + sets awaiting=finished_followup.
-    const fupCall = setContext.mock.calls.find((c: [string, { awaiting?: string; taskFieldId?: string }]) => {
-      const s = c[1];
+    const fupCall = setContext.mock.calls.find((c) => {
+      const s = c[1] as { awaiting?: string; taskFieldId?: string };
       return s.awaiting === 'finished_followup' && s.taskFieldId === 'tf-abc';
     });
     expect(fupCall).toBeTruthy();
@@ -1052,8 +1054,8 @@ describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
     });
     await handleAIMessage(manager, 'יש לי בעיה');
     // Expect a context set to problem_type_choice with the current TF.
-    const problemChoiceCall = setContext.mock.calls.find((c: [string, { awaiting?: string; taskFieldId?: string }]) => {
-      const s = c[1];
+    const problemChoiceCall = setContext.mock.calls.find((c) => {
+      const s = c[1] as { awaiting?: string; taskFieldId?: string };
       return s.awaiting === 'problem_type_choice' && s.taskFieldId === 'tf-abc';
     });
     expect(problemChoiceCall).toBeTruthy();
