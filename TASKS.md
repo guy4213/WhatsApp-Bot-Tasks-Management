@@ -1172,6 +1172,67 @@ error or a today-only view.
 
 ---
 
+### D5-T15 — Worker-intent inline dispatch inside detail-view action states (2026-07-05 hotfix)
+
+**Status:** DONE (local, uncommitted)
+
+**Problem reported live:** worker was viewing a specific TaskField's detail
+(state = `mgr_today_action` after picking from `הבדיקות שלי` list). They
+typed "יצאתי" expecting a status update. Bot invoked
+`extractInspectionActions` (correction/reassign extractor — Agent B), which
+does NOT recognize `set_field_status` / `report_problem` /
+`report_missing_info` intents → returned:
+> "לא זוהתה פעולה ברורה מההודעה. אנא ציין את הפעולה הרצויה. 1/2/3/4"
+
+The user (correctly) demanded: "worker free text must be understood as
+intent in ANY state, not only at menu top-level".
+
+**Fix:**
+- New function `tryDispatchWorkerIntentInline(user, text, taskFieldId)` in
+  `router.ts`. Called BEFORE `extractInspectionActions` inside
+  `handleMgrActionFreeText`.
+- Runs the general `parseIntent` with the user's role context.
+- On `set_field_status` (DEPARTED/ARRIVED/FINISHED) with confidence ≥
+  `CONF_LOW` → `performTransition(user, currentTaskFieldId, transition)`.
+  No disambiguation needed: we already know which TaskField the user is
+  viewing.
+- On `set_field_status` (WAITING_FOR_INFO) with a note → write directly;
+  without note → prompt for the note against the current TF.
+- On `set_field_status` (HAS_PROBLEM) with `problem_type` → write directly;
+  without → open the 7-item problem sub-menu against the current TF.
+- On `report_problem` → same as HAS_PROBLEM branch above.
+- On `report_missing_info` → write directly (with note) or prompt for the
+  note against the current TF.
+- Returns `true` (consumed) so the caller skips the correction extractor.
+- Any other intent OR low-confidence → returns `false`; the existing
+  `extractInspectionActions` path handles corrections/reassign/reschedule.
+
+**Files changed:**
+- `src/ai/router.ts` — `tryDispatchWorkerIntentInline` (+90 lines) invoked
+  from `handleMgrActionFreeText` (+3 lines).
+- `src/__tests__/detailViewAIContext.test.ts` — refactored parseIntent
+  mock + inspections service mocks to be trackable; +8 new tests for
+  D5-T15 covering DEPARTED / ARRIVED / FINISHED / report_problem (typed
+  + untyped) / report_missing_info / correction-still-routes-to-extractor
+  regression / low-confidence-still-routes-to-extractor regression.
+
+**QA:** `npx tsc --noEmit` exit 0. All 44 tests in
+`detailViewAIContext.test.ts` pass; 215/215 across 7 affected suites.
+
+**Live user impact:** typing "יצאתי" / "הגעתי" / "סיימתי" / "הלקוח לא ענה" /
+"שכחתי את המדד" while viewing an inspection's detail view now dispatches
+directly against that TaskField. No more "לא זוהתה פעולה ברורה" trap for
+worker intents in the detail view.
+
+**Constraints preserved:**
+- Correction/reassign/reschedule flows unchanged (regression tests).
+- Low-confidence intent still falls through to the correction extractor.
+- Both worker and manager users benefit — a manager viewing their own
+  inspection (item 7) can also say "יצאתי" and it works.
+- No new schema, no new migrations, no permission changes.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:

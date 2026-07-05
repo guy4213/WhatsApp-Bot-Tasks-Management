@@ -71,16 +71,21 @@ vi.mock('../services/taskFieldCorrections', () => ({
   getTaskFieldForCorrection: (...a: unknown[]) => getTaskFieldForCorrection(...a),
 }));
 
-// inspections service
+// inspections service — D5-T15 tests need trackable advance/writeProblem/writeMissingInfo mocks.
+const advanceFieldStatusMock = vi.fn().mockResolvedValue(undefined);
+const writeMissingInfoMock = vi.fn().mockResolvedValue(undefined);
+const writeProblemMock = vi.fn().mockResolvedValue(undefined);
+const notifyOfficeMissingInfoMock = vi.fn().mockResolvedValue(undefined);
+const notifyOfficeProblemMock = vi.fn().mockResolvedValue(undefined);
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: vi.fn().mockResolvedValue(null),
   resolveOpenTaskFieldByHint: vi.fn().mockResolvedValue(null),
-  advanceFieldStatus: vi.fn().mockResolvedValue(undefined),
+  advanceFieldStatus: (...a: unknown[]) => advanceFieldStatusMock(...a),
   writeFieldNotes: vi.fn().mockResolvedValue(undefined),
-  writeMissingInfo: vi.fn().mockResolvedValue(undefined),
-  writeProblem: vi.fn().mockResolvedValue(undefined),
-  notifyOfficeMissingInfo: vi.fn().mockResolvedValue(undefined),
-  notifyOfficeProblem: vi.fn().mockResolvedValue(undefined),
+  writeMissingInfo: (...a: unknown[]) => writeMissingInfoMock(...a),
+  writeProblem: (...a: unknown[]) => writeProblemMock(...a),
+  notifyOfficeMissingInfo: (...a: unknown[]) => notifyOfficeMissingInfoMock(...a),
+  notifyOfficeProblem: (...a: unknown[]) => notifyOfficeProblemMock(...a),
   notifyOfficeMissingEquipment: vi.fn().mockResolvedValue(undefined),
   dayFieldSummary: vi.fn().mockResolvedValue({ finished: [], waitingForInfoCount: 0 }),
   confirmInspection: vi.fn().mockResolvedValue(undefined),
@@ -144,13 +149,15 @@ vi.mock('../ai/provider', () => ({
   getProvider: () => ({ name: 'test' }),
 }));
 
+const parseIntentMock = vi.fn().mockResolvedValue({
+  intent: 'unknown', confidence: 0.1, task_reference: null, field: null,
+  new_value: null, params: {}, missing_fields: [], clarification: null,
+  requires_confirmation: false, requires_manager_approval: false,
+  transition: null, problem_type: null,
+});
 vi.mock('../ai/intentParser', () => ({
-  parseIntent: vi.fn().mockResolvedValue({
-    intent: 'unknown', confidence: 0.1, task_reference: null, field: null,
-    new_value: null, params: {}, missing_fields: [], clarification: null,
-    requires_confirmation: false, requires_manager_approval: false,
-    transition: null, problem_type: null,
-  }),
+  parseIntent: (...a: unknown[]) => parseIntentMock(...a),
+  buildSystemPrompt: vi.fn().mockReturnValue(''),
 }));
 
 vi.mock('../services/incomingLeads', () => ({
@@ -294,6 +301,17 @@ beforeEach(() => {
   listInspectionTypes.mockClear();
   getTaskFieldValuesForContext.mockReset();
   getTaskFieldDetail.mockReset();
+  parseIntentMock.mockReset().mockResolvedValue({
+    intent: 'unknown', confidence: 0.1, task_reference: null, field: null,
+    new_value: null, params: {}, missing_fields: [], clarification: null,
+    requires_confirmation: false, requires_manager_approval: false,
+    transition: null, problem_type: null,
+  });
+  advanceFieldStatusMock.mockClear();
+  writeMissingInfoMock.mockClear();
+  writeProblemMock.mockClear();
+  notifyOfficeMissingInfoMock.mockClear();
+  notifyOfficeProblemMock.mockClear();
   ctxStore = null;
 
   // Default: snapshot available
@@ -929,5 +947,174 @@ describe('multi-action flow — confirmation + dispatch', () => {
     expect(correctInspectionType).toHaveBeenCalledWith('tf-abc', 'it-rad', 'u-mgr', 'מנהל');
     expect(clearContext).toHaveBeenCalled();
     expect(lastMsg()).toContain('בוצע');
+  });
+});
+
+// ── D5-T15: worker-intent inline dispatch inside mgr_*_action states ─────────
+// Live bug: user viewing a specific TaskField's detail typed "יצאתי" — the
+// bot invoked the correction extractor (`extractInspectionActions`) which
+// doesn't recognize status transitions → responded "לא זוהתה פעולה ברורה".
+// After D5-T15: run the general worker-intent parser FIRST; on
+// `set_field_status` / `report_problem` / `report_missing_info` with
+// high confidence, dispatch against the currently-viewed TaskField.
+
+describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
+  it('"יצאתי" → set_field_status DEPARTED → advanceFieldStatus on current TF (no extractor call)', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'set_field_status', confidence: 0.96,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: 'DEPARTED', problem_type: null,
+    });
+    await handleAIMessage(manager, 'יצאתי');
+    expect(advanceFieldStatusMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      transition: 'DEPARTED',
+      updatedBy: manager.id,
+    });
+    // The correction extractor must NOT be invoked when the worker-intent
+    // path already consumed the message.
+    expect(extractInspectionActionsMock).not.toHaveBeenCalled();
+    // The "לא זוהתה פעולה ברורה" fallback must NOT appear.
+    const allText = sendTextMessage.mock.calls.map((c: [{ text: string }]) => c[0].text).join('\n');
+    expect(allText).not.toContain('לא זוהתה פעולה ברורה');
+  });
+
+  it('"הגעתי" → set_field_status ARRIVED → advanceFieldStatus on current TF', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'set_field_status', confidence: 0.95,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: 'ARRIVED', problem_type: null,
+    });
+    await handleAIMessage(manager, 'הגעתי');
+    expect(advanceFieldStatusMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      transition: 'ARRIVED',
+      updatedBy: manager.id,
+    });
+  });
+
+  it('"סיימתי" → set_field_status FINISHED → performTransition opens finished follow-up (state kept alive)', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'set_field_status', confidence: 0.97,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: 'FINISHED', problem_type: null,
+    });
+    await handleAIMessage(manager, 'סיימתי');
+    expect(advanceFieldStatusMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      transition: 'FINISHED',
+      updatedBy: manager.id,
+    });
+    // FINISHED opens the 4-option follow-up + sets awaiting=finished_followup.
+    const fupCall = setContext.mock.calls.find((c: [string, { awaiting?: string; taskFieldId?: string }]) => {
+      const s = c[1];
+      return s.awaiting === 'finished_followup' && s.taskFieldId === 'tf-abc';
+    });
+    expect(fupCall).toBeTruthy();
+  });
+
+  it('"הלקוח לא ענה" → report_problem CUSTOMER_NOT_ANSWERING → writeProblem on current TF', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'report_problem', confidence: 0.95,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: 'CUSTOMER_NOT_ANSWERING',
+    });
+    await handleAIMessage(manager, 'הלקוח לא ענה');
+    expect(writeProblemMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      problemType: 'CUSTOMER_NOT_ANSWERING',
+      note: null,
+      updatedBy: manager.id,
+    });
+    expect(notifyOfficeProblemMock).toHaveBeenCalledWith('tf-abc');
+  });
+
+  it('"יש לי בעיה" (no problem_type) → opens 7-item sub-menu on current TF', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'report_problem', confidence: 0.92,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    await handleAIMessage(manager, 'יש לי בעיה');
+    // Expect a context set to problem_type_choice with the current TF.
+    const problemChoiceCall = setContext.mock.calls.find((c: [string, { awaiting?: string; taskFieldId?: string }]) => {
+      const s = c[1];
+      return s.awaiting === 'problem_type_choice' && s.taskFieldId === 'tf-abc';
+    });
+    expect(problemChoiceCall).toBeTruthy();
+    // writeProblem must NOT be called yet (waiting for the sub-menu pick).
+    expect(writeProblemMock).not.toHaveBeenCalled();
+  });
+
+  it('"שכחתי את המדד" → report_missing_info → writeMissingInfo on current TF', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'report_missing_info', confidence: 0.93,
+      task_reference: null, field: null, new_value: null,
+      params: { note: 'המדד' },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    await handleAIMessage(manager, 'שכחתי את המדד');
+    expect(writeMissingInfoMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      note: 'המדד',
+      updatedBy: manager.id,
+    });
+    expect(notifyOfficeMissingInfoMock).toHaveBeenCalledWith('tf-abc');
+  });
+
+  it('correction intent (not a worker intent) still routes to extractor (regression check)', async () => {
+    seedActionCtx('mgr_today_action');
+    // parseIntent returns an intent that is NOT one of the 3 worker-inline ones.
+    parseIntentMock.mockResolvedValue({
+      intent: 'correct_task_field_site', confidence: 0.9,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'correct_site', newSiteAddress: 'הרצל 5' }],
+      confidence: 0.9, clarification: null,
+    });
+    await handleAIMessage(manager, 'תשנה את הכתובת להרצל 5');
+    // The extractor should still be called (worker-intent path returned false).
+    expect(extractInspectionActionsMock).toHaveBeenCalled();
+  });
+
+  it('low-confidence parseIntent → falls through to extractor (regression check)', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'set_field_status', confidence: 0.3, // below CONF_LOW threshold
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: 'DEPARTED', problem_type: null,
+    });
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [], confidence: 0, clarification: null,
+    });
+    await handleAIMessage(manager, 'משהו מעורפל');
+    // Extractor should be called since the intent parse was low confidence.
+    expect(extractInspectionActionsMock).toHaveBeenCalled();
+    // No status advance.
+    expect(advanceFieldStatusMock).not.toHaveBeenCalled();
   });
 });

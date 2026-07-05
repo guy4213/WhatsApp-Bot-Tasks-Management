@@ -174,6 +174,39 @@
 
 ---
 
+### TC-2.6 — Free-text בכל מצב detail-view (D5-T15 hotfix)
+**Setup:** מצב עובד (או מנהל שהוא גם עובד). היכנס ל־detail view של בדיקה ספציפית:
+1. שלח `הבדיקות שלי` → רשימת בדיקות ממוספרת
+2. הקש `1` (או כל מספר בטווח) → detail view של הבדיקה + תפריט 4 פעולות:
+   1. תיקון פרטי ביקור  2. תיקון סוג בדיקה  3. שיוך מחדש  4. חזרה
+
+**במצב הזה** (state = `mgr_today_action`), בדוק כל אחת מהפראזות. **לפני התיקון:** הבוט היה מחזיר "לא זוהתה פעולה ברורה מההודעה". **אחרי התיקון:** הבוט מבצע את הפעולה על הבדיקה שאתה רואה.
+
+- `יצאתי` → סטטוס עולה ל־EN_ROUTE
+- `בדרך` / `בדרכי` → EN_ROUTE
+- `הגעתי` / `אני באתר` → ARRIVED
+- `סיימתי` / `גמרתי` → FINISHED_FIELD + תפריט המשך של 4 (finished_followup)
+- `הלקוח לא ענה` → כתיבת HAS_PROBLEM עם problem_type=CUSTOMER_NOT_ANSWERING + התראה למשרד
+- `אין תשובה` → אותו דבר
+- `אין גישה` → HAS_PROBLEM / NO_ACCESS
+- `יש לי בעיה` (בלי סוג) → פותח sub-menu של 7 סוגי הבעיות עבור הבדיקה הנוכחית
+- `שכחתי את המדד` → WAITING_FOR_INFO / כתיבת note "המדד" + התראה
+- `חסר לי טופס דגימה` → WAITING_FOR_INFO / כתיבת note "טופס דגימה"
+
+**מצופה:**
+- **לא** מקבל "לא זוהתה פעולה ברורה"
+- הפעולה מתבצעת על ה־TaskField שאתה רואה — לא נשאל "לאיזה בדיקה?"
+- אישור התאמה לפעולה
+
+**גם — regression:** בדוק ש־תיקונים עדיין עובדים ב־detail view:
+- `שנה את הכתובת לרוטשילד 20 תל אביב` → correct_site flow (לא set_field_status)
+- `שייך מחדש לדני` → reassign flow
+- `שנה סוג בדיקה לבדיקת קרינה` → correct_type flow
+
+**תוצאה בפועל:** _______________________________________________
+
+---
+
 ### TC-2.5 — AI-first fallback: פראזה עם טווח לא ברור
 **Setup:** מצב עובד.
 
@@ -1069,6 +1102,7 @@ VALUES
 | 6 | Clarification surface | Query intents show clarification before list |
 | **14** | **dateScope="all"** | **`תציג את כל הבדיקות שלי מכל הזמנים` returns full list, no "לא הצלחתי" error** |
 | **14** | **AI-first fallback** | **Unknown range in regex → delegated to AI, not error** |
+| **15** | **Worker intent in detail-view** | **Typing "יצאתי" / "הגעתי" / "סיימתי" / "הלקוח לא ענה" in the detail view of a specific inspection dispatches on THAT inspection, no "לא זוהתה פעולה ברורה"** |
 
 ---
 

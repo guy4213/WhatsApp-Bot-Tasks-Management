@@ -5435,6 +5435,114 @@ async function handleMgrTaskActionReply(
 }
 
 /**
+ * D5-T15 — worker-intent inline dispatcher used INSIDE the detail-view
+ * (`mgr_*_action` states) BEFORE the correction/reassign extractor runs.
+ *
+ * The user is viewing a specific TaskField (its id is passed in). If they
+ * typed a worker-style intent — `set_field_status` (DEPARTED/ARRIVED/FINISHED/
+ * WAITING_FOR_INFO/HAS_PROBLEM), `report_problem`, or `report_missing_info` —
+ * we execute it against the currently-viewed TaskField (no disambig needed —
+ * we already know which one). Returns `true` when consumed; `false` means the
+ * caller should fall through to `extractInspectionActions` for
+ * corrections/reassign/reschedule.
+ *
+ * Rationale (per the product owner): worker free-text intents must be
+ * understood in ANY state, not just top-level. This eliminates the
+ * "לא זוהתה פעולה ברורה" trap when a user types "יצאתי" from a detail view.
+ */
+async function tryDispatchWorkerIntentInline(
+  user: ResolvedUser,
+  text: string,
+  taskFieldId: string,
+): Promise<boolean> {
+  if (!getProvider()) return false;
+  let intent: AIIntentResult;
+  try {
+    const [allowedTypes, allowedPriorities, history] = await Promise.all([
+      getAllowedTaskTypes(),
+      safePriorities(),
+      getHistory(user.phone),
+    ]);
+    intent = await parseIntent(text, { user, allowedTypes, allowedPriorities, history });
+  } catch (err) {
+    log.warn({ err }, 'tryDispatchWorkerIntentInline: parseIntent failed — falling back to extractor');
+    return false;
+  }
+  if (intent.confidence < CONF_LOW) return false;
+
+  // set_field_status — DEPARTED/ARRIVED/FINISHED are direct; WAITING_FOR_INFO
+  // and HAS_PROBLEM open the note / problem-type prompt on the current TF.
+  if (intent.intent === 'set_field_status') {
+    const transition = intent.transition ?? null;
+    if (transition === 'DEPARTED' || transition === 'ARRIVED' || transition === 'FINISHED') {
+      await performTransition(user, taskFieldId, transition);
+      return true;
+    }
+    if (transition === 'WAITING_FOR_INFO') {
+      const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+      if (note) {
+        await writeMissingInfo({ taskFieldId, note, updatedBy: user.id });
+        await notifyOfficeMissingInfo(taskFieldId);
+        await clearContext(user.phone);
+        await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+      } else {
+        await setContext(user.phone, { awaiting: 'missing_info_note', taskFieldId });
+        await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+      }
+      return true;
+    }
+    if (transition === 'HAS_PROBLEM') {
+      const problemType = intent.problem_type ?? null;
+      const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+      if (problemType) {
+        await writeProblem({ taskFieldId, problemType, note: note || null, updatedBy: user.id });
+        await notifyOfficeProblem(taskFieldId);
+        await clearContext(user.phone);
+        await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+      } else {
+        await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
+        await sendProblemTypeMenu(user.phone);
+      }
+      return true;
+    }
+  }
+
+  // report_problem — direct write against the current TF; if no problem_type,
+  // open the 7-item sub-menu on the current TF.
+  if (intent.intent === 'report_problem') {
+    const problemType = intent.problem_type ?? null;
+    const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+    if (problemType) {
+      await writeProblem({ taskFieldId, problemType, note: note || null, updatedBy: user.id });
+      await notifyOfficeProblem(taskFieldId);
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'עדכנתי. המנהל קיבל התראה.' });
+    } else {
+      await setContext(user.phone, { awaiting: 'problem_type_choice', taskFieldId });
+      await sendProblemTypeMenu(user.phone);
+    }
+    return true;
+  }
+
+  // report_missing_info — direct write against the current TF.
+  if (intent.intent === 'report_missing_info') {
+    const note = typeof intent.params?.note === 'string' ? intent.params.note.trim() : '';
+    if (note) {
+      await writeMissingInfo({ taskFieldId, note, updatedBy: user.id });
+      await notifyOfficeMissingInfo(taskFieldId);
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'עדכנתי. המשרד קיבל התראה.' });
+    } else {
+      await setContext(user.phone, { awaiting: 'missing_info_note', taskFieldId });
+      await sendTextMessage({ to: user.phone, text: 'מה חסר לדוח?' });
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Context-aware free-text handler for mgr_*_action states.
  * Invoked when the user sends non-digit text while viewing a specific TaskField.
  *
@@ -5465,6 +5573,16 @@ async function handleMgrActionFreeText(
     await showMenu(user);
     return;
   }
+
+  // ── D5-T15: worker-intent short-circuit inside the detail view ────────────
+  // Before invoking the correction/reassign extractor, run the general AI
+  // intent parser. If the user typed a WORKER intent ("יצאתי", "הגעתי",
+  // "סיימתי", "הלקוח לא ענה", "חסר לי X"), dispatch it directly against the
+  // currently-viewed TaskField without disambiguation. This makes free-text
+  // status updates work in ANY state, matching the user's expectation that
+  // the AI understands intent everywhere, not just at menu top-level.
+  const workerIntentConsumed = await tryDispatchWorkerIntentInline(user, text, taskFieldId);
+  if (workerIntentConsumed) return;
 
   // Load current TaskField values for the extractor context.
   const snapshot = await getTaskFieldValuesForContext(taskFieldId);
