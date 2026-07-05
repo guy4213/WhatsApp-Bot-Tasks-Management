@@ -134,7 +134,12 @@ const WORKER_FEW_SHOT = [
   '// null problem_type — router asks',
   '- "יש בעיה, לא מצליח למדוד" → report_problem, problem_type=null, params.note="לא מצליח למדוד" (router asks which type).',
   '',
-  '// report_missing_info',
+  '// report_missing_info — the worker is missing INFORMATION/DATA needed to',
+  '// WRITE UP the report: a number, a name, a reading, a filled-in form to',
+  '// retrieve, a permit. NEVER a physical tool/device/material — that is',
+  '// missing_equipment_free (see below). If in doubt: can you photograph or',
+  '// hand over the missing thing? Yes → equipment. No (it is a fact/document',
+  '// you need to obtain or a number/measurement) → missing_info.',
   '- "חסר לי טופס דגימה" → report_missing_info, params.note="טופס דגימה".',
   '- "שכחתי את המדד" → report_missing_info, params.note="המדד".',
   '- "שכחתי לרשום את המדד" → report_missing_info, params.note="המדד".',
@@ -149,12 +154,19 @@ const WORKER_FEW_SHOT = [
   '- "סיכום" → day_summary_query. No params.',
   '- "איך הסתיים היום שלי" → day_summary_query. No params.',
   '',
-  '// missing_equipment_free — worker reports missing equipment BEFORE going out (general, not at a specific inspection)',
+  '// missing_equipment_free — worker reports a missing PHYSICAL TOOL/DEVICE/',
+  '// MATERIAL needed to physically perform the inspection, said BEFORE going',
+  '// out (general, not at a specific inspection). NEVER use this for missing',
+  '// information/data/documents (numbers, names, readings, forms to retrieve)',
+  '// — that is report_missing_info, even if the Hebrew word is "טופס" (a form',
+  '// can be either — a PHYSICAL blank form/checklist the worker forgot to',
+  '// bring is equipment; a form/number/reading needed to WRITE the report is',
+  '// missing_info).',
   '- "אין לי בטריות" (morning, before departure) → missing_equipment_free, params.note="בטריות".',
   '- "חסר לי מזרן" → missing_equipment_free, params.note="מזרן".',
   '- "לא לקחתי את המכשיר" → missing_equipment_free, params.note="המכשיר".',
   '- "חסר לי ציוד" → missing_equipment_free, params.note="ציוד" (generic, note is "ציוד").',
-  '- "שכחתי את הטופס" → missing_equipment_free, params.note="הטופס".',
+  '- "שכחתי את הכפפות" / "שכחתי את הקסדה" / "שכחתי את המצלמה" → missing_equipment_free, params.note is the item.',
   '',
   '// Voice / polite prefixes for the worker (backport from manager quirks)',
   '- "בבקשה תראה לי את הבדיקות שלי" → list_my_inspections, params.dateScope="today". [voice "בבקשה תראה לי" prefix]',
@@ -288,23 +300,6 @@ const MANAGER_FEW_SHOT = [
   '- "עזרה" → open_manager_menu.',
   '- "תן לי את התפריט" → open_manager_menu.',
   '',
-  '// Date-range scoping examples (today = 2026-07-05 for illustration)',
-  '',
-  '// list_open_exceptions — with date range',
-  '- "חריגים של אתמול" → list_open_exceptions, params.filter="open", params.dateRange={from:"2026-07-04", to:"2026-07-05"}.',
-  '- "מה בעיות היו אתמול" → list_open_exceptions, params.filter="has_problem", params.dateRange={from:"2026-07-04", to:"2026-07-05"}.',
-  '- "חריגים של השבוע" → list_open_exceptions, params.filter="open", params.dateRange={from:"<this-week-sunday>", to:"<next-sunday>"}.',
-  '- "חריגים בין 1/7 ל-3/7" → list_open_exceptions, params.filter="open", params.dateRange={from:"2026-07-01", to:"2026-07-04"}. [3/7 is the last inclusive day → +1 for exclusive to]',
-  '- "מה קרה שלשום" → list_open_exceptions, params.filter="open", params.dateRange={from:"<today-2>", to:"<today-1>"}.',
-  '',
-  '// list_pending_leads — with date range',
-  '- "לידים של השבוע" → list_pending_leads, params.filter="unassigned", params.dateRange={from:"<this-week-sunday>", to:"<next-sunday>"}.',
-  '- "לידים מהשבוע שעבר" → list_pending_leads, params.filter="unassigned", params.dateRange={from:"<prev-sunday>", to:"<this-sunday>"}.',
-  '',
-  '// workers_day_overview — with date range',
-  '- "מה כולם עשו השבוע" → workers_day_overview, params.dateRange={from:"<this-week-sunday>", to:"<next-sunday>"}. [no workerName = all-workers]',
-  '- "סיכום של דני מהשבוע" → workers_day_overview, params.workerName="דני", params.dateRange={from:"<this-week-sunday>", to:"<next-sunday>"}.',
-  '',
   '// Manager also supports worker-style intents',
   '- "לתזמן ביקור" → schedule_task_field, params.scheduledStartAt=null.',
   '- "לשייך ליד" / "לשייך את הליד" → assign_lead.',
@@ -348,6 +343,57 @@ const MANAGER_FEW_SHOT = [
   '- "להעביר לעובד יוסי את המשימה של כהן" → reassign_task, task_reference="כהן", params.newWorkerName="יוסי", requires_manager_approval=true.',
   '- "לתקן את הכתובת של רבקה" → correct_task_field_site, task_reference="רבקה".',
 ].join('\n');
+
+/** Add `days` (may be negative) to a YYYY-MM-DD string. Noon-UTC anchor avoids DST edge cases. */
+function addDaysISO(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** 0=Sunday..6=Saturday for a YYYY-MM-DD string. */
+function isoDayOfWeek(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
+}
+
+/**
+ * D5-T19f: the date-range few-shot examples used to hardcode a specific
+ * illustrative "today" (e.g. "2026-07-05"). That silently goes stale on
+ * every OTHER day — it then directly contradicts the dynamically-injected
+ * "Today (Asia/Jerusalem) is ${todayIsrael}" statement elsewhere in the same
+ * prompt, and the LLM would sometimes resolve "אתמול" against the stale
+ * example's implied date instead of the real one, emitting a dateRange for
+ * the wrong day → zero matching rows → the router falls back to the generic
+ * exceptions menu instead of a filtered list. Compute every example
+ * relative to the REAL `todayIsrael` so this can never drift again.
+ */
+function buildDateRangeFewShot(todayIsrael: string): string {
+  const yesterday = addDaysISO(todayIsrael, -1);
+  const dayBeforeYesterday = addDaysISO(todayIsrael, -2);
+  const thisWeekSunday = addDaysISO(todayIsrael, -isoDayOfWeek(todayIsrael));
+  const nextSunday = addDaysISO(thisWeekSunday, 7);
+  const prevSunday = addDaysISO(thisWeekSunday, -7);
+  return [
+    '// Date-range scoping examples — computed relative to the REAL "Today" stated above. NEVER invent or hardcode a date here; always derive from today.',
+    '',
+    '// list_open_exceptions — with date range',
+    `- "חריגים של אתמול" → list_open_exceptions, params.filter="open", params.dateRange={from:"${yesterday}", to:"${todayIsrael}"}.`,
+    `- "מה בעיות היו אתמול" → list_open_exceptions, params.filter="has_problem", params.dateRange={from:"${yesterday}", to:"${todayIsrael}"}.`,
+    `- "חריגים של השבוע" → list_open_exceptions, params.filter="open", params.dateRange={from:"${thisWeekSunday}", to:"${nextSunday}"}.`,
+    '- "חריגים בין 1/7 ל-3/7" → list_open_exceptions, params.filter="open", params.dateRange={from:"2026-07-01", to:"2026-07-04"}. [explicit literal dates in the message itself — resolve those verbatim, do NOT relate them to today. 3/7 is the last inclusive day → +1 for exclusive to]',
+    `- "מה קרה שלשום" → list_open_exceptions, params.filter="open", params.dateRange={from:"${dayBeforeYesterday}", to:"${yesterday}"}.`,
+    '',
+    '// list_pending_leads — with date range',
+    `- "לידים של השבוע" → list_pending_leads, params.filter="unassigned", params.dateRange={from:"${thisWeekSunday}", to:"${nextSunday}"}.`,
+    `- "לידים מהשבוע שעבר" → list_pending_leads, params.filter="unassigned", params.dateRange={from:"${prevSunday}", to:"${thisWeekSunday}"}.`,
+    '',
+    '// workers_day_overview — with date range',
+    `- "מה כולם עשו השבוע" → workers_day_overview, params.dateRange={from:"${thisWeekSunday}", to:"${nextSunday}"}. [no workerName = all-workers]`,
+    `- "סיכום של דני מהשבוע" → workers_day_overview, params.workerName="דני", params.dateRange={from:"${thisWeekSunday}", to:"${nextSunday}"}.`,
+  ].join('\n');
+}
 
 export function buildSystemPrompt(ctx: ParseContext, message?: string): string {
   const todayIsrael = new Intl.DateTimeFormat('en-CA', {
@@ -455,6 +501,8 @@ export function buildSystemPrompt(ctx: ParseContext, message?: string): string {
     isMgr ? MANAGER_INTENT_LIST : WORKER_INTENT_LIST,
     '',
     isMgr ? MANAGER_FEW_SHOT : WORKER_FEW_SHOT,
+    '',
+    isMgr ? buildDateRangeFewShot(todayIsrael) : undefined,
     '',
     'help / unknown intents:',
     helpUnknownBlock,

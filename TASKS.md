@@ -1744,88 +1744,177 @@ follow-up if it's ever reported.
 bug, not a data-write bug.
 
 #### D5-T19c — Localize fieldStatus enums shown to user (FINISHED_FIELD → "הסתיים בשטח")
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** in search-by-status results and other display
 paths, the bot returns raw enums like `FINISHED_FIELD` instead of the
 Hebrew label.
 
-**What to do:**
-- Hebrew label table exists at `src/ai/inspectionFormatters.ts:38`.
-- Find all display sites that emit raw fieldStatus without applying the
-  labels. Suspect files:
-  - Search result formatters in `src/services/managerViews.ts` (Phase 5).
-  - `src/ai/router.ts` search dispatch path (Phase 5).
-  - Possibly `formatMyInspectionsRange` if it emits raw.
-- Route all user-facing status renderings through the existing label map.
-- Grep for `fieldStatus` in string interpolation / template literals and
-  wrap with label lookup.
+**Investigation.** All manager-side search/detail formatters (`managerViews.ts`
+consumers, `router.ts` search dispatch, `formatInspectionListRow`/
+`formatInspectionDetail`) already routed through the shared `fieldStatusHe()`
+in `src/ai/inspectionFormatters.ts` — verified clean. The actual leak was on
+the WORKER side: `src/whatsapp/digestContent.ts` kept a **second,
+independently-maintained copy** of the Hebrew label table (`FIELD_STATUS_HE`
++ local `fieldStatusLabelHe`), missing `DECLINED` and `CANCELED` — those two
+statuses rendered as the raw enum in the worker's morning digest
+(`formatInspectorMorning`) and on-demand day list (`formatInspectorDayList`,
+menu items 1/2).
+
+**Fix:** removed the duplicate table; `fieldStatusLabelHe` now delegates to
+the single shared `fieldStatusHe()` from `inspectionFormatters.ts` — the two
+tables can never drift apart again.
+
+**Files changed:**
+- `src/whatsapp/digestContent.ts` — removed local `FIELD_STATUS_HE` +
+  `fieldStatusLabelHe`; imports and delegates to `fieldStatusHe`.
+
+**Files changed (tests):**
+- `src/__tests__/inspectorMorning.test.ts` — new test: DECLINED/CANCELED now
+  localize correctly (fails against the old duplicate table).
+
+**Tests run:** `npx tsc --noEmit` clean; `npx vitest run` full suite —
+1145 passed / 7 skipped / 0 failed (pre-existing worker-pool OOM after
+completion, per X-T15a, unrelated).
 
 **Priority:** URGENT — user-visible polish. Also affects search results.
 
 ### Batch B — URGENT (product-level fixes)
 
 #### D5-T19d — `missing_equipment_free` routes to missing_info flow instead of equipment flow
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** phrases like "אין לי בטריות" / "חסר לי מזרן"
 sometimes ask "מה חסר לדוח?" instead of "איזה ציוד חסר?".
 
-**What to do:**
-- Trace `case 'missing_equipment_free'` in
-  `src/ai/router.ts` (added in D5-T10) and verify it calls
-  `handleEquipmentMissingNoteReply` with a fresh context, NOT
-  `handleMissingInfoNoteReply`.
-- Check that the LLM prompt clearly distinguishes:
-  - `missing_equipment_free` — pre-departure / general equipment
-  - `report_missing_info` — missing info for the FINAL REPORT of a specific TaskField
-- Verify the notification service used is `notifyOfficeMissingEquipment`,
-  not `notifyOfficeMissingInfo`.
-- Add a test with mocked LLM returning `missing_equipment_free` intent
-  and assert the equipment-alert service is called.
+**Investigation.** `case 'missing_equipment_free'` in router.ts was already
+correctly wired to `handleEquipmentMissingNoteReply` — not a router dispatch
+bug. This is purely LLM-classification confusion between
+`missing_equipment_free` and `report_missing_info`. Root cause: the two
+few-shot example blocks in `src/ai/intentParser.ts` used the Hebrew word
+"טופס" (form) as an example of BOTH intents — `report_missing_info`'s
+example was "חסר לי טופס דגימה" (missing a sampling form) while
+`missing_equipment_free`'s example was "שכחתי את הטופס" (forgot the form).
+Two near-identical phrasings pointing to different intents teaches the
+model that "טופס" is ambiguous, which plausibly bleeds into how confidently
+it classifies *other* equipment phrases too.
+
+**Fix:** replaced the ambiguous "שכחתי את הטופס" example with unambiguous
+physical items (gloves/helmet/camera), and added an explicit disambiguation
+heuristic to both blocks: `missing_equipment_free` = a physical
+tool/device/material; `report_missing_info` = information/data/a document to
+retrieve needed to WRITE the report — never a physical item.
+
+**Files changed:**
+- `src/ai/intentParser.ts` — few-shot examples + disambiguation heuristic
+  for both `missing_equipment_free` and `report_missing_info`.
+
+**Files changed (tests):**
+- `src/__tests__/managerIntents.test.ts` — new test asserting the worker
+  prompt contains the disambiguation heuristic and no longer contains the
+  ambiguous "שכחתי את הטופס" example.
+
+**Tests run:** `npx tsc --noEmit` clean; targeted + full suite pass (see
+D5-T19c's Part-1 summary run).
 
 **Priority:** URGENT — flow confusion.
 
 #### D5-T19e — Customer search returns empty despite matching data
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** "חפש בדיקה של חיים" / "חפש בדיקה של מעיין
 שפירא" returned no results, even though matches should exist. Field-status
 search DOES work, so the search dispatch works — just customer/name search
 is broken.
 
-**What to do:**
-- Trace `searchTasksByCustomerName` (should exist in
-  `src/services/managerViews.ts`). Check the query:
-  - Does it ILIKE-match against the 6-source COALESCE'd customer name
-    (Customer / Lead / IncomingLead / Project / fromName)?
-  - Does it JOIN Task→TaskField correctly?
-  - Any WHERE filter that would exclude legitimate rows (e.g. only "open"
-    statuses)?
-- Verify router dispatch for `searchBy=customer` hits the right function.
-- Add integration test with a seeded row and a matching search term.
+**Root cause (confirmed).** No `searchTasksByCustomerName` function existed
+— the "customer" search branch was an inline `pool.query` in `router.ts`
+(two near-duplicate copies, one in the `search_task` intent handler, one in
+`handleMgrSearchAwaitQueryReply`). Both SELECTed a 6-source `COALESCE`
+customer name (Customer/Lead/Project/IncomingLead) for **display**, but the
+`WHERE` clause filtered **only `c.name`** (the `Customer` table). Any Task
+linked via `Lead`/`Project`/`IncomingLead` instead of an actual `Customer`
+row — i.e. exactly the common case for inspections booked from a lead —
+would silently never match the search, even though that same name displays
+correctly everywhere else via the COALESCE.
+
+**Fix:** added `searchTasksByCustomerName` to `src/services/managerViews.ts`
+(reusing the existing shared `SEARCH_SELECT`), filtering on the SAME
+6-source `COALESCE` used for display. Replaced both inline duplicate
+queries in `router.ts` with calls to this function (also removing an
+inconsistent 8-source COALESCE variant that had crept into one of the two
+duplicates, unifying both to the canonical 6-source shape).
+
+**Files changed:**
+- `src/services/managerViews.ts` — new `searchTasksByCustomerName`.
+- `src/ai/router.ts` — both customer-search call sites now call the shared
+  function instead of inline SQL.
+
+**Files changed (tests):**
+- `src/__tests__/managerViews.test.ts` — SQL-shape assertion (WHERE
+  filters the full COALESCE, not just `c.name`) + a Lead-linked-row match
+  test (the exact reported bug).
+- `src/__tests__/managerSearchExpansion.test.ts` — router dispatch test:
+  `searchBy=customer` calls `searchTasksByCustomerName`.
+
+**Tests run:** `npx tsc --noEmit` clean; full suite pass (see D5-T19c's
+Part-1 summary run).
 
 **Priority:** URGENT — a core manager feature.
 
 #### D5-T19f — Exceptions by date range shows generic menu instead of filtered list
-**Status:** OPEN
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** "חריגים של אתמול" opens a generic exceptions
 menu instead of showing yesterday's exceptions. The dateRange param from
 D5-T11 (Phase 4) seems not to reach the query.
 
-**What to do:**
-- Trace router `list_open_exceptions` dispatch (Phase 4 D5-T11).
-- Verify `params.dateRange` is extracted, forwarded to
-  `getFieldExceptionRows`, and the query actually filters on the range.
-- Check the LLM prompt still includes the dateRange examples added in
-  D5-T11.
-- Verify the manager dashboard `count_only` (Phase 5) does NOT hijack the
-  dispatch when the LLM emits both `dateRange` AND `count_only=false`.
-- Add integration test with mocked LLM emitting dateRange and assert the
-  service is called with the range.
+**Investigation.** Router dispatch (`extractDateRange` → `getFieldExceptionRows`)
+and the service's SQL (half-open window, correctly toggling between
+`dateRange` and the single-`localDate` default) were both verified fully
+correct — already covered by `managerDateRange.test.ts` (which mocks
+`buildSystemPrompt` entirely, so it could never have caught this). The
+actual bug lives one layer up, in what the LLM is taught to emit.
 
-**Priority:** URGENT — Phase 4 regression / incomplete plumbing.
+**Root cause (confirmed).** The `dateRange` few-shot examples in
+`src/ai/intentParser.ts` hardcoded a specific illustrative "today"
+(`// Date-range scoping examples (today = 2026-07-05 for illustration)`,
+with "אתמול" → literal `{from:"2026-07-04", to:"2026-07-05"}`). That comment
+IS part of the actual prompt text sent to the model (the array is
+`.join('\n')`'d verbatim). On any day other than 2026-07-05 this directly
+**contradicts** the dynamically-injected `Today (Asia/Jerusalem) is
+${todayIsrael}` statement elsewhere in the same prompt — two conflicting
+claims about "today" in one prompt. The model would sometimes resolve
+"אתמול" against the stale example's implied date instead of the real one,
+emitting a `dateRange` for the wrong day → zero matching rows →
+`list_open_exceptions` falls through to `showMgrExceptionsSub` (the generic
+menu) instead of a filtered list — exactly the reported symptom.
+
+**Fix:** extracted the date-range few-shot block into
+`buildDateRangeFewShot(todayIsrael)`, computed dynamically inside
+`buildSystemPrompt` from the SAME real `todayIsrael` used for the "Today is
+X" statement — "yesterday", "שלשום", and week boundaries can never drift
+from the stated real date again. The one example using literal dates given
+verbatim in the message itself ("חריגים בין 1/7 ל-3/7") is left as a fixed
+literal on purpose — it doesn't depend on "today" at all.
+
+**Files changed:**
+- `src/ai/intentParser.ts` — `buildDateRangeFewShot` (new, dynamic) replaces
+  the hardcoded block; spliced into the manager prompt only.
+
+**Files changed (tests):**
+- `src/__tests__/managerIntents.test.ts` — 3 new tests using
+  `vi.useFakeTimers()` to pin "today" to two different dates (neither is
+  the old hardcoded 2026-07-05) and assert the "אתמול" example always
+  computes to exactly (today − 1) → today; asserts the old hardcoded date
+  string is gone; asserts the block is manager-only.
+
+**Tests run:** `npx tsc --noEmit` clean; full suite pass (see D5-T19c's
+Part-1 summary run).
+
+**Priority:** URGENT — Phase 4 regression / incomplete plumbing. Root cause
+was a prompt-consistency bug, not a router/service plumbing bug — both were
+already correct and already tested.
 
 ### Batch C — URGENT + IMPORTANT (features)
 

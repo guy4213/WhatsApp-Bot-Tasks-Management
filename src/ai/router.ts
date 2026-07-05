@@ -84,6 +84,7 @@ import {
   getWorkerDayDetail,
   searchTasksByWorkerName,
   searchTasksByProductCode,
+  searchTasksByCustomerName,
   searchTasksByAddress,
   searchTasksByPhone,
   searchTasksByTaskId,
@@ -1412,38 +1413,7 @@ async function executeIntent(
 
         let searchResults: TodayFieldInspectionRow[] = [];
         if (searchBy === 'customer') {
-          const { rows } = await import('../db/connection').then(async ({ pool }) => {
-            return pool.query<TodayFieldInspectionRow>(
-              `SELECT
-                 tf.id AS "taskFieldId", tf."taskId" AS "taskId",
-                 u.name AS "workerName",
-                 -- Customer name: 6-source COALESCE (SCHEMA_CRM.md) — Task.title/description excluded
-                 COALESCE(
-                   c.name,
-                   l."fullName",
-                   NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
-                   l.company,
-                   p.client,
-                   il."fromName"
-                 ) AS "customerName",
-                 t.title AS "taskTitle",
-                 to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI') AS "timeHm",
-                 tf."siteCity" AS "siteCity", tf."fieldStatus" AS "fieldStatus",
-                 tf.family AS family, it."labelHe" AS "typeLabelHe"
-               FROM "TaskField" tf
-               JOIN "Task" t             ON t.id  = tf."taskId"
-               JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-               LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
-               LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
-               LEFT JOIN "Project"      p  ON p.id  = t."projectId"
-               LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
-               LEFT JOIN "User" u          ON u.id  = t."ownerId"
-               WHERE c.name ILIKE '%' || $1 || '%'
-               ORDER BY tf."scheduledStartAt" DESC LIMIT 20`,
-              [query],
-            );
-          });
-          searchResults = rows;
+          searchResults = await searchTasksByCustomerName(query);
         } else if (searchBy === 'worker') {
           searchResults = await searchTasksByWorkerName(query);
         } else if (searchBy === 'product') {
@@ -5223,39 +5193,7 @@ async function handleMgrSearchAwaitQueryReply(
     // function yet, do it inline via the existing findCustomersByName + a follow-on query.
     // Actually, the simpler route: use the existing query helpers by ILIKE on customer name.
     // We'll do a filtered fetch via the pool directly (same pattern as managerViews).
-    const { rows } = await import('../db/connection').then(async ({ pool }) => {
-      return pool.query<TodayFieldInspectionRow>(
-        `SELECT
-           tf.id AS "taskFieldId", tf."taskId" AS "taskId",
-           u.name AS "workerName",
-           -- Customer name: COALESCE across Customer/Lead/Project/IncomingLead/Task (SCHEMA_CRM.md)
-           COALESCE(
-             c.name,
-             l."fullName",
-             NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
-             l.company,
-             p.client,
-             il."fromName",
-             NULLIF(TRIM(t.title), ''),
-             NULLIF(TRIM(t.description), '')
-           ) AS "customerName",
-           to_char(tf."scheduledStartAt" AT TIME ZONE 'Asia/Jerusalem', 'HH24:MI') AS "timeHm",
-           tf."siteCity" AS "siteCity", tf."fieldStatus" AS "fieldStatus",
-           tf.family AS family, it."labelHe" AS "typeLabelHe"
-         FROM "TaskField" tf
-         JOIN "Task" t             ON t.id  = tf."taskId"
-         JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
-         LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
-         LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
-         LEFT JOIN "Project"      p  ON p.id  = t."projectId"
-         LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
-         LEFT JOIN "User" u          ON u.id  = t."ownerId"
-         WHERE c.name ILIKE '%' || $1 || '%'
-         ORDER BY tf."scheduledStartAt" DESC LIMIT 20`,
-        [searchQuery],
-      );
-    });
-    results = rows;
+    results = await searchTasksByCustomerName(searchQuery);
   } else if (kind === 'worker') {
     results = await searchTasksByWorkerName(searchQuery);
   } else if (kind === 'product') {

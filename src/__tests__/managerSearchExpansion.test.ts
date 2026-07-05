@@ -19,6 +19,7 @@ const getAllWorkersDayOverview = vi.fn();
 const getWorkerDayDetail = vi.fn();
 const searchTasksByWorkerName = vi.fn();
 const searchTasksByProductCode = vi.fn();
+const searchTasksByCustomerName = vi.fn();
 const searchTasksByAddress = vi.fn();
 const searchTasksByPhone = vi.fn();
 const searchTasksByTaskId = vi.fn();
@@ -36,6 +37,7 @@ vi.mock('../services/managerViews', () => ({
   getWorkerDayDetail: (...a: unknown[]) => getWorkerDayDetail(...a),
   searchTasksByWorkerName: (...a: unknown[]) => searchTasksByWorkerName(...a),
   searchTasksByProductCode: (...a: unknown[]) => searchTasksByProductCode(...a),
+  searchTasksByCustomerName: (...a: unknown[]) => searchTasksByCustomerName(...a),
   searchTasksByAddress: (...a: unknown[]) => searchTasksByAddress(...a),
   searchTasksByPhone: (...a: unknown[]) => searchTasksByPhone(...a),
   searchTasksByTaskId: (...a: unknown[]) => searchTasksByTaskId(...a),
@@ -299,6 +301,7 @@ beforeEach(() => {
   getWorkerDayDetail.mockReset();
   searchTasksByWorkerName.mockReset();
   searchTasksByProductCode.mockReset();
+  searchTasksByCustomerName.mockReset();
   searchTasksByAddress.mockReset();
   searchTasksByPhone.mockReset();
   searchTasksByTaskId.mockReset();
@@ -537,6 +540,19 @@ describe('5c+5d — router: searchBy=field_status dispatches to searchTasksByFie
 // ── 5c: Existing search dimensions still work (no regression) ────────────────
 
 describe('5c — no regression: existing searchBy dimensions still work', () => {
+  // D5-T19e: customer search used to be an inline pool.query in router.ts
+  // filtering only Customer.name, silently missing Tasks linked via
+  // Lead/Project/IncomingLead. Now dispatches to the shared
+  // searchTasksByCustomerName service function (same 6-source COALESCE used
+  // for display) — see managerViews.test.ts for the SQL-shape assertion.
+  it('searchBy=customer dispatches to searchTasksByCustomerName', async () => {
+    searchTasksByCustomerName.mockResolvedValue([makeRow({ customerName: 'מעיין שפירא' })]);
+    mockParseIntent(makeIntent('search_task', { params: { searchBy: 'customer', query: 'מעיין שפירא' } }));
+    await handleAIMessage(admin, 'בדיקה של מעיין שפירא');
+    expect(searchTasksByCustomerName).toHaveBeenCalledWith('מעיין שפירא');
+    expect(searchTasksByWorkerName).not.toHaveBeenCalled();
+  });
+
   it('searchBy=worker still dispatches to searchTasksByWorkerName', async () => {
     searchTasksByWorkerName.mockResolvedValue([makeRow({ workerName: 'יוסי' })]);
     mockParseIntent(makeIntent('search_task', { params: { searchBy: 'worker', query: 'יוסי' } }));

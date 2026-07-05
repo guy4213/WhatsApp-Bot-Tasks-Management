@@ -675,6 +675,37 @@ const SEARCH_SELECT = `
   LEFT JOIN "User" u          ON u.id  = t."ownerId"`;
 
 /**
+ * Fuzzy search TaskField rows by customer name (ILIKE '%query%').
+ * D5-T19e: must match the SAME 6-source COALESCE used for display (Customer
+ * / Lead / Project / IncomingLead) — a WHERE filtering only `c.name` (the
+ * `Customer` table) silently misses any Task linked via Lead/Project/
+ * IncomingLead instead of an actual Customer row, even though that same name
+ * displays correctly everywhere else via the COALESCE.
+ * Returns up to 20 rows ordered by scheduledStartAt DESC.
+ * No date filter — returns rows across all dates.
+ */
+export async function searchTasksByCustomerName(
+  query: string,
+): Promise<TaskSearchRow[]> {
+  const { rows } = await pool.query<TaskSearchRow>(
+    `${SEARCH_SELECT}
+     WHERE COALESCE(
+       c.name,
+       l."fullName",
+       NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+       l.company,
+       p.client,
+       il."fromName"
+     ) ILIKE '%' || $1 || '%'
+     ORDER BY tf."scheduledStartAt" DESC
+     LIMIT 20`,
+    [query],
+  );
+  log.info({ query, count: rows.length }, 'Searched tasks by customer name');
+  return rows;
+}
+
+/**
  * Fuzzy search TaskField rows by site address or city (ILIKE '%query%').
  * Returns up to 20 rows ordered by scheduledStartAt DESC.
  * No date filter — returns rows across all dates.

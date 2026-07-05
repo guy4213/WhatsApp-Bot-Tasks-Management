@@ -32,6 +32,7 @@ import type {
 import type { YoramLeadCounts } from '../services/incomingLeads';
 import { problemTypeMenu } from '../ai/menu';
 import { DIGEST_PAYLOAD_IDS } from '../ai/digestCommands';
+import { fieldStatusHe } from '../ai/inspectionFormatters';
 
 /** One WhatsApp quick-reply button. `id` is a stable digest payload id. */
 export interface DigestButton {
@@ -92,21 +93,15 @@ export function digestTemplateKey(
 // by the dispatcher (per K1: `user.role !== 'ADMIN'` == inspector). No
 // per-role emoji noise — the v2 spec calls for clean output.
 
-/** Hebrew labels for `TaskField.fieldStatus` — spec §4 / migration 009 values. */
-const FIELD_STATUS_HE: Record<string, string> = {
-  ASSIGNED: 'משובצת',
-  CONFIRMED: 'אושרה',
-  EN_ROUTE: 'בדרך',
-  ARRIVED: 'באתר',
-  WAITING_FOR_INFO: 'ממתין למידע',
-  HAS_PROBLEM: 'עם בעיה',
-  NEEDS_MORE_INFO: 'צריך פרטים',
-  FINISHED_FIELD: 'הסתיים בשטח',
-};
-
-/** Localize a `fieldStatus` code — falls back to the raw code if unknown. */
+/**
+ * Localize a `fieldStatus` code. D5-T19c: this used to be a second,
+ * independently-maintained copy of the Hebrew label table (missing DECLINED
+ * / CANCELED, which meant those two statuses displayed as the raw enum in
+ * the worker's morning digest / day list). Delegates to the single shared
+ * table in `inspectionFormatters.ts` so the two can never drift again.
+ */
 function fieldStatusLabelHe(status: string): string {
-  return FIELD_STATUS_HE[status] ?? status;
+  return fieldStatusHe(status);
 }
 
 /**

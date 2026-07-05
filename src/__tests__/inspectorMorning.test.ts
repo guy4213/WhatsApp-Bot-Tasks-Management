@@ -109,6 +109,28 @@ describe('formatInspectorMorning', () => {
     }
   });
 
+  // D5-T19c regression: digestContent.ts used to keep its own copy of the
+  // Hebrew fieldStatus label table, missing DECLINED and CANCELED — those
+  // two rendered as the raw enum instead of a Hebrew label. Now delegates to
+  // the single shared table in inspectionFormatters.ts.
+  it('localizes DECLINED and CANCELED (previously missing from the local label copy)', () => {
+    const cases: Array<[string, string]> = [
+      ['DECLINED', 'דחה'],
+      ['CANCELED', 'בוטל'],
+    ];
+    for (const [code, he] of cases) {
+      const items: InspectionListItem[] = [
+        {
+          taskFieldId: 't', customerName: 'ל', siteAddress: 'א',
+          siteCity: 'ר', fieldStatus: code, family: 'general', typeLabelHe: 'ט',
+        },
+      ];
+      const { text } = formatInspectorMorning(items, { name: 'ד' });
+      expect(text).toContain(`סטטוס: ${he}`);
+      expect(text).not.toContain(`סטטוס: ${code}`);
+    }
+  });
+
   it('degrades gracefully when customerName / siteAddress / siteCity are null', () => {
     const items: InspectionListItem[] = [
       {

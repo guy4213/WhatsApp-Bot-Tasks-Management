@@ -21,6 +21,7 @@ import {
   getWorkerDayDetail,
   searchTasksByWorkerName,
   searchTasksByProductCode,
+  searchTasksByCustomerName,
   getTaskFieldDetail,
 } from '../services/managerViews';
 
@@ -350,6 +351,43 @@ describe('searchTasksByWorkerName', () => {
     const rows = await searchTasksByWorkerName('דני');
     expect(rows).toHaveLength(1);
     expect(rows[0].workerName).toBe('דני כהן');
+  });
+});
+
+// ── searchTasksByCustomerName ─────────────────────────────────────────────────
+
+describe('searchTasksByCustomerName', () => {
+  // D5-T19e regression: the old inline query (in router.ts) filtered
+  // `WHERE c.name ILIKE ...` — only the Customer table — while the SELECT
+  // displayed a name from a 6-source COALESCE (Customer/Lead/Project/
+  // IncomingLead). A Task linked via Lead or IncomingLead (no Customer row)
+  // would never match the search, even though its name displays correctly
+  // everywhere else. The WHERE clause must filter on the SAME COALESCE.
+  it('filters on the same 6-source COALESCE used for display, not just Customer.name', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await searchTasksByCustomerName('מעיין שפירא');
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/WHERE\s+COALESCE\(/i);
+    expect(sql).toMatch(/c\.name/);
+    expect(sql).toMatch(/l\."fullName"/);
+    expect(sql).toMatch(/l\.company/);
+    expect(sql).toMatch(/p\.client/);
+    expect(sql).toMatch(/il\."fromName"/);
+    expect(sql).toMatch(/ILIKE\s+'%'\s*\|\|\s*\$1\s*\|\|\s*'%'/);
+    expect(params[0]).toBe('מעיין שפירא');
+  });
+
+  it('finds a Task linked via Lead (no Customer row) — the exact reported bug', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [{
+        taskFieldId: 'tf9', taskId: 't9', workerName: 'דני', customerName: 'מעיין שפירא',
+        timeHm: '11:00', siteCity: 'חיפה', fieldStatus: 'ASSIGNED',
+        family: 'noise', typeLabelHe: 'רעש',
+      }],
+    });
+    const rows = await searchTasksByCustomerName('מעיין שפירא');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].customerName).toBe('מעיין שפירא');
   });
 });
 

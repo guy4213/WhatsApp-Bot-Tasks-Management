@@ -10,7 +10,7 @@
  *  - Manager users get MANAGER_INTENT_LIST / MANAGER_FEW_SHOT
  *  - Worker users get WORKER_INTENT_LIST / WORKER_FEW_SHOT
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { parseIntent, buildSystemPrompt, type ParseContext } from '../ai/intentParser';
 import { parseIntentResult } from '../ai/schema';
 import type { LLMProvider, StructuredRequest } from '../ai/provider';
@@ -98,6 +98,20 @@ describe('buildSystemPrompt — role-awareness', () => {
     expect(prompt).toContain('WORKER-SIDE INTENTS');
   });
 
+  // D5-T19d: missing_equipment_free / report_missing_info were confusable —
+  // the few-shot examples used "טופס" (form) as an example of BOTH intents,
+  // which taught the model to guess. The equipment example set must no
+  // longer use the ambiguous "טופס" wording, and both blocks must carry an
+  // explicit physical-item-vs-information disambiguation rule.
+  it('worker prompt disambiguates missing_equipment_free from report_missing_info (no ambiguous "טופס" equipment example)', () => {
+    const prompt = buildSystemPrompt(makeCtx(makeWorker()));
+    expect(prompt).toContain('missing_equipment_free');
+    expect(prompt).toContain('PHYSICAL TOOL/DEVICE/');
+    expect(prompt).toContain('INFORMATION/DATA');
+    // The old contradictory example ("שכחתי את הטופס" as equipment) must be gone.
+    expect(prompt).not.toContain('"שכחתי את הטופס"');
+  });
+
   it('worker prompt does NOT contain MANAGER_INTENT_LIST block', () => {
     const prompt = buildSystemPrompt(makeCtx(makeWorker()));
     expect(prompt).not.toContain('MANAGER-SIDE INTENTS');
@@ -133,6 +147,43 @@ describe('buildSystemPrompt — role-awareness', () => {
     const prompt = buildSystemPrompt(makeCtx(admin));
     expect(prompt).toContain('Manager-level: true');
     expect(prompt).toContain('MANAGER-SIDE INTENTS');
+  });
+});
+
+// D5-T19f: the date-range few-shot examples ("חריגים של אתמול" → dateRange)
+// used to hardcode a specific illustrative "today" (2026-07-05). On any
+// OTHER day that silently contradicted the dynamically-injected real
+// "Today is X" statement elsewhere in the same prompt, and the LLM would
+// sometimes resolve "אתמול" to the wrong absolute date — the router then
+// found zero matching rows and fell back to the generic exceptions menu
+// instead of a filtered list. The examples must now track the REAL date.
+describe('buildSystemPrompt — date-range few-shot tracks the real "today" (D5-T19f)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('"אתמול" example dateRange is always exactly (today - 1) → today, whatever the real date is', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-17T09:00:00Z')); // arbitrary date, NOT the old hardcoded 2026-07-05
+    const prompt = buildSystemPrompt(makeCtx(makeManager()));
+    expect(prompt).toContain('Today (Asia/Jerusalem) is 2026-08-17');
+    expect(prompt).toContain('dateRange={from:"2026-08-16", to:"2026-08-17"}');
+    // The old hardcoded illustrative date must never appear again.
+    expect(prompt).not.toContain('2026-07-05');
+    expect(prompt).not.toContain('today = 2026-07-05');
+  });
+
+  it('recomputes correctly on a different pinned date (no stale caching across calls)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-05T09:00:00Z')); // Monday
+    const prompt = buildSystemPrompt(makeCtx(makeManager()));
+    expect(prompt).toContain('Today (Asia/Jerusalem) is 2026-01-05');
+    expect(prompt).toContain('dateRange={from:"2026-01-04", to:"2026-01-05"}'); // yesterday = Sunday
+  });
+
+  it('worker prompt does NOT include the date-range few-shot block (manager-only feature)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-17T09:00:00Z'));
+    const prompt = buildSystemPrompt(makeCtx(makeWorker()));
+    expect(prompt).not.toContain('Date-range scoping examples');
   });
 });
 
