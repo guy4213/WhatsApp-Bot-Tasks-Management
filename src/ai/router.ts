@@ -58,6 +58,7 @@ import { getManagersForBroadcast } from '../services/pendingActions';
 import { getInspectionsForWorkerOnDate } from '../services/inspectionsQueries';
 import {
   getMyInspectionsInRange,
+  getAllMyInspections,
   type MyInspectionRangeItem,
 } from '../services/myInspectionsRange';
 import { parseHebrewInspectionRange } from './dateRangeParser';
@@ -893,16 +894,24 @@ async function executeIntent(
 
     case 'list_my_inspections': {
       // Phase 1 worker parity — LLM-parsed "show my inspections" with an
-      // optional dateScope / rangeExpr param. We synthesize a text form that
-      // MY_INSPECTIONS_RE will parse deterministically so we reuse the exact
-      // same range logic as the fast-path regex (single source of truth for
-      // Hebrew date resolution).
+      // optional dateScope / rangeExpr param.
       const dateScope = typeof intent.params?.dateScope === 'string'
         ? intent.params.dateScope.trim().toLowerCase()
         : '';
       const rangeExpr = typeof intent.params?.rangeExpr === 'string'
         ? intent.params.rangeExpr.trim()
         : '';
+
+      // "all" scope — no date filter, show everything (post-Phase-6 addition).
+      // Triggered by phrases like "כל הבדיקות שלי מכל הזמנים", "מאז ומעולם",
+      // "בלי הגבלה", "הכל".
+      if (dateScope === 'all') {
+        await handleMyInspectionsAllTime(user);
+        return;
+      }
+
+      // Bounded scopes — synthesize a text form that MY_INSPECTIONS_RE +
+      // parseHebrewInspectionRange will resolve deterministically.
       let synthesized = 'הבדיקות שלי';
       if (rangeExpr.length > 0) {
         synthesized += ' ' + rangeExpr;
@@ -4461,6 +4470,13 @@ async function handleMyInspectionsFreeText(user: ResolvedUser, text: string): Pr
   const m = text.match(MY_INSPECTIONS_RE);
   const suffix = (m?.[2] ?? '').trim();
 
+  // "all time" shortcut inside the fast-path — matches "כל הזמנים",
+  // "מכל הזמנים", "הכל", "בלי הגבלה", "מאז ומעולם", "מהתחלה".
+  if (/^(?:מ?כל\s+הזמנים|הכל|בלי\s+הגבלה|מאז\s+ומעולם|מהתחלה)$/.test(suffix)) {
+    await handleMyInspectionsAllTime(user);
+    return;
+  }
+
   const now = new Date();
   let range: { fromLocalDate: string; toLocalDate: string; label: string };
   if (suffix.length === 0) {
@@ -4471,10 +4487,12 @@ async function handleMyInspectionsFreeText(user: ResolvedUser, text: string): Pr
   } else {
     const parsed = parseHebrewInspectionRange(suffix, now);
     if (!parsed) {
-      await sendTextMessage({
-        to: user.phone,
-        text: 'לא הצלחתי להבין את הטווח. נסה "הבדיקות שלי היום", "הבדיקות שלי השבוע", או "הבדיקות שלי בין 1/7 ל-10/7".',
-      });
+      // The user's suffix wasn't a recognized Hebrew range ("מהזמן", "לא ברור" —
+      // things like "מכל הזמנים" already handled above). Instead of erroring,
+      // hand off to the AI parser — the LLM has a broader vocabulary
+      // (list_my_inspections with `dateScope: "all"` etc.). This is the
+      // "AI-first" fallback the product owner asked for.
+      await routeToAIParserFor(user, text);
       return;
     }
     range = parsed;
@@ -4502,6 +4520,62 @@ async function handleMyInspectionsFreeText(user: ResolvedUser, text: string): Pr
   });
 
   await sendChunked(user.phone, body);
+}
+
+/**
+ * "All time" variant of `handleMyInspectionsFreeText` — no date filter, up to
+ * 200 most-recent TaskFields. Used when the user asks
+ * "תציג את כל הבדיקות שלי מכל הזמנים" / "הכל" / "בלי הגבלה" — either from
+ * the LLM (`list_my_inspections` intent with `dateScope='all'`) or via the
+ * fast-path regex + suffix normalization inside `handleMyInspectionsFreeText`.
+ */
+async function handleMyInspectionsAllTime(user: ResolvedUser): Promise<void> {
+  const items = await getAllMyInspections(user.id);
+  if (items.length === 0) {
+    await sendTextMessage({
+      to: user.phone,
+      text: 'אין לך שום בדיקות שטח משויכות (כל הזמנים).',
+    });
+    return;
+  }
+  const body = formatMyInspectionsRange(items, `כל הזמנים · ${items.length} בדיקות`, /* isMultiDay */ true);
+  await setContext(user.phone, {
+    awaiting: 'mgr_my_today_pick_task', // reuse the same numbered-picker handler
+    mgrTaskFieldIds: items.map((r) => r.taskFieldId),
+    mgrTaskIds: items.map((r) => r.taskId),
+  });
+  await sendChunked(user.phone, body);
+}
+
+/**
+ * Fast-path recovery: when `MY_INSPECTIONS_RE` matched but the suffix isn't a
+ * recognized range (e.g. "בין הזמנים", "לפני חודש"), delegate to the AI parser
+ * so the LLM can emit `list_my_inspections` with a broader `dateScope`. Uses
+ * the same rolling history + provider path as `handleAIMessage`.
+ */
+async function routeToAIParserFor(user: ResolvedUser, text: string): Promise<void> {
+  if (!getProvider()) {
+    await sendTextMessage({
+      to: user.phone,
+      text: 'לא הצלחתי להבין את הטווח. נסה "הבדיקות שלי היום", "הבדיקות שלי השבוע", "הכל", או "הבדיקות שלי בין 1/7 ל-10/7".',
+    });
+    return;
+  }
+  let intent: AIIntentResult;
+  try {
+    const [allowedTypes, allowedPriorities, history] = await Promise.all([
+      getAllowedTaskTypes(),
+      safePriorities(),
+      getHistory(user.phone),
+    ]);
+    intent = await parseIntent(text, { user, allowedTypes, allowedPriorities, history });
+  } catch (err) {
+    log.error({ err }, 'AI fallback parse failed inside handleMyInspectionsFreeText');
+    await sendTextMessage({ to: user.phone, text: 'שגיאה בעיבוד הבקשה. נסה שוב.' });
+    return;
+  }
+  await appendTurn(user.phone, 'user', text);
+  await routeIntent(user, intent, text);
 }
 
 /** Format the multi-row range list for `handleMyInspectionsFreeText`. */

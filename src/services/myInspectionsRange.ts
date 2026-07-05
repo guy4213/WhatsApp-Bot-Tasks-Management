@@ -109,3 +109,62 @@ export async function getMyInspectionsInRange(
   );
   return rows;
 }
+
+/**
+ * All TaskFields assigned to `userId` (Task.ownerId) with NO date filter —
+ * used for the "כל הזמנים" / "הכל" / dateScope='all' free-text intent. Excludes
+ * CANCELED / DECLINED (same rule as `getMyInspectionsInRange`).
+ * Ordered by scheduledStartAt DESC (newest first) so the most relevant rows
+ * lead the list. Soft cap at 200 rows so a worker with a very long history
+ * doesn't exceed WhatsApp's chunked-body budget.
+ */
+export async function getAllMyInspections(
+  userId: string,
+  limit = 200,
+): Promise<MyInspectionRangeItem[]> {
+  const { rows } = await pool.query<{
+    taskFieldId: string;
+    taskId: string;
+    customerName: string | null;
+    taskTitle: string | null;
+    siteAddress: string | null;
+    siteCity: string | null;
+    fieldStatus: string;
+    family: string;
+    typeLabelHe: string;
+    scheduledStartAt: Date;
+  }>(
+    `SELECT
+       tf.id                       AS "taskFieldId",
+       tf."taskId"                 AS "taskId",
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                           AS "customerName",
+       t.title                     AS "taskTitle",
+       tf."siteAddress"            AS "siteAddress",
+       tf."siteCity"               AS "siteCity",
+       tf."fieldStatus"            AS "fieldStatus",
+       tf.family                   AS family,
+       it."labelHe"                AS "typeLabelHe",
+       tf."scheduledStartAt"       AS "scheduledStartAt"
+     FROM "TaskField" tf
+     JOIN "Task" t             ON t.id  = tf."taskId"
+     JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     WHERE t."ownerId" = $1
+       AND tf."fieldStatus" NOT IN ('CANCELED','DECLINED')
+     ORDER BY tf."scheduledStartAt" DESC NULLS LAST
+     LIMIT $2`,
+    [userId, limit],
+  );
+  log.info({ userId, count: rows.length }, 'Loaded ALL my inspections');
+  return rows;
+}

@@ -35,7 +35,7 @@ function isManagerLevel(user: ResolvedUser): boolean {
 
 const WORKER_INTENT_LIST = [
   'WORKER-SIDE INTENTS (use for non-manager users):',
-  '- list_my_inspections: user wants to see THEIR OWN inspection list. Any phrasing asking for their inspections/day/list. Use params.dateScope: "today" (default), "tomorrow", "week", "next_week", or omit for today. If a Hebrew date range appears ("בין 1/7 ל-10/7", "מיום ראשון עד חמישי"), copy the raw suffix into params.rangeExpr so the backend parser resolves it. This is the go-to intent when a worker just wants to see what they have — do NOT use get_task for that.',
+  '- list_my_inspections: user wants to see THEIR OWN inspection list. Any phrasing asking for their inspections/day/list. Use params.dateScope: "today" (default), "tomorrow", "week", "next_week", or "all" (for "כל הזמנים" / "הכל" / "מכל הזמנים" / "בלי הגבלה" / "מאז ומעולם" / "מהתחלה" / "כל הבדיקות שלי" — any phrasing implying no date filter). Omit for today. If a Hebrew date range appears ("בין 1/7 ל-10/7", "מיום ראשון עד חמישי", "בחודש הקרוב", "לחודש הבא"), copy the raw suffix into params.rangeExpr so the backend parser resolves it. This is the go-to intent when a worker just wants to see what they have — do NOT use get_task for that.',
   '- get_task: user wants details of ONE SPECIFIC task, naming the customer or address. Set task_reference. Do NOT use this for a general "show me my list" request — that is list_my_inspections.',
   '- set_field_status: a FIELD INSPECTOR reports that they are advancing an inspection to a new operational status. Set the top-level "transition" field to one of: ' + FIELD_STATUS_TRANSITIONS.join(', ') + '. Map: "יצאתי"/"בדרך"/"בדרכי"/"נסעתי"/"אני עוזב"/"יצאתי בדרך"→DEPARTED; "הגעתי"/"אני באתר"/"אני כבר בשטח"/"הגעתי לאתר"→ARRIVED; "סיימתי"/"גמרתי"/"סיימתי הכל"/"סיימתי את הבדיקה"→FINISHED; "אני מחכה למידע"/"צריך עוד פרטים לפני שאוכל לסיים"→WAITING_FOR_INFO; "יש לי בעיה"/"יש בעיה בבדיקה"→HAS_PROBLEM. Note: "התחלתי" is NOT a valid transition (STARTED was retired) — treat it as ARRIVED if context implies on-site arrival, else set intent=unknown with a clarification. If the worker names a specific customer/address ("יצאתי ללקוח כהן", "הגעתי לרעננה") put that in task_reference; otherwise leave task_reference=null and the backend disambiguates. Do NOT put the transition in params.',
   '- report_problem: a FIELD INSPECTOR reports a problem with an inspection. If their phrasing maps cleanly to one of the 7 declared problem types, set the top-level "problem_type" field to it: ' + FIELD_PROBLEM_TYPES.join(', ') + '. Map: "הלקוח לא ענה"/"לא עונה בטלפון"/"אין תשובה"/"הלקוח מתחמק"→CUSTOMER_NOT_ANSWERING; "אין גישה"/"אין גישה לאתר"/"אין מפתח"/"השער סגור"→NO_ACCESS; "הלקוח לא נמצא"/"אין אף אחד"/"אין אף אחד בבית"→CUSTOMER_NOT_PRESENT; "חסר ציוד"/"אין לי את המכשיר"/"חסר לי בטריות"/"אין חשמל"→MISSING_EQUIPMENT; "אי אפשר לבצע"/"לא ניתן לבצע"/"לא הצלחתי לבצע"→CANNOT_PERFORM; "בעיה מקצועית"→PROFESSIONAL_ISSUE; anything else on a "problem" phrasing→OTHER. If the phrasing does NOT map cleanly, leave problem_type=null (the router will show the 7-item sub-menu). Free-text elaboration goes in params.note. Optional inline customer/address ref → task_reference.',
@@ -67,6 +67,13 @@ const WORKER_FEW_SHOT = [
   '- "בבקשה תראה לי מה יש לי" → list_my_inspections, params.dateScope="today". [voice "בבקשה" prefix]',
   '- "אני רוצה לראות את הבדיקות שלי" → list_my_inspections, params.dateScope="today". [voice prefix]',
   '- "הבדיקות שלי בין 1/7 ל-10/7" → list_my_inspections, params.rangeExpr="בין 1/7 ל-10/7".',
+  '- "תציג את כל הבדיקות שלי מכל הזמנים" → list_my_inspections, params.dateScope="all".',
+  '- "כל הבדיקות שלי" → list_my_inspections, params.dateScope="all".',
+  '- "תראה לי הכל" → list_my_inspections, params.dateScope="all".',
+  '- "הבדיקות שלי בלי הגבלה" → list_my_inspections, params.dateScope="all".',
+  '- "כל מה שיש לי" → list_my_inspections, params.dateScope="all".',
+  '- "הבדיקות שלי מאז ומעולם" → list_my_inspections, params.dateScope="all".',
+  '- "מהתחלה את כל הבדיקות שלי" → list_my_inspections, params.dateScope="all".',
   '',
   '// set_field_status — DEPARTED variants',
   '- "יצאתי לרעננה" → set_field_status, transition="DEPARTED", task_reference="רעננה".',

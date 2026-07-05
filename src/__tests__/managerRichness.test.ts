@@ -199,6 +199,7 @@ vi.mock('../services/inspectionsQueries', () => ({
 
 vi.mock('../services/myInspectionsRange', () => ({
   getMyInspectionsInRange: vi.fn().mockResolvedValue([]),
+  getAllMyInspections: vi.fn().mockResolvedValue([]),
 }));
 
 // Sasha is in the leads-viewer set (services/specialUsers.ts).

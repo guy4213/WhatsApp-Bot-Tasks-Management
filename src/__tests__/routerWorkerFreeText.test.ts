@@ -178,8 +178,10 @@ vi.mock('../services/inspectionsQueries', () => ({
 }));
 
 const getMyInspectionsInRange = vi.fn().mockResolvedValue([]);
+const getAllMyInspections = vi.fn().mockResolvedValue([]);
 vi.mock('../services/myInspectionsRange', () => ({
   getMyInspectionsInRange: (...a: unknown[]) => getMyInspectionsInRange(...a),
+  getAllMyInspections: (...a: unknown[]) => getAllMyInspections(...a),
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────────
@@ -218,6 +220,7 @@ beforeEach(() => {
   notifyOfficeMissingInfo.mockReset().mockResolvedValue(undefined);
   notifyOfficeProblem.mockReset().mockResolvedValue(undefined);
   getMyInspectionsInRange.mockReset().mockResolvedValue([]);
+  getAllMyInspections.mockReset().mockResolvedValue([]);
 });
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -570,5 +573,83 @@ describe('AI intent missing_equipment_free dispatch', () => {
       return s.awaiting === 'equipment_missing_note';
     });
     expect(equipmentCtxSet).toBe(true);
+  });
+});
+
+// ── list_my_inspections dateScope="all" — full history ────────────────────────
+
+describe('list_my_inspections dateScope="all" (post-Phase-6 addition)', () => {
+  it('AI intent dateScope="all" routes to getAllMyInspections (NOT getMyInspectionsInRange)', async () => {
+    getContext.mockResolvedValue(null);
+    parseIntentMock.mockResolvedValue({
+      intent: 'list_my_inspections',
+      confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: { dateScope: 'all' },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    // Phrase the LLM emitted the intent for.
+    await handleAIMessage(makeWorker(), 'תציג את כל הבדיקות שלי מכל הזמנים');
+    expect(getAllMyInspections).toHaveBeenCalledTimes(1);
+    expect(getMyInspectionsInRange).not.toHaveBeenCalled();
+  });
+
+  it('fast-path suffix "מכל הזמנים" routes to getAllMyInspections without AI', async () => {
+    getContext.mockResolvedValue(null);
+    await handleAIMessage(makeWorker(), 'הבדיקות שלי מכל הזמנים');
+    expect(getAllMyInspections).toHaveBeenCalledTimes(1);
+    // AI parser must NOT be called for the fast-path all-time shortcut.
+    expect(parseIntentMock).not.toHaveBeenCalled();
+  });
+
+  it('fast-path suffix "הכל" routes to getAllMyInspections without AI', async () => {
+    getContext.mockResolvedValue(null);
+    await handleAIMessage(makeWorker(), 'הבדיקות שלי הכל');
+    expect(getAllMyInspections).toHaveBeenCalledTimes(1);
+    expect(parseIntentMock).not.toHaveBeenCalled();
+  });
+
+  it('empty-result path prints "אין לך שום בדיקות שטח משויכות (כל הזמנים)"', async () => {
+    getContext.mockResolvedValue(null);
+    getAllMyInspections.mockResolvedValueOnce([]);
+    parseIntentMock.mockResolvedValue({
+      intent: 'list_my_inspections',
+      confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: { dateScope: 'all' },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    await handleAIMessage(makeWorker(), 'תראה לי את כל הבדיקות שלי מכל הזמנים בבקשה');
+    expect(msgLog.some((m) => /אין לך שום בדיקות שטח משויכות \(כל הזמנים\)/.test(m))).toBe(true);
+  });
+});
+
+// ── AI-first fallback when regex matches but range fails ─────────────────────
+
+describe('Fast-path failure falls through to AI parser (post-Phase-6)', () => {
+  it('regex-matched phrase with unparseable range delegates to the AI parser (not an error message)', async () => {
+    getContext.mockResolvedValue(null);
+    // LLM will emit list_my_inspections with dateScope="all" as it should.
+    parseIntentMock.mockResolvedValue({
+      intent: 'list_my_inspections',
+      confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: { dateScope: 'all' },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    // Suffix "לפני מיליון שנה" is not a recognized Hebrew range → old
+    // behavior returned "לא הצלחתי להבין את הטווח". New behavior: delegate
+    // to AI which emits dateScope=all and we show all-time.
+    await handleAIMessage(makeWorker(), 'הבדיקות שלי לפני מיליון שנה');
+    expect(parseIntentMock).toHaveBeenCalled();
+    expect(getAllMyInspections).toHaveBeenCalledTimes(1);
+    // The old error message must NOT be produced.
+    expect(msgLog.some((m) => /לא הצלחתי להבין את הטווח/.test(m))).toBe(false);
   });
 });

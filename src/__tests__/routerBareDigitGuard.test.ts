@@ -213,6 +213,7 @@ vi.mock('../services/inspectionsQueries', () => ({
 
 vi.mock('../services/myInspectionsRange', () => ({
   getMyInspectionsInRange: vi.fn().mockResolvedValue([]),
+  getAllMyInspections: vi.fn().mockResolvedValue([]),
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────────

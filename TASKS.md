@@ -1121,6 +1121,57 @@ Full suite peaked at 1119-1166 passing.
 
 ---
 
+### D5-T14 — `list_my_inspections` dateScope="all" + AI-first fallback (2026-07-05 hotfix)
+
+**Status:** DONE (local, uncommitted)
+
+**Problem reported live:** worker typed "תציג את כל הבדיקות שלי מכל הזמנים" —
+regex fast-path matched, passed "מכל הזמנים" as range suffix,
+`parseHebrewInspectionRange` returned null → bot answered
+"לא הצלחתי להבין את הטווח". Even when the user retried with more context,
+the bot defaulted to today, IGNORING the user's explicit "מכל הזמנים".
+
+**Fix:**
+- Added `dateScope: "all"` to `list_my_inspections` schema semantics.
+- New service `getAllMyInspections(userId, limit=200)` — no date filter,
+  ordered DESC by scheduledStartAt, soft cap 200 rows.
+- Router `case 'list_my_inspections'` handles `dateScope === 'all'` → routes
+  to `handleMyInspectionsAllTime` (new function).
+- `handleMyInspectionsFreeText` — when the fast-path regex matches but the
+  Hebrew range suffix is unrecognized (used to error), now delegates to the
+  AI parser via `routeToAIParserFor` so the LLM can emit
+  `list_my_inspections` with the appropriate `dateScope`. This is the
+  "AI-first" behavior the user asked for ("מספיק עם הרגקסים - AI INTENT
+  כמו שצריך כמו באדמין").
+- Fast-path shortcut inside `handleMyInspectionsFreeText`: if the suffix
+  matches "מכל הזמנים / הכל / בלי הגבלה / מאז ומעולם / מהתחלה", jump
+  straight to `handleMyInspectionsAllTime` without an AI round-trip.
+- Intent parser prompt: `WORKER_INTENT_LIST` documents `dateScope="all"`;
+  `WORKER_FEW_SHOT` gets 7 new examples covering the "all" variants.
+
+**Files changed:**
+- `src/services/myInspectionsRange.ts` (+62 — `getAllMyInspections`)
+- `src/ai/router.ts` — import `getAllMyInspections`, extended
+  `list_my_inspections` case, added `handleMyInspectionsAllTime` and
+  `routeToAIParserFor` helpers, fast-path all-time shortcut.
+- `src/ai/intentParser.ts` — worker prompt docs `dateScope='all'`, +7 FEW_SHOT.
+- `src/__tests__/routerWorkerFreeText.test.ts` — mock `getAllMyInspections`,
+  +5 tests covering AI intent path, fast-path shortcut, empty-result
+  message, and the "regex matched but range unparseable → AI takeover".
+- `src/__tests__/managerRichness.test.ts` — added `getAllMyInspections`
+  mock to satisfy import.
+- `src/__tests__/routerBareDigitGuard.test.ts` — same mock addition.
+
+**QA:** `npx tsc --noEmit` exit 0. Suites re-run: 180/180 across the six
+affected files. Key scenario (regex matches "מכל הזמנים" → all-time list)
+covered.
+
+**Live user impact:** "תציג את כל הבדיקות שלי מכל הזמנים" now returns the
+full list of worker's TaskFields (up to 200 most-recent) instead of an
+error or a today-only view.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:
