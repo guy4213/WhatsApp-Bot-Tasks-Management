@@ -1,5 +1,10 @@
 /**
  * D3-T3 + D3-T4 — leadAssignmentNotifier polling job.
+ *
+ * Dedup check (isLeadNotificationSent, a plain SELECT) now runs BEFORE the
+ * WhatsApp send; the ledger row (claimLeadNotification, an INSERT) is only
+ * written AFTER the send actually succeeds — never before. A failed send
+ * leaves no row, so the next tick retries instead of silently skipping.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,6 +46,11 @@ afterEach(() => {
 import { runLeadAssignmentNotifier } from '../scheduler/jobs/leadAssignmentNotifier';
 
 const EMPTY = { rowCount: 0, rows: [] };
+// isLeadNotificationSent (SELECT) result shapes.
+const NOT_SENT = { rowCount: 0, rows: [] };
+const ALREADY_SENT = { rowCount: 1, rows: [{ leadId: 'x' }] };
+// claimLeadNotification (INSERT, called only after a successful send).
+const CLAIMED = { rowCount: 1, rows: [{ leadId: 'x' }] };
 
 function makeAssignedRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -78,21 +88,21 @@ function makeEscalationRow(overrides: Record<string, unknown> = {}) {
 // ── D3-T3: worker assignment alerts ──────────────────────────────────────────
 
 describe('D3-T3 worker assignment alert', () => {
-  it('claims dedup then sends to worker phone', async () => {
+  it('checks dedup, sends to worker phone, then records as sent', async () => {
     const row = makeAssignedRow();
     poolQuery
-      // findNewlyAssignedLeads
-      .mockResolvedValueOnce({ rowCount: 1, rows: [row] })
-      // claimLeadNotification ASSIGNED_TO_WORKER
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: row.id }] })
-      // findEscalationCandidates (no Sasha phone set → escalation skipped)
-      // actually, processEscalations short-circuits when SASHA_PHONE is unset
-      .mockResolvedValueOnce(EMPTY); // findEscalationCandidates would not be called
+      .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findNewlyAssignedLeads
+      .mockResolvedValueOnce(NOT_SENT)   // isLeadNotificationSent ASSIGNED_TO_WORKER → not sent
+      .mockResolvedValueOnce(CLAIMED);   // claimLeadNotification (after successful send)
 
     await runLeadAssignmentNotifier();
 
-    // Dedup INSERT was called
-    const claimCall = poolQuery.mock.calls[1];
+    // Dedup check ran BEFORE the send.
+    const checkCall = poolQuery.mock.calls[1];
+    expect(checkCall[0]).toMatch(/SELECT 1 FROM "WhatsappLeadNotification"/);
+    expect(checkCall[1]).toContain('ASSIGNED_TO_WORKER');
+    // The claim INSERT ran AFTER the send.
+    const claimCall = poolQuery.mock.calls[2];
     expect(claimCall[0]).toMatch(/INSERT INTO "WhatsappLeadNotification"/);
     expect(claimCall[1]).toContain('ASSIGNED_TO_WORKER');
 
@@ -105,26 +115,43 @@ describe('D3-T3 worker assignment alert', () => {
     expect(msg.text).toContain('לטיפול ועדכון ב-CRM');
   });
 
-  it('skips send when dedup claim returns false (already claimed)', async () => {
+  it('skips send when already sent (dedup)', async () => {
     const row = makeAssignedRow();
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findNewlyAssignedLeads
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] });   // claim → already claimed
+      .mockResolvedValueOnce(ALREADY_SENT);                // isLeadNotificationSent → already sent
 
     await runLeadAssignmentNotifier();
 
     expect(sendTextMessage).not.toHaveBeenCalled();
   });
 
-  it('skips send when worker has no phone', async () => {
+  it('skips send when worker has no phone, and records it as handled (no re-log every tick)', async () => {
     const row = makeAssignedRow({ workerPhone: null });
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findNewlyAssignedLeads
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: row.id }] }); // claim succeeds
+      .mockResolvedValueOnce(NOT_SENT)                     // isLeadNotificationSent → not sent
+      .mockResolvedValueOnce(CLAIMED);                     // claimLeadNotification (no-phone → recorded as handled)
 
     await runLeadAssignmentNotifier();
 
     expect(sendTextMessage).not.toHaveBeenCalled();
+    const claimCall = poolQuery.mock.calls[2];
+    expect(claimCall[0]).toMatch(/INSERT INTO "WhatsappLeadNotification"/);
+  });
+
+  it('does NOT record as sent when the WhatsApp send fails (retry next tick)', async () => {
+    const row = makeAssignedRow();
+    sendTextMessage.mockRejectedValueOnce(new Error('send failed'));
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findNewlyAssignedLeads
+      .mockResolvedValueOnce(NOT_SENT);                    // isLeadNotificationSent → not sent
+
+    await runLeadAssignmentNotifier();
+
+    expect(sendTextMessage).toHaveBeenCalledOnce();
+    // No further pool.query call (no claim INSERT) after the failed send.
+    expect(poolQuery).toHaveBeenCalledTimes(2);
   });
 
   it('continues loop on per-lead send failure', async () => {
@@ -132,8 +159,10 @@ describe('D3-T3 worker assignment alert', () => {
     const rowB = makeAssignedRow({ id: 'lead-b', fromName: 'שני' });
     poolQuery
       .mockResolvedValueOnce({ rowCount: 2, rows: [rowA, rowB] }) // findNewlyAssignedLeads
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: 'lead-a' }] }) // claim A
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: 'lead-b' }] }); // claim B
+      .mockResolvedValueOnce(NOT_SENT) // isLeadNotificationSent lead-a → not sent
+      // send A fails below → no claim call for lead-a
+      .mockResolvedValueOnce(NOT_SENT) // isLeadNotificationSent lead-b → not sent
+      .mockResolvedValueOnce(CLAIMED); // claimLeadNotification lead-b (send succeeds)
 
     sendTextMessage
       .mockRejectedValueOnce(new Error('send A failed'))
@@ -141,7 +170,7 @@ describe('D3-T3 worker assignment alert', () => {
 
     await runLeadAssignmentNotifier();
 
-    // Both rows were attempted
+    // Both rows were attempted despite A failing.
     expect(sendTextMessage).toHaveBeenCalledTimes(2);
   });
 
@@ -161,17 +190,17 @@ describe('D3-T4 Sasha escalation', () => {
     getLeadsViewerPhones.mockResolvedValue(['972509999999']);
   });
 
-  it('claims ESCALATED_1H then sends to Sasha with AI suggestion', async () => {
+  it('checks dedup, sends to Sasha with AI suggestion, then records as sent', async () => {
     const row = makeEscalationRow();
     suggestWorkerForLead.mockResolvedValue({ userId: 'u-1', reason: 'מתמחה בקרינה' });
 
     poolQuery
       .mockResolvedValueOnce(EMPTY)  // findNewlyAssignedLeads
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] })  // findEscalationCandidates
-      // findActiveInspectors runs before claim
+      // findActiveInspectors runs before the dedup check
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 'u-1', name: 'דני', role: 'WORKER' }] })
-      // claimLeadNotification ESCALATED_1H
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: row.id }] });
+      .mockResolvedValueOnce(NOT_SENT)  // isLeadNotificationSent ESCALATED_1H → not sent
+      .mockResolvedValueOnce(CLAIMED);  // claimLeadNotification (after successful send)
 
     await runLeadAssignmentNotifier();
 
@@ -191,7 +220,8 @@ describe('D3-T4 Sasha escalation', () => {
       .mockResolvedValueOnce(EMPTY) // findNewlyAssignedLeads
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findEscalationCandidates
       .mockResolvedValueOnce({ rowCount: 0, rows: [] })    // findActiveInspectors
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: row.id }] }); // claim → granted
+      .mockResolvedValueOnce(NOT_SENT)  // isLeadNotificationSent → not sent
+      .mockResolvedValueOnce(CLAIMED);  // claimLeadNotification
 
     await runLeadAssignmentNotifier();
 
@@ -219,7 +249,8 @@ describe('D3-T4 Sasha escalation', () => {
       .mockResolvedValueOnce(EMPTY) // findNewlyAssignedLeads
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findEscalationCandidates
       .mockResolvedValueOnce({ rowCount: 0, rows: [] })    // findActiveInspectors
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: row.id }] }); // claim
+      .mockResolvedValueOnce(NOT_SENT)  // isLeadNotificationSent → not sent
+      .mockResolvedValueOnce(CLAIMED);  // claimLeadNotification (after >=1 delivery)
 
     await runLeadAssignmentNotifier();
 
@@ -231,18 +262,35 @@ describe('D3-T4 Sasha escalation', () => {
     expect(recipients).toContain('972500000003');
   });
 
-  it('skips escalation loop when claim returns false', async () => {
+  it('skips escalation loop when already sent', async () => {
     const row = makeEscalationRow();
 
     poolQuery
       .mockResolvedValueOnce(EMPTY) // findNewlyAssignedLeads
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findEscalationCandidates
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] })    // claim → already claimed
-      .mockResolvedValueOnce({ rowCount: 0, rows: [] });   // findActiveInspectors
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })    // findActiveInspectors
+      .mockResolvedValueOnce(ALREADY_SENT);                // isLeadNotificationSent → already sent
 
     await runLeadAssignmentNotifier();
 
     expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('does NOT record as sent when every recipient send fails (retry next tick)', async () => {
+    const row = makeEscalationRow();
+    sendTextMessage.mockRejectedValue(new Error('send failed'));
+
+    poolQuery
+      .mockResolvedValueOnce(EMPTY) // findNewlyAssignedLeads
+      .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findEscalationCandidates
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })    // findActiveInspectors
+      .mockResolvedValueOnce(NOT_SENT); // isLeadNotificationSent → not sent
+
+    await runLeadAssignmentNotifier();
+
+    expect(sendTextMessage).toHaveBeenCalledOnce();
+    // No further pool.query call (no claim INSERT) since delivery count is 0.
+    expect(poolQuery).toHaveBeenCalledTimes(4);
   });
 
   it('continues loop when send fails for one lead', async () => {
@@ -253,8 +301,10 @@ describe('D3-T4 Sasha escalation', () => {
       .mockResolvedValueOnce(EMPTY) // findNewlyAssignedLeads
       .mockResolvedValueOnce({ rowCount: 2, rows: [rowA, rowB] }) // findEscalationCandidates
       .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // findActiveInspectors
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: 'lead-a' }] }) // claim A
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ leadId: 'lead-b' }] }); // claim B
+      .mockResolvedValueOnce(NOT_SENT)  // isLeadNotificationSent lead-a → not sent
+      // lead-a's only viewer send fails → delivered=0 → NO claim call for lead-a
+      .mockResolvedValueOnce(NOT_SENT)  // isLeadNotificationSent lead-b → not sent
+      .mockResolvedValueOnce(CLAIMED);  // claimLeadNotification lead-b (send succeeds)
 
     sendTextMessage
       .mockRejectedValueOnce(new Error('A failed'))

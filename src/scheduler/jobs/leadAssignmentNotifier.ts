@@ -9,8 +9,11 @@
  *        with no prior escalation; sends Sasha one alert per lead with an
  *        AI-suggested worker. Dedup via WhatsappLeadNotification(leadId, 'ESCALATED_1H').
  *
- * INSERT-first dedup (claim before send) guarantees at-most-one delivery per
- * (leadId, eventKind), consistent with completionNotifier + digestDispatcher.
+ * Dedup guarantees at-most-one delivery per (leadId, eventKind): a read-only
+ * check runs BEFORE attempting to send, and the WhatsappLeadNotification row
+ * is only INSERTed (via claimLeadNotification) AFTER the WhatsApp send
+ * actually succeeds — never before. A failed send is retried on the next
+ * tick instead of being silently marked as handled.
  * Per-lead failures are isolated — the loop continues to the next row.
  */
 import { sendTextMessage } from '../../whatsapp/sender';
@@ -22,7 +25,7 @@ import {
   type IncomingLeadRow,
   type AssignedLeadRow,
 } from '../../services/incomingLeads';
-import { claimLeadNotification } from '../../services/leadNotificationLog';
+import { claimLeadNotification, isLeadNotificationSent } from '../../services/leadNotificationLog';
 import { suggestWorkerForLead, type InspectorCandidate } from '../../ai/leadSuggester';
 import { normalizeIsraeliPhone } from '../../auth/phoneNormalizer';
 import { getLeadsViewerPhones } from '../../services/specialUsers';
@@ -70,27 +73,47 @@ async function processAssignmentAlerts(): Promise<void> {
   log.info({ count: rows.length }, 'Lead assignment notifier: newly assigned leads');
 
   for (const lead of rows) {
-    let claimed: boolean;
+    // Read-only dedup check FIRST — do not mark as sent until the WhatsApp
+    // send below actually succeeds.
+    let alreadySent: boolean;
     try {
-      claimed = await claimLeadNotification(lead.id, 'ASSIGNED_TO_WORKER');
+      alreadySent = await isLeadNotificationSent(lead.id, 'ASSIGNED_TO_WORKER');
     } catch (err) {
-      log.error({ err, leadId: lead.id }, 'claimLeadNotification failed for ASSIGNED_TO_WORKER');
+      log.error({ err, leadId: lead.id }, 'isLeadNotificationSent check failed for ASSIGNED_TO_WORKER');
       continue;
     }
-    if (!claimed) continue;
+    if (alreadySent) continue;
 
     if (!lead.workerPhone) {
       log.warn({ leadId: lead.id, workerId: lead.workerId }, 'Assigned worker has no phone — skipping alert');
+      // Permanent condition for this lead — record as handled so it isn't
+      // re-selected (and re-logged) on every tick. Not the "mark before send"
+      // bug: no message was ever meant to go out here.
+      await claimLeadNotification(lead.id, 'ASSIGNED_TO_WORKER').catch((err) => {
+        log.error({ err, leadId: lead.id }, 'Failed to record no-phone lead as handled');
+      });
       continue;
     }
 
     try {
       const phone = normalizeIsraeliPhone(lead.workerPhone) ?? lead.workerPhone;
       await sendTextMessage({ to: phone, text: formatWorkerAssignmentAlert(lead) });
-      log.info({ leadId: lead.id, workerId: lead.workerId }, 'Worker assignment alert sent');
     } catch (err) {
-      log.error({ err, leadId: lead.id }, 'Worker assignment alert send failed');
+      log.error(
+        { err, leadId: lead.id, phone: lead.workerPhone },
+        'Worker assignment alert WhatsApp send FAILED — will retry next tick (not marked as sent)',
+      );
+      continue;
     }
+
+    // Mark as sent ONLY after the WhatsApp send actually succeeded.
+    await claimLeadNotification(lead.id, 'ASSIGNED_TO_WORKER').catch((err) => {
+      log.error(
+        { err, leadId: lead.id },
+        'Failed to record ASSIGNED_TO_WORKER as sent after a successful WhatsApp send — risk of a duplicate on the next tick',
+      );
+    });
+    log.info({ leadId: lead.id, workerId: lead.workerId }, 'Worker assignment alert sent');
   }
 }
 
@@ -142,14 +165,16 @@ async function processEscalations(): Promise<void> {
   }
 
   for (const lead of rows) {
-    let claimed: boolean;
+    // Read-only dedup check FIRST — do not mark as sent until at least one
+    // viewer actually receives the WhatsApp message below.
+    let alreadySent: boolean;
     try {
-      claimed = await claimLeadNotification(lead.id, 'ESCALATED_1H');
+      alreadySent = await isLeadNotificationSent(lead.id, 'ESCALATED_1H');
     } catch (err) {
-      log.error({ err, leadId: lead.id }, 'claimLeadNotification failed for ESCALATED_1H');
+      log.error({ err, leadId: lead.id }, 'isLeadNotificationSent check failed for ESCALATED_1H');
       continue;
     }
-    if (!claimed) continue;
+    if (alreadySent) continue;
 
     const suggestion = await suggestWorkerForLead(
       { service: lead.subject, messageText: lead.body, customerName: lead.fromName },
@@ -165,17 +190,36 @@ async function processEscalations(): Promise<void> {
     const results = await Promise.allSettled(
       viewerPhones.map((phone) => sendTextMessage({ to: phone, text })),
     );
+    let delivered = 0;
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
-      if (r.status === 'rejected') {
+      if (r.status === 'fulfilled') {
+        delivered += 1;
+      } else {
         log.error(
           { err: r.reason, leadId: lead.id, to: viewerPhones[i] },
-          'Escalation alert send failed for recipient',
+          'Escalation alert WhatsApp send FAILED for this recipient',
         );
       }
     }
+
+    if (delivered === 0) {
+      log.error(
+        { leadId: lead.id, recipients: viewerPhones.length },
+        'Escalation alert: EVERY recipient send failed — will retry next tick (not marked as sent)',
+      );
+      continue;
+    }
+
+    // Mark as sent ONLY after at least one viewer actually received it.
+    await claimLeadNotification(lead.id, 'ESCALATED_1H').catch((err) => {
+      log.error(
+        { err, leadId: lead.id },
+        'Failed to record ESCALATED_1H as sent after a successful WhatsApp send — risk of a duplicate on the next tick',
+      );
+    });
     log.info(
-      { leadId: lead.id, recipients: viewerPhones.length },
+      { leadId: lead.id, recipients: viewerPhones.length, delivered },
       'Escalation alert fanned out to leads viewers',
     );
   }

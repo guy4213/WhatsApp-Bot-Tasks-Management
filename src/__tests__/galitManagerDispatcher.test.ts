@@ -41,6 +41,7 @@ const sendTextMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 const notifyMock = vi.hoisted(() => vi.fn(async () => undefined));
 const claimDigestSendMock = vi.hoisted(() => vi.fn(async () => true));
+const isDigestAlreadySentMock = vi.hoisted(() => vi.fn(async () => false));
 const markDigestFailedMock = vi.hoisted(() => vi.fn(async () => undefined));
 const writeAuditLogMock = vi.hoisted(() => vi.fn(async () => undefined));
 
@@ -85,6 +86,7 @@ vi.mock('../whatsapp/templates', () => ({
 }));
 vi.mock('../services/digestSendLog', () => ({
   claimDigestSend: claimDigestSendMock,
+  isDigestAlreadySent: isDigestAlreadySentMock,
   markDigestFailed: markDigestFailedMock,
 }));
 vi.mock('../utils/auditLog', () => ({
@@ -135,6 +137,7 @@ describe('dispatcher — Yoram branch routing (D4-T1, name-based)', () => {
     getOpenFieldExceptionsMock.mockResolvedValue([]);
     getYoramLeadCountsMock.mockResolvedValue({ overnight: 4, unassigned: 2 });
     claimDigestSendMock.mockResolvedValue(true);
+    isDigestAlreadySentMock.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -262,12 +265,20 @@ describe('dispatcher — Yoram branch routing (D4-T1, name-based)', () => {
 
   // ── Dedup preserved ──
 
-  it('claimDigestSend false → no formatter runs (dedup preserved)', async () => {
-    claimDigestSendMock.mockResolvedValueOnce(false);
+  it('already sent → no formatter runs (dedup preserved)', async () => {
+    isDigestAlreadySentMock.mockResolvedValueOnce(true);
     await fire(rowFor({ name: 'יורם', role: 'ADMIN', hm: '08:00', evening: false }));
 
     expect(formatGalitManagerMorningMock).not.toHaveBeenCalled();
     expect(formatInspectorMorningMock).not.toHaveBeenCalled();
     expect(notifyMock).not.toHaveBeenCalled();
+    expect(claimDigestSendMock).not.toHaveBeenCalled();
+  });
+
+  it('WhatsApp send failure does NOT record the digest as sent (retry next tick)', async () => {
+    notifyMock.mockRejectedValueOnce(new Error('WhatsApp API error'));
+    await fire(rowFor({ name: 'יורם', role: 'ADMIN', hm: '08:00', evening: false }));
+
+    expect(claimDigestSendMock).not.toHaveBeenCalled();
   });
 });

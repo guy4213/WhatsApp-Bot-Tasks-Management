@@ -14,9 +14,31 @@ import { pool } from '../db/connection';
 export type LeadEventKind = 'ASSIGNED_TO_WORKER' | 'ESCALATED_1H';
 
 /**
- * Atomically claim the right to send a lead notification. Returns true when
- * this instance wins the INSERT (first send); false when the row already exists
- * (another instance already sent it). Never throws on PK conflict.
+ * Read-only check: has this lead notification already been successfully
+ * sent? Call BEFORE attempting to send. Absence of a row means "not sent
+ * yet" — rows are only ever inserted (via `claimLeadNotification`) AFTER a
+ * WhatsApp send actually succeeds, so this never returns true for a
+ * notification that failed to send.
+ */
+export async function isLeadNotificationSent(
+  leadId: string,
+  eventKind: LeadEventKind,
+): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM "WhatsappLeadNotification"
+     WHERE "leadId" = $1 AND "eventKind" = $2`,
+    [leadId, eventKind],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Record that a lead notification was successfully sent. Call ONLY after
+ * the WhatsApp send has actually succeeded — never before. Returns true
+ * when this instance wins the INSERT; false when the row already exists
+ * (a race with another instance — belt-and-suspenders on top of the
+ * job-level advisory lock in scheduler/index.ts). Never throws on PK
+ * conflict.
  */
 export async function claimLeadNotification(
   leadId: string,

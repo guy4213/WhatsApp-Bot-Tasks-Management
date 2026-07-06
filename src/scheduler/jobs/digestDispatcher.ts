@@ -3,7 +3,7 @@ import { notify } from '../../whatsapp/templates';
 import { sendButtonMessage, sendTextMessage } from '../../whatsapp/sender';
 import { writeAuditLog } from '../../utils/auditLog';
 import { moduleLogger } from '../../utils/logger';
-import { claimDigestSend, markDigestFailed, type DigestType } from '../../services/digestSendLog';
+import { claimDigestSend, isDigestAlreadySent, type DigestType } from '../../services/digestSendLog';
 import { getEmployeeEndOfDay } from '../../services/tasks';
 import {
   formatEmployeeEndOfDay,
@@ -159,21 +159,25 @@ export async function runDigestDispatcher(): Promise<void> {
 //
 // Fetches overnight unassigned leads, gets one AI suggestion per lead, formats
 // via formatSashaLeadsMorning, and sends. Dedup via LEADS_MORNING in the
-// WhatsappDigestSendLog (same INSERT-first pattern as the inspector morning).
+// WhatsappDigestSendLog — the ledger row is written ONLY after the WhatsApp
+// send actually succeeds (see `claimDigestSend`'s doc comment), so a failed
+// send is retried on the next tick instead of being silently swallowed.
 // Uses sendTextMessage directly — no approved template yet (D5-T5 scope).
 
 async function dispatchSashaLeadsMorning(row: DueUserRow): Promise<void> {
-  let claimed = false;
+  let alreadySent: boolean;
   try {
-    claimed = await claimDigestSend(row.user_id, 'LEADS_MORNING', row.local_date);
+    alreadySent = await isDigestAlreadySent(row.user_id, 'LEADS_MORNING', row.local_date);
   } catch (err) {
-    log.error({ err, userId: row.user_id }, 'claimDigestSend LEADS_MORNING failed');
+    log.error({ err, userId: row.user_id }, 'isDigestAlreadySent LEADS_MORNING check failed — skipping this tick');
     return;
   }
-  if (!claimed) return;
+  if (alreadySent) return;
 
+  let leads: Awaited<ReturnType<typeof findOvernightUnassignedLeads>>;
+  let content: DigestContent;
   try {
-    const leads = await findOvernightUnassignedLeads(row.local_date);
+    leads = await findOvernightUnassignedLeads(row.local_date);
 
     const suggestions: LeadDigestSuggestion[] = [];
     if (leads.length > 0) {
@@ -195,24 +199,35 @@ async function dispatchSashaLeadsMorning(row: DueUserRow): Promise<void> {
       suggestions.push(...rawSuggestions);
     }
 
-    const content = formatSashaLeadsMorning(
-      leads as LeadDigestRow[],
-      suggestions,
-      { name: row.user_name },
-    );
-
-    await sendTextMessage({ to: row.user_phone, text: content.text });
-    await auditDigest(row, 'LEADS_MORNING', 'SUCCESS');
-    log.info({ userId: row.user_id, leadCount: leads.length }, 'Sasha leads morning digest sent');
+    content = formatSashaLeadsMorning(leads as LeadDigestRow[], suggestions, { name: row.user_name });
   } catch (err) {
-    log.error({ err, userId: row.user_id }, 'Sasha leads morning digest send failed');
-    try {
-      await markDigestFailed(row.user_id, 'LEADS_MORNING', row.local_date);
-    } catch (markErr) {
-      log.error({ err: markErr, userId: row.user_id }, 'markDigestFailed LEADS_MORNING failed');
-    }
+    log.error({ err, userId: row.user_id }, 'Sasha leads morning digest content build failed — will retry next tick (not marked as sent)');
     await auditDigest(row, 'LEADS_MORNING', 'FAILED', (err as Error).message ?? 'unknown');
+    return;
   }
+
+  try {
+    await sendTextMessage({ to: row.user_phone, text: content.text });
+  } catch (err) {
+    log.error(
+      { err, userId: row.user_id, phone: row.user_phone },
+      'Sasha leads morning WhatsApp send FAILED — will retry next tick (not marked as sent)',
+    );
+    await auditDigest(row, 'LEADS_MORNING', 'FAILED', (err as Error).message ?? 'unknown send error');
+    return;
+  }
+
+  // Mark as sent ONLY after the WhatsApp send actually succeeded.
+  try {
+    await claimDigestSend(row.user_id, 'LEADS_MORNING', row.local_date);
+  } catch (err) {
+    log.error(
+      { err, userId: row.user_id },
+      'Failed to record LEADS_MORNING digest as sent after a successful WhatsApp send — risk of a duplicate on the next tick',
+    );
+  }
+  await auditDigest(row, 'LEADS_MORNING', 'SUCCESS');
+  log.info({ userId: row.user_id, leadCount: leads.length }, 'Sasha leads morning digest sent');
 }
 
 // `dispatchOne` handles the two "primary" digest slots — MORNING and EVENING.
@@ -225,18 +240,29 @@ async function dispatchOne(
   row: DueUserRow,
   type: PrimaryDigestType,
 ): Promise<void> {
-  // INSERT-first dedup: only the instance that wins the claim sends.
-  let claimed = false;
+  // Read-only dedup check FIRST — do not claim/mark until the send actually
+  // succeeds (see isDigestAlreadySent's doc comment). This is what stops the
+  // "marked sent before WhatsApp confirmed delivery" bug: a failed send below
+  // leaves no ledger row, so the next tick (or tomorrow's window) retries.
+  let alreadySent: boolean;
   try {
-    claimed = await claimDigestSend(row.user_id, type, row.local_date);
+    alreadySent = await isDigestAlreadySent(row.user_id, type, row.local_date);
   } catch (err) {
-    log.error({ err, userId: row.user_id, type }, 'claimDigestSend failed');
+    log.error({ err, userId: row.user_id, type }, 'isDigestAlreadySent check failed — skipping this tick');
     return;
   }
-  if (!claimed) return; // already sent today (this user/type/day)
+  if (alreadySent) return;
+
+  let content: DigestContent;
+  try {
+    content = await buildContent(row, type);
+  } catch (err) {
+    log.error({ err, userId: row.user_id, type }, 'Digest content build failed — will retry next tick (not marked as sent)');
+    await auditDigest(row, type, 'FAILED', (err as Error).message ?? 'unknown content-build error');
+    return;
+  }
 
   try {
-    const content = await buildContent(row, type);
     // Exceptions viewers (Yoram + dev admins) use the "elevated" template
     // (manager digest slot); everyone else uses the employee digest template.
     // The template content itself is currently rendered from `fallbackText`
@@ -250,17 +276,26 @@ async function dispatchOne(
       fallbackText: content.text,
       buttons: content.buttons,
     });
-    await auditDigest(row, type, 'SUCCESS');
-    log.info({ userId: row.user_id, type, name: row.user_name }, 'Digest sent');
   } catch (err) {
-    log.error({ err, userId: row.user_id, type }, 'Digest send failed');
-    try {
-      await markDigestFailed(row.user_id, type, row.local_date);
-    } catch (markErr) {
-      log.error({ err: markErr, userId: row.user_id, type }, 'markDigestFailed failed');
-    }
+    log.error(
+      { err, userId: row.user_id, type, phone: row.user_phone },
+      'WhatsApp digest send FAILED — will retry next tick (not marked as sent)',
+    );
     await auditDigest(row, type, 'FAILED', (err as Error).message ?? 'unknown send error');
+    return;
   }
+
+  // Mark as sent ONLY after the WhatsApp send actually succeeded.
+  try {
+    await claimDigestSend(row.user_id, type, row.local_date);
+  } catch (err) {
+    log.error(
+      { err, userId: row.user_id, type },
+      'Failed to record digest as sent after a successful WhatsApp send — risk of a duplicate on the next tick',
+    );
+  }
+  await auditDigest(row, type, 'SUCCESS');
+  log.info({ userId: row.user_id, type, name: row.user_name }, 'Digest sent');
 }
 
 async function buildContent(
@@ -328,19 +363,21 @@ async function auditDigest(
 // already delivered successfully.
 
 async function maybeDispatchEquipmentReminder(row: DueUserRow): Promise<void> {
-  // INSERT-first dedup on a separate digestType — an inspector morning that
+  // Read-only dedup check on a separate digestType — an inspector morning that
   // already went out today doesn't gate the equipment reminder, and vice-versa.
-  let claimed = false;
+  // Not claimed/marked until we know the outcome below (send success, or a
+  // legitimate "nothing to send" case) — never before.
+  let alreadySent: boolean;
   try {
-    claimed = await claimDigestSend(row.user_id, 'EQUIPMENT_MORNING', row.local_date);
+    alreadySent = await isDigestAlreadySent(row.user_id, 'EQUIPMENT_MORNING', row.local_date);
   } catch (err) {
     log.error(
       { err, userId: row.user_id, type: 'EQUIPMENT_MORNING' },
-      'claimDigestSend failed (equipment reminder skipped)',
+      'isDigestAlreadySent check failed (equipment reminder skipped this tick)',
     );
     return;
   }
-  if (!claimed) return;
+  if (alreadySent) return;
 
   // Skip if no inspections today (empty families → no checklist → no message).
   let inspections: InspectionListItem[];
@@ -349,15 +386,19 @@ async function maybeDispatchEquipmentReminder(row: DueUserRow): Promise<void> {
   } catch (err) {
     log.error(
       { err, userId: row.user_id },
-      'getInspectionsForWorkerOnDate failed (equipment reminder skipped)',
+      'getInspectionsForWorkerOnDate failed — equipment reminder will retry next tick (not marked as sent)',
     );
-    await markDigestFailed(row.user_id, 'EQUIPMENT_MORNING', row.local_date).catch(() => undefined);
     return;
   }
   if (inspections.length === 0) {
-    // The morning digest itself already told the worker there's nothing today.
-    // The claim row stays so we don't re-check throughout the day.
+    // Legitimate no-op, not a failure — nothing to send today. Record it as
+    // handled (via claimDigestSend) so we don't needlessly re-derive this
+    // every tick inside the same due-window; this is NOT the "mark before
+    // send" bug because no message was ever meant to go out here.
     log.info({ userId: row.user_id }, 'Equipment reminder skipped — no inspections today');
+    await claimDigestSend(row.user_id, 'EQUIPMENT_MORNING', row.local_date).catch((err) => {
+      log.error({ err, userId: row.user_id }, 'Failed to record EQUIPMENT_MORNING no-op as handled');
+    });
     return;
   }
 
@@ -366,17 +407,23 @@ async function maybeDispatchEquipmentReminder(row: DueUserRow): Promise<void> {
   try {
     items = await getEquipmentChecklistForFamilies(families);
   } catch (err) {
-    log.error({ err, userId: row.user_id, families }, 'getEquipmentChecklistForFamilies failed');
-    await markDigestFailed(row.user_id, 'EQUIPMENT_MORNING', row.local_date).catch(() => undefined);
+    log.error(
+      { err, userId: row.user_id, families },
+      'getEquipmentChecklistForFamilies failed — equipment reminder will retry next tick (not marked as sent)',
+    );
     return;
   }
   if (items.length === 0) {
     // No checklist seeded for the family(ies) the worker is inspecting. Skip
-    // silently — safer than sending a confusing empty message.
+    // silently — safer than sending a confusing empty message. Legitimate
+    // no-op (see comment above) — record as handled.
     log.info(
       { userId: row.user_id, families },
       'Equipment reminder skipped — no checklist rows for these families',
     );
+    await claimDigestSend(row.user_id, 'EQUIPMENT_MORNING', row.local_date).catch((err) => {
+      log.error({ err, userId: row.user_id }, 'Failed to record EQUIPMENT_MORNING no-op as handled');
+    });
     return;
   }
 
@@ -387,6 +434,9 @@ async function maybeDispatchEquipmentReminder(row: DueUserRow): Promise<void> {
   });
   if (content.text.length === 0 || content.buttons.length === 0) {
     log.info({ userId: row.user_id }, 'Equipment reminder skipped — empty formatter output');
+    await claimDigestSend(row.user_id, 'EQUIPMENT_MORNING', row.local_date).catch((err) => {
+      log.error({ err, userId: row.user_id }, 'Failed to record EQUIPMENT_MORNING no-op as handled');
+    });
     return;
   }
 
@@ -399,20 +449,24 @@ async function maybeDispatchEquipmentReminder(row: DueUserRow): Promise<void> {
       body: content.text,
       buttons: content.buttons,
     });
-    await auditDigest(row, 'EQUIPMENT_MORNING', 'SUCCESS');
-    log.info({ userId: row.user_id }, 'Equipment reminder sent');
   } catch (err) {
-    log.error({ err, userId: row.user_id }, 'Equipment reminder send failed');
-    try {
-      await markDigestFailed(row.user_id, 'EQUIPMENT_MORNING', row.local_date);
-    } catch (markErr) {
-      log.error({ err: markErr, userId: row.user_id }, 'markDigestFailed failed');
-    }
-    await auditDigest(
-      row,
-      'EQUIPMENT_MORNING',
-      'FAILED',
-      (err as Error).message ?? 'unknown send error',
+    log.error(
+      { err, userId: row.user_id, phone: row.user_phone },
+      'Equipment reminder WhatsApp send FAILED — will retry next tick (not marked as sent)',
+    );
+    await auditDigest(row, 'EQUIPMENT_MORNING', 'FAILED', (err as Error).message ?? 'unknown send error');
+    return;
+  }
+
+  // Mark as sent ONLY after the WhatsApp send actually succeeded.
+  try {
+    await claimDigestSend(row.user_id, 'EQUIPMENT_MORNING', row.local_date);
+  } catch (err) {
+    log.error(
+      { err, userId: row.user_id },
+      'Failed to record EQUIPMENT_MORNING digest as sent after a successful WhatsApp send — risk of a duplicate on the next tick',
     );
   }
+  await auditDigest(row, 'EQUIPMENT_MORNING', 'SUCCESS');
+  log.info({ userId: row.user_id }, 'Equipment reminder sent');
 }

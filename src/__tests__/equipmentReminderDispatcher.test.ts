@@ -38,6 +38,7 @@ const formatGalitManagerEndOfDayMock = vi.hoisted(() => vi.fn());
 const sendButtonMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
 const notifyMock = vi.hoisted(() => vi.fn(async () => undefined));
 const claimDigestSendMock = vi.hoisted(() => vi.fn());
+const isDigestAlreadySentMock = vi.hoisted(() => vi.fn(async (_uid: string, _type: string) => false));
 const markDigestFailedMock = vi.hoisted(() => vi.fn(async () => undefined));
 const writeAuditLogMock = vi.hoisted(() => vi.fn(async () => undefined));
 
@@ -85,6 +86,7 @@ vi.mock('../whatsapp/templates', () => ({
 }));
 vi.mock('../services/digestSendLog', () => ({
   claimDigestSend: claimDigestSendMock,
+  isDigestAlreadySent: isDigestAlreadySentMock,
   markDigestFailed: markDigestFailedMock,
 }));
 vi.mock('../utils/auditLog', () => ({
@@ -137,6 +139,7 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
     getEquipmentChecklistMock.mockResolvedValue([]);
     // Default: both claim attempts (MORNING + EQUIPMENT_MORNING) succeed.
     claimDigestSendMock.mockResolvedValue(true);
+    isDigestAlreadySentMock.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -238,12 +241,12 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
     expect(formatEquipmentReminderMock).not.toHaveBeenCalled();
   });
 
-  it('EQUIPMENT_MORNING claim returns false → no send (already sent this local day)', async () => {
+  it('EQUIPMENT_MORNING already sent → no send (already sent this local day)', async () => {
     getInspectionsMock.mockResolvedValue([oneInspection]);
     getEquipmentChecklistMock.mockResolvedValue(checklistRows);
-    // MORNING claim: true. EQUIPMENT_MORNING claim: false (already sent).
-    claimDigestSendMock.mockImplementation(async (_uid, type: string) =>
-      type === 'EQUIPMENT_MORNING' ? false : true,
+    // MORNING: not yet sent. EQUIPMENT_MORNING: already sent.
+    isDigestAlreadySentMock.mockImplementation(async (_uid: string, type: string) =>
+      type === 'EQUIPMENT_MORNING',
     );
 
     await fireMorning(rowFor('SALES'));
@@ -251,6 +254,16 @@ describe('dispatcher — equipment reminder (D2-T9)', () => {
     expect(getEquipmentChecklistMock).not.toHaveBeenCalled();
     expect(formatEquipmentReminderMock).not.toHaveBeenCalled();
     expect(sendButtonMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('equipment WhatsApp send failure does NOT record as sent (retry next tick)', async () => {
+    getInspectionsMock.mockResolvedValue([oneInspection]);
+    getEquipmentChecklistMock.mockResolvedValue(checklistRows);
+    sendButtonMessageMock.mockRejectedValueOnce(new Error('WhatsApp API error'));
+
+    await fireMorning(rowFor('SALES'));
+
+    expect(claimDigestSendMock).not.toHaveBeenCalledWith('u-1', 'EQUIPMENT_MORNING', expect.any(String));
   });
 
   it('dedupes families before hitting the DB (2 inspections in same family → one lookup)', async () => {

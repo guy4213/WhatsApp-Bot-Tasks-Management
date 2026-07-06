@@ -34,6 +34,7 @@ const sendButtonMessageMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 const notifyMock = vi.hoisted(() => vi.fn(async () => undefined));
 const claimDigestSendMock = vi.hoisted(() => vi.fn(async () => true));
+const isDigestAlreadySentMock = vi.hoisted(() => vi.fn(async () => false));
 const markDigestFailedMock = vi.hoisted(() => vi.fn(async () => undefined));
 const writeAuditLogMock = vi.hoisted(() => vi.fn(async () => undefined));
 
@@ -81,6 +82,7 @@ vi.mock('../whatsapp/templates', () => ({
 }));
 vi.mock('../services/digestSendLog', () => ({
   claimDigestSend: claimDigestSendMock,
+  isDigestAlreadySent: isDigestAlreadySentMock,
   markDigestFailed: markDigestFailedMock,
 }));
 vi.mock('../utils/auditLog', () => ({
@@ -113,6 +115,7 @@ describe('dispatcher morning branch — routing (D2-T4)', () => {
     getInspectionsMock.mockResolvedValue([]);
     getEquipmentChecklistMock.mockResolvedValue([]);
     claimDigestSendMock.mockResolvedValue(true);
+    isDigestAlreadySentMock.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -156,10 +159,17 @@ describe('dispatcher morning branch — routing (D2-T4)', () => {
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves per-day dedup — a false claim skips the send entirely', async () => {
-    claimDigestSendMock.mockResolvedValueOnce(false);
+  it('preserves per-day dedup — already-sent skips the send entirely', async () => {
+    isDigestAlreadySentMock.mockResolvedValueOnce(true);
     await fireMorning('SALES');
     expect(formatInspectorMorningMock).not.toHaveBeenCalled();
     expect(notifyMock).not.toHaveBeenCalled();
+    expect(claimDigestSendMock).not.toHaveBeenCalledWith('u-1', 'MORNING', expect.any(String));
+  });
+
+  it('WhatsApp send failure does NOT record the digest as sent (retry next tick)', async () => {
+    notifyMock.mockRejectedValueOnce(new Error('WhatsApp API error'));
+    await fireMorning('SALES');
+    expect(claimDigestSendMock).not.toHaveBeenCalledWith('u-1', 'MORNING', expect.any(String));
   });
 });

@@ -9,8 +9,10 @@ const log = moduleLogger('dueDateReminder');
  * Reminds the owner ~1 hour before a task's due time. Running every 5 min with a
  * 10-minute look-ahead window ([now+55min, now+65min]) guarantees every due time
  * is covered (not just those near the top of the hour). Each reminder is guarded
- * by an INSERT-first into "WhatsappReminderLog" (kind 'DUE_1H'), so a task is
- * reminded at most once even across overlapping runs or restarts.
+ * by a row in "WhatsappReminderLog" (kind 'DUE_1H') — but the row is only
+ * INSERTed AFTER the WhatsApp send actually succeeds, so a task is reminded
+ * at most once, and a failed send is retried on the next tick instead of
+ * being silently marked as handled.
  */
 export async function runDueDateReminder(): Promise<void> {
   const result = await pool.query<{
@@ -41,24 +43,45 @@ export async function runDueDateReminder(): Promise<void> {
 
   await Promise.allSettled(
     result.rows.map(async (row) => {
-      // INSERT-first dedup — only the run that actually inserts sends the reminder.
-      const inserted = await pool.query(
-        `INSERT INTO "WhatsappReminderLog" ("taskId", "kind") VALUES ($1, 'DUE_1H')
-         ON CONFLICT DO NOTHING`,
+      // Read-only dedup check FIRST — do not mark as reminded until the send
+      // actually succeeds below.
+      const already = await pool.query(
+        `SELECT 1 FROM "WhatsappReminderLog" WHERE "taskId" = $1 AND kind = 'DUE_1H'`,
         [row.task_id],
       );
-      if ((inserted.rowCount ?? 0) === 0) return; // already reminded
+      if ((already.rowCount ?? 0) > 0) return; // already reminded
 
       const dueTime = new Date(row.due_date).toLocaleTimeString('he-IL', {
         hour: '2-digit',
         minute: '2-digit',
         timeZone: 'Asia/Jerusalem',
       });
-      await notify({
-        to: row.owner_phone,
-        key: 'DUE_REMINDER',
-        bodyParams: [row.title, dueTime],
-        fallbackText: `⏰ תזכורת: המשימה "${row.title}" מגיעה למועדה בעוד כשעה (${dueTime}).`,
+
+      try {
+        await notify({
+          to: row.owner_phone,
+          key: 'DUE_REMINDER',
+          bodyParams: [row.title, dueTime],
+          fallbackText: `⏰ תזכורת: המשימה "${row.title}" מגיעה למועדה בעוד כשעה (${dueTime}).`,
+        });
+      } catch (err) {
+        log.error(
+          { err, taskId: row.task_id, phone: row.owner_phone },
+          'Due-date reminder WhatsApp send FAILED — will retry next tick (not marked as sent)',
+        );
+        return;
+      }
+
+      // Mark as reminded ONLY after the WhatsApp send actually succeeded.
+      await pool.query(
+        `INSERT INTO "WhatsappReminderLog" ("taskId", "kind") VALUES ($1, 'DUE_1H')
+         ON CONFLICT DO NOTHING`,
+        [row.task_id],
+      ).catch((err) => {
+        log.error(
+          { err, taskId: row.task_id },
+          'Failed to record due-date reminder as sent after a successful WhatsApp send — risk of a duplicate on the next tick',
+        );
       });
     }),
   );

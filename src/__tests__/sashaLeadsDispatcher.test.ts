@@ -109,15 +109,20 @@ function makeRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// claimDigestSend INSERT-first
+// isDigestAlreadySent / isLeadNotificationSent read (SELECT 1 ...) — same
+// shape as the old claim INSERT's result, just semantically "already sent?".
+const ALREADY_SENT = { rowCount: 1, rows: [{ userId: 'u-sasha' }] };
+const NOT_SENT      = { rowCount: 0, rows: [] };
+// claimDigestSend INSERT — called only AFTER a successful send; its return
+// value isn't asserted on by these tests, so any shape works.
 const CLAIM_GRANTED = { rowCount: 1, rows: [{ userId: 'u-sasha' }] };
-const CLAIM_DENIED  = { rowCount: 0, rows: [] };
 
 describe('Sasha leads morning dispatcher', () => {
   it('sends LEADS_MORNING at 09:30 when User.name = "סשה"', async () => {
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // selectDigestCandidates
-      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend LEADS_MORNING
+      .mockResolvedValueOnce(NOT_SENT)      // isDigestAlreadySent LEADS_MORNING → not sent
+      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend LEADS_MORNING (after successful send)
 
     await runDigestDispatcher();
 
@@ -136,14 +141,27 @@ describe('Sasha leads morning dispatcher', () => {
     expect(poolQuery).toHaveBeenCalledTimes(1);
   });
 
-  it('skips send when claim is already taken (dedup)', async () => {
+  it('skips send when already sent today (dedup)', async () => {
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // selectDigestCandidates
-      .mockResolvedValueOnce(CLAIM_DENIED); // claimDigestSend → already claimed
+      .mockResolvedValueOnce(ALREADY_SENT); // isDigestAlreadySent → already sent
 
     await runDigestDispatcher();
 
     expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('does NOT record as sent when the WhatsApp send fails (retry next tick)', async () => {
+    sendTextMessage.mockRejectedValueOnce(new Error('WhatsApp API error'));
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // selectDigestCandidates
+      .mockResolvedValueOnce(NOT_SENT); // isDigestAlreadySent LEADS_MORNING → not sent
+
+    await runDigestDispatcher();
+
+    expect(sendTextMessage).toHaveBeenCalledOnce();
+    // Only 2 pool calls happened — no INSERT (claimDigestSend) after a failed send.
+    expect(poolQuery).toHaveBeenCalledTimes(2);
   });
 
   it('routes non-Sasha name to normal MORNING path', async () => {
@@ -157,8 +175,9 @@ describe('Sasha leads morning dispatcher', () => {
     });
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [normalRow] }) // selectDigestCandidates
-      .mockResolvedValueOnce(CLAIM_GRANTED) // claimDigestSend MORNING
-      .mockResolvedValueOnce(CLAIM_DENIED); // claimDigestSend EQUIPMENT_MORNING → denied, skip equipment
+      .mockResolvedValueOnce(NOT_SENT)       // isDigestAlreadySent MORNING → not sent
+      .mockResolvedValueOnce(CLAIM_GRANTED)  // claimDigestSend MORNING (after successful send)
+      .mockResolvedValueOnce(ALREADY_SENT);  // isDigestAlreadySent EQUIPMENT_MORNING → already sent, skip equipment
 
     await runDigestDispatcher();
 
@@ -187,7 +206,8 @@ describe('Sasha leads morning dispatcher', () => {
     });
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [guyRow] }) // selectDigestCandidates
-      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend MORNING (Galit path)
+      .mockResolvedValueOnce(NOT_SENT)      // isDigestAlreadySent MORNING → not sent
+      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend MORNING (Galit path, after successful send)
 
     await runDigestDispatcher();
 
@@ -207,7 +227,8 @@ describe('Sasha leads morning dispatcher', () => {
     });
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [yairRow] }) // selectDigestCandidates
-      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend MORNING
+      .mockResolvedValueOnce(NOT_SENT)      // isDigestAlreadySent MORNING → not sent
+      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend MORNING (after successful send)
 
     await runDigestDispatcher();
 
@@ -221,7 +242,8 @@ describe('Sasha leads morning dispatcher', () => {
     // and nothing else (the continue after her branch skips MORNING/EVENING).
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // selectDigestCandidates
-      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend LEADS_MORNING
+      .mockResolvedValueOnce(NOT_SENT)      // isDigestAlreadySent LEADS_MORNING → not sent
+      .mockResolvedValueOnce(CLAIM_GRANTED); // claimDigestSend LEADS_MORNING (after successful send)
 
     await runDigestDispatcher();
 

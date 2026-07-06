@@ -2366,6 +2366,159 @@ verify the fixes live in one final pass ("אבדוק את הכל בסוף בבת
 
 ---
 
+## 4.11 — D5-T20: WhatsApp notification "mark before send" audit + fix (production incident)
+
+**Status:** DONE (local, uncommitted) — 5 of 6 unsafe paths fixed; `expireActions`
+deferred as a separate follow-up (see D5-T20f below), per explicit user decision.
+
+**Context:** live production digest failures (Meta template 404s, see the
+D5-T19 digest incident discussion) led to a broader question: does the bot
+ever mark a WhatsApp notification as "sent/handled" in the DB **before**
+confirming the actual send succeeded? A full audit of every automatic
+WhatsApp notification path found the answer was yes, in several places —
+the classic "claim before send" pattern used for cross-instance dedup also
+silently absorbed permanent, un-retried delivery failures (a failed send
+looks identical to a successfully-delivered one from the DB's point of
+view, since the dedup row already exists either way).
+
+**User decision:** minimal fix now (no new migrations / status columns /
+attemptCount / lastError / nextRetryAt) — just re-order each unsafe path to
+"attempt the send → mark sent/claimed ONLY on success → on failure, log
+clearly and leave no row, so the next tick retries." A full retry
+mechanism (status/attemptCount/lastAttemptAt/lastError/nextRetryAt) is
+explicitly deferred to a second phase, after the Meta templates are
+approved and the system is stable.
+
+#### D5-T20a — digestDispatcher.ts (MORNING/EVENING/EQUIPMENT_MORNING/LEADS_MORNING)
+**Status:** DONE.
+
+**Fix:** added `isDigestAlreadySent` (read-only SELECT) to
+`src/services/digestSendLog.ts`, called BEFORE attempting any send in all
+3 functions (`dispatchOne`, `dispatchSashaLeadsMorning`,
+`maybeDispatchEquipmentReminder`). `claimDigestSend` (the INSERT) is now
+called ONLY after the WhatsApp send actually succeeds. Legitimate no-op
+skips in the equipment reminder (no inspections today / no checklist rows
+/ empty formatter output) still record as handled via `claimDigestSend` —
+these are not send failures, so recording them prevents needless
+re-derivation, matching the original design intent. `markDigestFailed` is
+no longer called from the dispatcher (no row is ever inserted before
+success, so there's nothing to flip to FAILED) but the function itself is
+left in place/exported since `digest.integration.test.ts` unit-tests it
+directly.
+
+**Files affected:** `src/services/digestSendLog.ts` (new
+`isDigestAlreadySent`), `src/scheduler/jobs/digestDispatcher.ts` (all 3
+dispatch functions restructured).
+
+**Files changed (tests):** `inspectorMorningDispatcher.test.ts`,
+`equipmentReminderDispatcher.test.ts`, `sashaLeadsDispatcher.test.ts`,
+`galitManagerDispatcher.test.ts` — updated mocks to include
+`isDigestAlreadySent`, converted "claim returns false" tests to
+"already sent" tests, and added new tests per file: WhatsApp send failure
+does NOT record as sent (retry next tick).
+
+#### D5-T20b — dueDateReminder.ts
+**Status:** DONE.
+
+**Fix:** replaced the pre-send `INSERT ... ON CONFLICT DO NOTHING` claim
+with a `SELECT 1 FROM "WhatsappReminderLog"` dedup check BEFORE the send;
+the INSERT now runs only after `notify()` succeeds.
+
+**Files affected:** `src/scheduler/jobs/dueDateReminder.ts`.
+
+**Files changed (tests):** new file `src/__tests__/dueDateReminder.test.ts`
+(6 tests — no tasks due, success path records after send, dedup skip,
+failed send does NOT record + retries, a failed-then-successful retry
+sequence, continues the batch when one task fails and another succeeds).
+This job had ZERO test coverage before this fix. Verified non-vacuous:
+temporarily reverted the fix (`git stash` on just this file) and confirmed
+5 of 6 new tests fail against the old code, then restored.
+
+#### D5-T20c — deadlineAlerts.ts (runDeadlineExceededAlert only)
+**Status:** DONE. `runDeadlineApproachingAlert` was audited and found
+already safe — it has NO dedup/claim mechanism at all (re-sends daily
+while a task remains in the approaching window), so it cannot have the
+"mark before send" bug; that's a separate, pre-existing "may repeat daily"
+characteristic, out of scope here.
+
+**Fix:** the dedup INSERT (kind `DEADLINE_EXCEEDED`) previously ran once
+per task BEFORE the fan-out to all managers. Now: tasks are read
+read-only, the fan-out happens, and each task is marked alerted only if
+**at least one** manager actually received the WhatsApp message (same
+"at least one delivery counts as sent" bar used by `broadcastToManagers`
+in `services/inspections.ts`). If every manager send fails, no task is
+marked and the whole batch retries on the next tick.
+
+**Files affected:** `src/scheduler/jobs/deadlineAlerts.ts`.
+
+**Files changed (tests):** new file `src/__tests__/deadlineAlerts.test.ts`
+(7 tests — no overdue tasks, no active managers, success path, every-
+manager-fails does NOT mark, partial delivery (≥1 success) DOES mark, a
+failed-then-successful retry sequence, one combined message per manager
+covering all fresh tasks). This job had ZERO test coverage before this
+fix.
+
+#### D5-T20d — leadAssignmentNotifier.ts (both D3-T3 assignment alerts and D3-T4 escalations)
+**Status:** DONE.
+
+**Fix:** added `isLeadNotificationSent` (read-only SELECT) to
+`src/services/leadNotificationLog.ts`. `processAssignmentAlerts`: checks
+dedup first; a missing worker phone is a permanent no-op and is still
+recorded as handled (via `claimLeadNotification`) to avoid re-logging
+every 2-minute tick; the claim INSERT only happens after a successful
+send. `processEscalations`: same dedup-first pattern; since this fans out
+to multiple leads viewers, the claim is written only when at least one
+recipient actually receives the message (same bar as D5-T20c).
+
+**Files affected:** `src/services/leadNotificationLog.ts` (new
+`isLeadNotificationSent`), `src/scheduler/jobs/leadAssignmentNotifier.ts`
+(both functions restructured).
+
+**Files changed (tests):** `src/__tests__/leadAssignmentNotifier.test.ts`
+— rewritten in full (13 tests) to match the new query ordering, plus new
+cases: failed send does not record + retries, no-phone lead is recorded
+as handled, every-recipient-fails does not record, partial escalation
+delivery still records.
+
+#### D5-T20e — Meta template retry correctness (checked per user's explicit ask)
+**Status:** DONE — verified, no separate action needed beyond D5-T20a-d.
+
+Confirmed: even with `WHATSAPP_TEMPLATES_ENABLED=true` and fully-approved
+templates, `notify()` in `src/whatsapp/templates.ts` either returns
+successfully or throws — there is no scenario where it silently succeeds
+without actually delivering. The D5-T20a-d fixes (mark only after
+`notify()`/`sendTextMessage()`/`sendButtonMessage()` resolves) are
+therefore already correct for both the free-form fallback path AND the
+future fully-templated path — no additional change is needed once the
+Meta templates are approved and `WHATSAPP_TEMPLATES_ENABLED` is flipped
+back to `true`.
+
+#### D5-T20f — expireActions.ts (DEFERRED — separate follow-up, not fixed here)
+**Status:** OPEN — explicitly deferred by the user ("לגבי expireActions —
+תסמן כמשימה נפרדת, כי זה שונה במהות ודורש החלטה נפרדת").
+
+**Why this is different from the other 5 paths:** `expireStaleActions()`
+transitions `WhatsappPendingAction.state` from PENDING_* to `EXPIRED`
+**atomically as part of the same query that selects candidates** (a CTE
+with `FOR UPDATE SKIP LOCKED`). Unlike the other paths, this state
+transition is the actual business fact (the action genuinely did expire)
+and is correct regardless of whether the notification about it is ever
+delivered — un-expiring an action just because a WhatsApp send failed
+would be wrong. The bug here is narrower: there is no separate tracking of
+whether the EXPIRY NOTIFICATION itself was delivered, and no retry for
+just that notification. Fixing this requires a product decision on what
+"retry" even means for an expiry announcement (re-fetch the resolved
+action's phone/manager list days later? cap retries? etc.) — hence
+deferred rather than guessed at.
+
+**Tests run (whole D5-T20 fix):** `npx tsc --noEmit` clean; full suite
+1191 passed, 7 skipped, 0 failed.
+
+**Priority:** URGENT (D5-T20a-e) — silent, permanent notification loss in
+production. D5-T20f: IMPORTANT, deferred pending a product decision.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:

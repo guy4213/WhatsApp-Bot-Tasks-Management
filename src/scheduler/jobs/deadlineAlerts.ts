@@ -15,6 +15,10 @@ const DATE_FORMAT: Intl.DateTimeFormatOptions = {
 // ── Deadline EXCEEDED — tasks past due, not done ──────────────────────────────
 // Each overdue task is alerted to managers ONCE (dedup via WhatsappReminderLog,
 // kind 'DEADLINE_EXCEEDED'), so a task that stays overdue isn't re-alerted daily.
+// The dedup row is only INSERTed AFTER at least one manager actually received
+// the alert (same "at least one delivery counts as sent" bar used elsewhere
+// in this codebase, e.g. broadcastToManagers) — if every manager send fails,
+// no task is marked alerted and the whole batch is retried on the next tick.
 
 export async function runDeadlineExceededAlert(): Promise<void> {
   // 1. Overdue, not-done tasks not yet alerted.
@@ -39,20 +43,9 @@ export async function runDeadlineExceededAlert(): Promise<void> {
   );
 
   if ((tasks.rowCount ?? 0) === 0) return;
+  const fresh = tasks.rows;
 
-  // 2. INSERT-first dedup — keep only the tasks this run actually claimed.
-  const fresh: typeof tasks.rows = [];
-  for (const t of tasks.rows) {
-    const ins = await pool.query(
-      `INSERT INTO "WhatsappReminderLog" ("taskId", "kind") VALUES ($1, 'DEADLINE_EXCEEDED')
-       ON CONFLICT DO NOTHING`,
-      [t.task_id],
-    );
-    if ((ins.rowCount ?? 0) === 1) fresh.push(t);
-  }
-  if (fresh.length === 0) return;
-
-  // 3. Notify all active managers/admins (respecting opt-outs).
+  // 2. Notify all active managers/admins (respecting opt-outs).
   const managers = await pool.query<{ phone: string; name: string }>(
     `SELECT m.phone, m.name
      FROM "User" m
@@ -75,7 +68,7 @@ export async function runDeadlineExceededAlert(): Promise<void> {
     return `• "${t.task_title}" (${t.owner_name}) — מועד היה: ${since}`;
   });
 
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     managers.rows.map((m) => {
       const text =
         `שלום ${m.name}, התראה: ${fresh.length} משימות שעבר מועדן:\n\n` + lines.join('\n');
@@ -87,6 +80,41 @@ export async function runDeadlineExceededAlert(): Promise<void> {
       });
     }),
   );
+
+  let delivered = 0;
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      delivered += 1;
+    } else {
+      log.error(
+        { err: r.reason, managerPhone: managers.rows[i].phone },
+        'Deadline-exceeded WhatsApp send FAILED for this manager',
+      );
+    }
+  });
+
+  if (delivered === 0) {
+    log.error(
+      { tasks: fresh.length, managers: managers.rowCount },
+      'Deadline-exceeded alert: EVERY manager send failed — will retry next tick (no task marked as alerted)',
+    );
+    return;
+  }
+
+  // Mark each task as alerted ONLY after at least one manager actually
+  // received the WhatsApp message.
+  for (const t of fresh) {
+    await pool.query(
+      `INSERT INTO "WhatsappReminderLog" ("taskId", "kind") VALUES ($1, 'DEADLINE_EXCEEDED')
+       ON CONFLICT DO NOTHING`,
+      [t.task_id],
+    ).catch((err) => {
+      log.error(
+        { err, taskId: t.task_id },
+        'Failed to record deadline-exceeded alert as sent after a successful WhatsApp send — risk of a duplicate on the next tick',
+      );
+    });
+  }
 }
 
 // ── Deadline APPROACHING — tasks due within DEADLINE_ALERT_HOURS ──────────────
