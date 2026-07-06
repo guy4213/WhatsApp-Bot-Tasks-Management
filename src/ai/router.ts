@@ -5680,11 +5680,48 @@ async function tryPivotToAIIntent(
  * understood in ANY state, not just top-level. This eliminates the
  * "לא זוהתה פעולה ברורה" trap when a user types "יצאתי" from a detail view.
  */
+/**
+ * Keyword fast-path for the 4 unambiguous worker-transition phrasings, run
+ * BEFORE the LLM in the detail-view context. Bypasses LLM misclassifications
+ * of phrases like "שנה סטטוס ל יצאתי" (which the intent parser sometimes
+ * routes to a non-worker intent with clarification="לא ציינת לאיזו משימה...",
+ * even though the taskFieldId is clearly known from context).
+ *
+ * Only matches strong, unambiguous verbs — "יצאתי", "הגעתי", "סיימתי",
+ * "אישרתי" — with negation guards ("לא יצאתי", "עוד לא הגעתי"). Ambiguous
+ * transitions (WAITING_FOR_INFO / HAS_PROBLEM) are intentionally NOT matched
+ * here — they need the LLM to extract the associated note / problem_type.
+ */
+function extractDirectStatusKeyword(
+  text: string,
+): 'CONFIRM' | 'DEPARTED' | 'ARRIVED' | 'FINISHED' | null {
+  const t = text.trim();
+  const matches = (positives: string[], negations: string[]): boolean => {
+    for (const neg of negations) if (t.includes(neg)) return false;
+    return positives.some((p) => t.includes(p));
+  };
+  if (matches(['יצאתי', 'יוצא לדרך', 'יוצא בזמן'], ['לא יצאתי', 'עוד לא יצאתי'])) return 'DEPARTED';
+  if (matches(['הגעתי', 'הגענו לאתר'],             ['לא הגעתי', 'עוד לא הגעתי'])) return 'ARRIVED';
+  if (matches(['סיימתי', 'סיימנו את הבדיקה'],       ['לא סיימתי', 'עוד לא סיימתי'])) return 'FINISHED';
+  if (matches(['אישרתי', 'מאשר את', 'אושר לי'],    ['לא אישרתי', 'לא אושר'])) return 'CONFIRM';
+  return null;
+}
+
 async function tryDispatchWorkerIntentInline(
   user: ResolvedUser,
   text: string,
   taskFieldId: string,
 ): Promise<boolean> {
+  // Fast-path: unambiguous worker-transition keyword in the raw text — dispatch
+  // directly on the currently-viewed TaskField. Fixes the case where the LLM
+  // misclassifies phrases like "שנה סטטוס ל יצאתי" as a non-worker intent and
+  // asks for task disambiguation even though the target is obvious from context.
+  const keywordTransition = extractDirectStatusKeyword(text);
+  if (keywordTransition) {
+    await performTransition(user, taskFieldId, keywordTransition);
+    return true;
+  }
+
   if (!getProvider()) return false;
   let intent: AIIntentResult;
   try {

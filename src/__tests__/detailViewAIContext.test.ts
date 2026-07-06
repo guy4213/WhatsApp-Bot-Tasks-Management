@@ -1019,6 +1019,47 @@ describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
     });
   });
 
+  it('bug-fix: "שנה סטטוס ל יצאתי" — keyword fast-path dispatches DEPARTED even when LLM misclassifies as get_task', async () => {
+    seedActionCtx('mgr_today_action');
+    // Simulate the LLM mistake seen in production: classified the phrase as
+    // a generic get_task lookup with a clarification asking which task, even
+    // though the taskFieldId is already fixed by context.
+    parseIntentMock.mockResolvedValue({
+      intent: 'get_task', confidence: 0.7,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: ['task_reference'],
+      clarification: 'לא ציינת לאיזו משימה לשנות את הסטטוס. אנא ציין את המשימה.',
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    await handleAIMessage(manager, 'שנה סטטוס ל יצאתי');
+    expect(advanceFieldStatusMock).toHaveBeenCalledWith({
+      taskFieldId: 'tf-abc',
+      transition: 'DEPARTED',
+      updatedBy: manager.id,
+    });
+    const allText = sendTextMessage.mock.calls
+      .map((c) => (c[0] as { text: string }).text)
+      .join('\n');
+    expect(allText).not.toContain('לא ציינת לאיזו משימה');
+  });
+
+  it('bug-fix: keyword fast-path respects negation — "לא יצאתי עדיין" does NOT dispatch DEPARTED', async () => {
+    seedActionCtx('mgr_today_action');
+    parseIntentMock.mockResolvedValue({
+      intent: 'unknown', confidence: 0.3,
+      task_reference: null, field: null, new_value: null, params: {},
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [], confidence: 0.2, clarification: null,
+    });
+    await handleAIMessage(manager, 'לא יצאתי עדיין');
+    expect(advanceFieldStatusMock).not.toHaveBeenCalled();
+  });
+
   it('"הגעתי" → set_field_status ARRIVED → advanceFieldStatus on current TF', async () => {
     seedActionCtx('mgr_today_action');
     parseIntentMock.mockResolvedValue({
