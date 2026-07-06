@@ -1215,7 +1215,23 @@ async function executeIntent(
         return;
       }
       if (exRows.length === 0) {
-        await showMgrExceptionsSub(user);
+        // D5-T19h: previously fell back to the generic exceptions sub-menu on
+        // an empty filtered result, which looked exactly like the filter had
+        // been ignored (e.g. "בעיות שטח" → filter=has_problem, zero matching
+        // rows → the full "חריגים ודיווחים" menu instead of a clear
+        // "none of this kind right now" answer). Send a filter-specific empty
+        // message instead, matching the established pattern in
+        // list_pending_leads (see the `unassLeads.length === 0` /
+        // `escLeads.length === 0` branches just below).
+        const exEmptyMsg: Record<import('../services/managerViews').FieldExceptionFilter, string> = {
+          open_exceptions:   'אין חריגים פתוחים כרגע.',
+          not_confirmed:     'אין משימות שלא אושרו כרגע.',
+          has_problem:       'אין חריגים עם בעיה כרגע.',
+          waiting_for_info:  'אין משימות שממתינות למידע כרגע.',
+          not_closed:        'כל הבדיקות נסגרו — אין חריגים מסוג זה כרגע.',
+        };
+        await clearContext(user.phone);
+        await sendTextMessage({ to: user.phone, text: exEmptyMsg[resolvedExFilter] });
         return;
       }
       const exLines = exRows.map((r, i) => {

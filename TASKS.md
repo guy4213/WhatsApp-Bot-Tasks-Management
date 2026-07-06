@@ -1966,53 +1966,66 @@ Part-2 summary run).
 **Priority:** URGENT — the user labeled this "צריך לטפל דחוף".
 
 #### D5-T19h — Exception filter phrasings ("בעיות שטח" / "חסר מידע") don't trigger filter — show generic menu
-**Status:** NEEDS FOLLOW-UP
+**Status:** DONE (local, uncommitted)
 
 **What the QA report said:** in TC-9.3, filter synonyms added in Phase 6
 (D5-T13) don't actually cause the router to apply the filter — it falls
 back to the generic exceptions menu.
 
-**Investigation — could not reproduce a code-level bug.** Checked every
-item on the task's own checklist:
-1. The D5-T13 few-shot examples ARE present in `intentParser.ts`
-   (`MANAGER_FEW_SHOT`, "// Phase 6 — Exceptions filter synonyms" section) —
-   all 6 phrases from the QA report are there, correctly worded, mapping to
-   the exact machine `filter` values the router expects.
-2. The `exFilterMap` in `case 'list_open_exceptions'` (router.ts) contains
-   every one of those machine values (`has_problem`, `not_confirmed`,
-   `waiting_for_info`, `not_closed`) — no typo, no missing key.
-3. `routerManagerIntents.test.ts` already has one passing test PER filter
-   value (`with filter=has_problem calls getFieldExceptionRows("has_problem")`,
-   etc.) that feeds the router a mocked LLM response with each of these
-   exact filter values + non-empty rows, and asserts the exceptions list is
-   shown (`mgr_exceptions_pick_row`), NOT the generic sub-menu.
-4. `showMgrExceptionsSub` is only reached via one path:
-   `if (exRows.length === 0) { await showMgrExceptionsSub(user); }` — i.e.
-   the router only falls back to the generic menu when the (correctly
-   filtered) query genuinely returns zero rows.
+**First investigation pass (superseded — see below):** static analysis
+concluded the router/prompt plumbing was correct end-to-end (few-shot
+examples present, `exFilterMap` complete, passing tests per filter value)
+and could not reproduce a defect, so this was marked NEEDS FOLLOW-UP
+pending live verification. That static analysis was incomplete: it
+verified the NON-EMPTY-result path but never followed the EMPTY-result
+path (`exRows.length === 0`) through to what it actually does.
 
-**Conclusion:** the router/service/prompt plumbing for `list_open_exceptions`
-+ any of the Phase-6 filter synonyms is verified correct end-to-end via
-passing tests that exercise exactly this scenario. Unlike D5-T19f (where a
-concrete hardcoded/contradictory-date defect was found and fixed), no
-equivalent defect exists here in the current code for D5-T19h. This is
-either (a) already resolved by earlier work in this same session's parallel
-history, or (b) a live-LLM classification-quality issue (the model not
-reliably picking these synonyms in practice) that cannot be verified or
-fixed from static code analysis / mocked-LLM tests in this environment — it
-requires live testing against the real model/provider.
+**Root cause (confirmed via live production report):** user sent "בעיות
+שטח" as a manager. The LLM correctly classified it as
+`list_open_exceptions` with `params.filter="has_problem"` (this exact
+mapping is a few-shot example in the prompt) — the classification was
+NEVER the problem. The bug was in router.ts's handling of a *correctly
+filtered, genuinely empty* result:
+```js
+if (exRows.length === 0) {
+  await showMgrExceptionsSub(user);   // ← shows the FULL generic menu
+  return;
+}
+```
+Since there happened to be zero `has_problem` exceptions at that moment
+(plausible right after production data was reset), the manager saw the
+full "חריגים ודיווחים" sub-menu — visually indistinguishable from "the
+filter was ignored," which is exactly what the QA report described. The
+`list_pending_leads` case one switch-arm below already had the correct
+pattern (`if (unassLeads.length === 0) { sendTextMessage('אין כרגע לידים
+לא משויכים.'); }` / same for `escLeads`) — `list_open_exceptions` was the
+inconsistent one.
 
-**Recommended next step (not done here):** re-run the exact TC-9.3
-reproduction steps against the live bot and capture the actual
-`AIIntentResult` the LLM returns for each phrase (log it, or use the
-`writeAuditLog`/chat-history trail) to confirm whether intent+filter come
-back correctly. If they do, there is no bug to fix. If they don't, the fix
-is prompt-tuning (stronger examples, or reduce prompt length/competing
-examples elsewhere) — needs empirical LLM output, not more code reading.
+**Implementation:** replaced the `showMgrExceptionsSub(user)` fallback
+with a filter-specific "no results" message (mirroring the
+`list_pending_leads` pattern) — one line per `FieldExceptionFilter` value:
+open_exceptions / not_confirmed / has_problem / waiting_for_info /
+not_closed, each with its own Hebrew "none of this kind right now" text,
+then `clearContext`.
+
+**Files affected:** `src/ai/router.ts` (`case 'list_open_exceptions'`
+empty-result branch).
+
+**Files changed (tests):** `src/__tests__/routerManagerIntents.test.ts` —
+replaced the one test that had encoded the BUGGY behavior as expected
+(`'shows exceptions sub-menu when no rows found'`, asserting the message
+contained `'חריגים ודיווחים'`) with 5 tests, one per filter value,
+including the exact live-reported phrase "בעיות שטח" → filter=has_problem
+→ `'אין חריגים עם בעיה כרגע.'`. Verified `managerDateRange.test.ts`'s
+empty-result tests for this intent only assert the `getFieldExceptionRows`
+call args (not the response text), so they were unaffected.
+
+**Tests run:** `npx tsc --noEmit` clean; targeted 6-file batch (229
+tests) pass; full suite 1172 passed, 7 skipped, 0 failed.
 
 **Priority:** URGENT — Phase 6 feature that doesn't work end-to-end. Root
-cause not located; flagged for live-environment follow-up rather than
-guessed at.
+cause located and fixed; this was a router bug, not an LLM classification
+issue as first suspected.
 
 #### D5-T19i — Allow ADMIN / MANAGER to assign leads (currently only Sasha + dev observers)
 **Status:** DONE (local, uncommitted)

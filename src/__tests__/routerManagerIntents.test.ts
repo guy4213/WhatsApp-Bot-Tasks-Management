@@ -427,11 +427,45 @@ describe('intent: list_open_exceptions', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'mgr_exceptions_pick_row' });
   });
 
-  it('shows exceptions sub-menu when no rows found', async () => {
+  // D5-T19h: previously fell back to the generic exceptions sub-menu on an
+  // empty filtered result — indistinguishable from the filter having been
+  // ignored entirely. Live report: "בעיות שטח" (filter=has_problem) with
+  // zero matching rows showed the full "חריגים ודיווחים" menu instead of a
+  // clear "none of this kind" answer. Now sends a filter-specific message.
+  it('filter=open + zero rows → "אין חריגים פתוחים כרגע." (not the generic sub-menu)', async () => {
     getFieldExceptionRows.mockResolvedValue([]);
     mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'open' } }));
     await handleAIMessage(admin, 'חריגים');
-    expect(lastMsg()).toContain('חריגים ודיווחים');
+    expect(lastMsg()).toBe('אין חריגים פתוחים כרגע.');
+    expect(lastMsg()).not.toContain('חריגים ודיווחים');
+  });
+
+  it('filter=has_problem + zero rows → "אין חריגים עם בעיה כרגע." (the exact live-reported case)', async () => {
+    getFieldExceptionRows.mockResolvedValue([]);
+    mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'has_problem' } }));
+    await handleAIMessage(admin, 'בעיות שטח');
+    expect(lastMsg()).toBe('אין חריגים עם בעיה כרגע.');
+  });
+
+  it('filter=not_confirmed + zero rows → "אין משימות שלא אושרו כרגע."', async () => {
+    getFieldExceptionRows.mockResolvedValue([]);
+    mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'not_confirmed' } }));
+    await handleAIMessage(admin, 'אילו בדיקות לא אושרו');
+    expect(lastMsg()).toBe('אין משימות שלא אושרו כרגע.');
+  });
+
+  it('filter=waiting_for_info + zero rows → "אין משימות שממתינות למידע כרגע."', async () => {
+    getFieldExceptionRows.mockResolvedValue([]);
+    mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'waiting_for_info' } }));
+    await handleAIMessage(admin, 'ממתינות למידע');
+    expect(lastMsg()).toBe('אין משימות שממתינות למידע כרגע.');
+  });
+
+  it('filter=not_closed + zero rows → "כל הבדיקות נסגרו — אין חריגים מסוג זה כרגע."', async () => {
+    getFieldExceptionRows.mockResolvedValue([]);
+    mockParseIntent(makeIntent('list_open_exceptions', { params: { filter: 'not_closed' } }));
+    await handleAIMessage(admin, 'מי לא סגר יום');
+    expect(lastMsg()).toBe('כל הבדיקות נסגרו — אין חריגים מסוג זה כרגע.');
   });
 
   it('rejects non-manager with "אין הרשאה"', async () => {
