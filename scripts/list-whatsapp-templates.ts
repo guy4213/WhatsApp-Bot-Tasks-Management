@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const url = `https://graph.facebook.com/${graphVersion}/${wabaId}/message_templates?fields=name,status,language,category,components,id,rejected_reason&limit=250`;
+  const url = `https://graph.facebook.com/${graphVersion}/${wabaId}/message_templates?fields=name,status,language,category,components,id,rejected_reason,last_edited_time,previous_category,quality_score&limit=250`;
   console.log(`Fetching from Meta Graph ${graphVersion} for WABA ${wabaId.slice(0, 6)}...\n`);
 
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
