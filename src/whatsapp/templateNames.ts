@@ -24,7 +24,11 @@ export type NotificationKey =
   | 'EMPLOYEE_MORNING_DIGEST'
   | 'MANAGER_MORNING_DIGEST'
   | 'EMPLOYEE_END_OF_DAY_REPORT'
-  | 'MANAGER_END_OF_DAY_REPORT';
+  | 'MANAGER_END_OF_DAY_REPORT'
+  // Customer-facing template — the customer is notified when the assigned
+  // worker flips TaskField.fieldStatus to EN_ROUTE. Body: "שלום {{1}}, {{2}}
+  // מ־גלית ... יצא לדרך ... לביצוע {{3}}. לפניות ישירות לבודק: {{4}}. בהצלחה!"
+  | 'CUSTOMER_WORKER_EN_ROUTE';
 
 // Default Meta template names (override individually via WHATSAPP_TEMPLATE_<KEY>).
 export const DEFAULT_TEMPLATE_NAMES: Record<NotificationKey, string> = {
@@ -42,6 +46,7 @@ export const DEFAULT_TEMPLATE_NAMES: Record<NotificationKey, string> = {
   MANAGER_MORNING_DIGEST:      'manager_morning_digest',
   EMPLOYEE_END_OF_DAY_REPORT:  'employee_end_of_day_report',
   MANAGER_END_OF_DAY_REPORT:   'manager_end_of_day_report',
+  CUSTOMER_WORKER_EN_ROUTE:    'customer_worker_en_route',
 };
 
 /** Resolved template name for a key — overridable via WHATSAPP_TEMPLATE_<KEY>. */

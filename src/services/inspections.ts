@@ -34,6 +34,7 @@ import {
   getFieldSummaryForWorkerOnDate,
   type DayFieldSummary,
 } from './inspectionsQueries';
+import { sendWorkerEnRouteNotification } from './customerNotifications';
 import type { FieldProblemType } from '../types';
 
 const log = moduleLogger('inspections');
@@ -382,6 +383,18 @@ export async function advanceFieldStatus(params: AdvanceFieldStatusParams): Prom
   }
   await pool.query(sql, [taskFieldId, updatedBy]);
   log.info({ taskFieldId, transition, updatedBy }, 'advanceFieldStatus written');
+
+  // Customer-facing notification on DEPARTED (fieldStatus → EN_ROUTE). Fire-
+  // and-forget — the customer notify + worker feedback flow must never delay
+  // or fail the status write. All internal failures are absorbed inside
+  // `sendWorkerEnRouteNotification`; the outer .catch is a belt-and-suspenders
+  // guard against an unexpected throw before the service's own try/catch runs.
+  // Gated by CUSTOMER_NOTIFICATIONS_ENABLED='true' inside the service.
+  if (transition === 'DEPARTED') {
+    void sendWorkerEnRouteNotification(taskFieldId, updatedBy).catch((err) => {
+      log.error({ err, taskFieldId }, 'sendWorkerEnRouteNotification unexpected throw');
+    });
+  }
 }
 
 // ── D2-T6: finished follow-up option 2 — free-text notes ────────────────────
