@@ -57,7 +57,8 @@
       "Bash(echo \"tsc=$?\")",
       "Bash(findstr \"passed\\\\|failed\\\\|Tests\")",
       "Bash(node -e ' *)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "WebFetch(domain:owntracks.org)"
     ]
   }
 }
