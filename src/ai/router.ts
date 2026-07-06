@@ -24,7 +24,9 @@ import { setActiveTask, getActiveTask } from '../services/taskContext';
 import { getHistory, appendTurn } from '../services/chatHistory';
 import {
   listTasks, getTaskById, getAllowedTaskTypes, getAllowedPriorities, findUsersByName,
+  getTaskDetailsForReminder,
 } from '../services/tasks';
+import { formatTaskDetailsExtended, buildCrmTaskUrl } from '../services/taskDetailFormatter';
 import { sendTextMessage, sendButtonMessage, sendListMessage } from '../whatsapp/sender';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
@@ -148,6 +150,8 @@ import {
   preReminderNeedInfoPayloadId,
   preReminderProblemPayloadId,
 } from '../services/preInspectionReminder';
+// Enhanced due-date reminder: "פרטים נוספים" button payload matcher.
+import { matchTaskDetailsPayload } from '../scheduler/jobs/dueDateReminder';
 
 const log = moduleLogger('ai-router');
 
@@ -384,6 +388,25 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   if (preReminderTap) {
     await handlePreReminderTap(user, preReminderTap.kind, preReminderTap.taskFieldId);
     return;
+  }
+
+  // Enhanced due-date reminder — "פרטים נוספים" button tap or text trigger.
+  // (a) Button tap payload → always route to the details handler.
+  const taskDetailsTap = matchTaskDetailsPayload(text);
+  if (taskDetailsTap) {
+    await handleTaskDetailsRequest(user, taskDetailsTap.taskId);
+    return;
+  }
+  // (b) Text triggers "פרטים" / "פרטים נוספים" — only when there is an active
+  //     task in context (set by dueDateReminder after a successful send). With
+  //     no active task, fall through so the general router / AI handles it.
+  const trimmedTaskDetails = text.trim();
+  if (/^פרטים(?:\s+נוספים)?$/u.test(trimmedTaskDetails)) {
+    const active = getActiveTask(user.phone);
+    if (active?.taskId) {
+      await handleTaskDetailsRequest(user, active.taskId);
+      return;
+    }
   }
 
   // MGR_MENU_N list-tap with no active context: treat as if user is at mgr_menu_root.
@@ -2737,6 +2760,22 @@ async function handlePreReminderTap(
       await sendProblemTypeMenu(user.phone);
       return;
   }
+}
+
+/**
+ * Enhanced due-date reminder — respond to the "פרטים נוספים" button tap or the
+ * "פרטים" / "פרטים נוספים" text trigger with the extended task-detail message.
+ * Read-only (no writes to Task.status). Distinct from the pre-inspection flow.
+ */
+async function handleTaskDetailsRequest(user: ResolvedUser, taskId: string): Promise<void> {
+  const details = await getTaskDetailsForReminder(taskId);
+  if (!details) {
+    await sendTextMessage({ to: user.phone, text: 'לא הצלחתי למצוא את פרטי המשימה. נסה שוב או פנה למנהל.' });
+    return;
+  }
+  const crmUrl = buildCrmTaskUrl(taskId);
+  const body = formatTaskDetailsExtended(details, crmUrl);
+  await sendTextMessage({ to: user.phone, text: body });
 }
 
 async function handlePreReminderNeedInfoNoteReply(

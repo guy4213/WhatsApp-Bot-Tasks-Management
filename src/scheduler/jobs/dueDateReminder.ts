@@ -1,8 +1,32 @@
 import { pool } from '../../db/connection';
 import { notify } from '../../whatsapp/templates';
 import { moduleLogger } from '../../utils/logger';
+import { getTaskDetailsForReminder } from '../../services/tasks';
+import { setActiveTask } from '../../services/taskContext';
+import {
+  formatTaskReminderBody,
+  reminderTemplateParams,
+  buildCrmTaskUrl,
+} from '../../services/taskDetailFormatter';
 
 const log = moduleLogger('dueDateReminder');
+
+// ── Task-details button payload (TASK_ENHANCED_DUE_REMINDER.md) ───────────────
+
+/** Quick-reply payload id carried by the "פרטים נוספים" button. */
+export function taskDetailsPayloadId(taskId: string): string {
+  return `TASK_DETAILS_${taskId}`;
+}
+
+/**
+ * Parse a `TASK_DETAILS_<taskId>` payload. `Task.id` is `text` (not a UUID), so
+ * the id part is matched permissively. Exact-prefix match, so it never collides
+ * with `PREREMIND_*` (preInspectionReminder) payloads.
+ */
+export function matchTaskDetailsPayload(raw: string): { taskId: string } | null {
+  const m = raw.trim().match(/^TASK_DETAILS_([0-9a-zA-Z_-]{6,})$/);
+  return m ? { taskId: m[1] } : null;
+}
 
 /**
  * Runs every 5 minutes.
@@ -13,6 +37,12 @@ const log = moduleLogger('dueDateReminder');
  * INSERTed AFTER the WhatsApp send actually succeeds, so a task is reminded
  * at most once, and a failed send is retried on the next tick instead of
  * being silently marked as handled.
+ *
+ * The reminder body is enriched (customer/contact/description + a "פרטים נוספים"
+ * quick-reply button). Both delivery paths render identical text:
+ *  - in-window recipients get the freeform body (`fallbackText`) + button;
+ *  - out-of-window recipients get the `due_reminder_v2` template (10 body vars +
+ *    quick-reply button), which Meta renders to the same string.
  */
 export async function runDueDateReminder(): Promise<void> {
   const result = await pool.query<{
@@ -51,18 +81,32 @@ export async function runDueDateReminder(): Promise<void> {
       );
       if ((already.rowCount ?? 0) > 0) return; // already reminded
 
+      // Fetch the full detail row. If the task vanished (deleted / not found),
+      // skip WITHOUT stamping so we don't send an empty reminder.
+      const details = await getTaskDetailsForReminder(row.task_id);
+      if (!details) {
+        log.warn({ taskId: row.task_id }, 'Due-date reminder skipped — task detail not found');
+        return;
+      }
+
       const dueTime = new Date(row.due_date).toLocaleTimeString('he-IL', {
         hour: '2-digit',
         minute: '2-digit',
         timeZone: 'Asia/Jerusalem',
       });
+      const crmUrl = buildCrmTaskUrl(row.task_id);
+      const body = formatTaskReminderBody(details, crmUrl);
+      const bodyParams = reminderTemplateParams(details, crmUrl);
+      const payloadId = taskDetailsPayloadId(row.task_id);
 
       try {
         await notify({
           to: row.owner_phone,
           key: 'DUE_REMINDER',
-          bodyParams: [row.title, dueTime],
-          fallbackText: `⏰ תזכורת: המשימה "${row.title}" מגיעה למועדה בעוד כשעה (${dueTime}).`,
+          bodyParams,
+          fallbackText: body,
+          buttons: [{ id: payloadId, title: 'פרטים נוספים' }],
+          templateButtonParams: [{ subType: 'quick_reply', index: 0, payload: payloadId }],
         });
       } catch (err) {
         log.error(
@@ -83,6 +127,14 @@ export async function runDueDateReminder(): Promise<void> {
           'Failed to record due-date reminder as sent after a successful WhatsApp send — risk of a duplicate on the next tick',
         );
       });
+
+      // Fire-and-forget: remember the task so text triggers "פרטים" work. A
+      // failure here must never block or duplicate the reminder.
+      try {
+        setActiveTask(row.owner_phone, row.task_id, row.title);
+      } catch (err) {
+        log.error({ err, taskId: row.task_id }, 'setActiveTask failed after due-date reminder (non-fatal)');
+      }
     }),
   );
 }

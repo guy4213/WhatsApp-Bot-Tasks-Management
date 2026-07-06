@@ -1,6 +1,7 @@
 import { pool } from '../db/connection';
 import { canViewAllTasks } from '../auth/permissions';
 import type { Task, Customer, Lead, Project, ResolvedUser, TaskFilter, TaskListItem } from '../types';
+import type { TaskDetailForReminder } from './taskDetailFormatter';
 
 // ── Read: list tasks ──────────────────────────────────────────────────────────
 
@@ -436,6 +437,89 @@ export async function getTaskById(
   );
 
   return result.rowCount === 0 ? null : result.rows[0];
+}
+
+/**
+ * Full detail row for the enhanced due-date reminder (TASK_ENHANCED_DUE_REMINDER.md).
+ * One query joining Task + owner + Customer/Lead/Project/IncomingLead. Read-only.
+ *
+ * Column notes (see the task's Assumption A + schema audit):
+ *  - `contactName` / `contactPhone` come from the dedicated `Customer.contactName`
+ *    / `Customer.contactPhone` columns (confirmed in use by taskFieldScheduling.ts;
+ *    the sibling `contactName` is documented in SCHEMA_CRM.md). This deviates from
+ *    the spec's tentative `phone2` guess — the dedicated column is the correct
+ *    intended source. Change here (one place) if the CRM ever renames it.
+ *  - `Task.processNotes` and `IncomingLead.fromPhone` are NOT documented in
+ *    SCHEMA_CRM.md and have no other query usage, so they are read defensively via
+ *    `to_jsonb(row) ->> 'col'` — this yields the value when the column exists and
+ *    NULL (never a hard error) when it does not, so the every-5-minutes reminder
+ *    can never crash on a missing column.
+ */
+export async function getTaskDetailsForReminder(taskId: string): Promise<TaskDetailForReminder | null> {
+  const result = await pool.query<{
+    taskId: string;
+    taskTitle: string;
+    customerName: string | null;
+    customerPhone: string | null;
+    contactName: string | null;
+    contactPhone: string | null;
+    dueDate: Date;
+    assignedTo: string | null;
+    description: string | null;
+    processNotes: string | null;
+    address: string | null;
+    city: string | null;
+    status: string;
+  }>(
+    `SELECT
+       t.id                                                             AS "taskId",
+       t.title                                                          AS "taskTitle",
+       -- Customer name: 6-source COALESCE (SCHEMA_CRM.md)
+       COALESCE(
+         c.name,
+         l."fullName",
+         NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+         l.company,
+         p.client,
+         il."fromName"
+       )                                                                AS "customerName",
+       COALESCE(c.phone, l.phone, to_jsonb(il) ->> 'fromPhone')         AS "customerPhone",
+       NULLIF(TRIM(c."contactName"), '')                                AS "contactName",
+       NULLIF(TRIM(c."contactPhone"), '')                               AS "contactPhone",
+       t."dueDate"                                                      AS "dueDate",
+       u.name                                                           AS "assignedTo",
+       t.description                                                    AS "description",
+       to_jsonb(t) ->> 'processNotes'                                   AS "processNotes",
+       c.address                                                        AS "address",
+       c.city                                                           AS "city",
+       t.status::text                                                   AS "status"
+     FROM "Task" t
+     LEFT JOIN "User"         u  ON u.id  = t."ownerId"
+     LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+     LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+     LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+     LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+     WHERE t.id = $1`,
+    [taskId],
+  );
+
+  if (result.rowCount === 0) return null;
+  const r = result.rows[0];
+  return {
+    taskId: r.taskId,
+    taskTitle: r.taskTitle,
+    customerName: r.customerName,
+    customerPhone: r.customerPhone,
+    contactName: r.contactName,
+    contactPhone: r.contactPhone,
+    dueDate: new Date(r.dueDate),
+    assignedTo: r.assignedTo,
+    description: r.description,
+    processNotes: r.processNotes,
+    address: r.address,
+    city: r.city,
+    status: r.status ?? '',
+  };
 }
 
 // ── Write: create task ────────────────────────────────────────────────────────

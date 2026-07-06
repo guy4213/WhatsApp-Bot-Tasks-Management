@@ -141,6 +141,18 @@ export async function sendListMessage({ to, body, buttonLabel, sections }: ListM
   );
 }
 
+/**
+ * Dynamic per-send parameter for a template button component. `quick_reply`
+ * buttons carry a `payload` (echoed back on tap); `url` buttons carry the URL
+ * suffix (`text`) filling the button's variable. Only needed for templates
+ * whose approved definition declares such a button.
+ */
+export interface TemplateButtonParam {
+  subType: 'quick_reply' | 'url';
+  index: number;   // 0-based button position in the template's buttons component
+  payload: string; // quick_reply → the payload id; url → the URL suffix
+}
+
 export interface TemplateMessage {
   to: string;
   /** Template name as registered/approved in Meta WhatsApp Manager. */
@@ -149,9 +161,15 @@ export interface TemplateMessage {
   languageCode: string;
   /** Ordered body variables filling {{1}}, {{2}}, … (no newlines/tabs — sanitized). */
   bodyParams?: string[];
+  /**
+   * Optional dynamic button parameters. When absent/empty the outgoing payload
+   * shape is IDENTICAL to before (body-only components) — do not change that,
+   * the 14 existing approved templates depend on it.
+   */
+  buttonParams?: TemplateButtonParam[];
 }
 
-export async function sendTemplateMessage({ to, name, languageCode, bodyParams }: TemplateMessage): Promise<void> {
+export async function sendTemplateMessage({ to, name, languageCode, bodyParams, buttonParams }: TemplateMessage): Promise<void> {
   const recipient = normalizeRecipient(to);
   const params = (bodyParams ?? []).map(sanitizeParam);
 
@@ -159,11 +177,30 @@ export async function sendTemplateMessage({ to, name, languageCode, bodyParams }
     name,
     language: { code: languageCode },
   };
+
+  const components: Array<Record<string, unknown>> = [];
   if (params.length > 0) {
-    template.components = [{
+    components.push({
       type: 'body',
       parameters: params.map((text) => ({ type: 'text', text })),
-    }];
+    });
+  }
+  for (const b of buttonParams ?? []) {
+    components.push({
+      type: 'button',
+      sub_type: b.subType,
+      index: b.index,
+      parameters: [
+        b.subType === 'quick_reply'
+          ? { type: 'payload', payload: b.payload }
+          : { type: 'text', text: sanitizeParam(b.payload) },
+      ],
+    });
+  }
+  // Only attach `components` when there is at least one — preserves the exact
+  // body-only shape (and the no-components shape) used by existing templates.
+  if (components.length > 0) {
+    template.components = components;
   }
 
   await deliver(

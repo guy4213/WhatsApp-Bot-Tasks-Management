@@ -2519,6 +2519,92 @@ production. D5-T20f: IMPORTANT, deferred pending a product decision.
 
 ---
 
+## 4.12 — D5-T21: Enhanced CRM due-date reminder (contact details + "פרטים נוספים", freeform + due_reminder_v2 template)
+
+**Status:** DONE (local, uncommitted — NOT pushed; awaiting user go-ahead per
+the session's pull-only instruction). Meta LIVE template submission still
+pending (no Meta credentials in this environment — see below).
+
+**Spec:** `TASK_ENHANCED_DUE_REMINDER.md` (implemented verbatim). Enrich the
+1-hour CRM due-date reminder with a full detail body + a "פרטים נוספים"
+quick-reply button that opens an extended detail message, with **100%
+coverage**: freeform (`sendButtonMessage`, in-window) and the new Meta
+template `due_reminder_v2` (out-of-window) render byte-identical text.
+
+**Consistency invariant (by construction):** `formatTaskReminderBody(d, crmUrl)`
+is DEFINED as the substitution of `reminderTemplateParams(d, crmUrl)` into the
+frozen `DUE_REMINDER_V2_TEMPLATE_BODY` — the freeform text and the template
+render cannot drift. A test asserts this via an independent substitution.
+
+**Files created:**
+- `src/services/taskDetailFormatter.ts` — pure formatters (`formatTaskReminderBody`,
+  `reminderTemplateParams`, `formatTaskDetailsExtended`, `truncateForTemplate`,
+  `buildCrmTaskUrl`) + the frozen template body constant. No DB/network.
+- `scripts/create-due-reminder-v2-template.ts` — submits `due_reminder_v2`
+  (10 body vars + one QUICK_REPLY button) to Meta; `--dry-run` supported;
+  imports the frozen body so it can't drift.
+- `src/__tests__/taskDetailFormatter.test.ts` (23 tests, incl. the invariant).
+- `src/__tests__/senderTemplateButtons.test.ts` (6 tests, incl. 2 regression
+  guards for the 14 existing templates).
+- `src/__tests__/routerTaskDetailsButton.test.ts` (5 tests).
+
+**Files edited:**
+- `src/whatsapp/sender.ts` — extended `sendTemplateMessage` with optional
+  `buttonParams` (quick_reply/url button components). Shape is IDENTICAL when
+  `buttonParams` is absent (regression-tested).
+- `src/whatsapp/templates.ts` — `notify()` gained `templateButtonParams`,
+  passed through only on the template path.
+- `src/services/tasks.ts` — new `getTaskDetailsForReminder(taskId)`.
+- `src/scheduler/jobs/dueDateReminder.ts` — enriched body + button +
+  `templateButtonParams`; `setActiveTask` (fire-and-forget, try/catch) after a
+  successful send; `taskDetailsPayloadId` / `matchTaskDetailsPayload` helpers.
+- `src/ai/router.ts` — dispatch for the `TASK_DETAILS_<taskId>` tap and the
+  "פרטים" / "פרטים נוספים" text triggers → `handleTaskDetailsRequest` (read-only).
+- `.env.example` — `CRM_TASK_URL_TEMPLATE` + a comment on flipping
+  `WHATSAPP_TEMPLATE_DUE_REMINDER=due_reminder_v2` after Meta approval.
+- `src/__tests__/dueDateReminder.test.ts` — extended (D5-T20 regressions kept +
+  enrichment/button/context tests). 9 tests.
+
+**Schema decisions (Assumption A + audit — no DB access in this env):**
+- `contactPhone` → **`Customer.contactPhone`**, NOT the spec's tentative
+  `phone2`. Clear evidence: `taskFieldScheduling.ts` already SELECTs
+  `c."contactPhone"` live, and `Customer.contactName` (its sibling) is in
+  SCHEMA_CRM.md. This is the spec's explicit "change in one place + document"
+  path.
+- `Task.processNotes` and `IncomingLead.fromPhone` are absent from SCHEMA_CRM.md
+  and have zero query usage anywhere, so they're read **defensively** via
+  `to_jsonb(row) ->> 'col'` — yields the value if the column exists, NULL (never
+  a hard error) if not. The every-5-min reminder can't crash on a missing column.
+  Confirmed by the user ("מאשר הכל תרוץ").
+- Extended message shows the FULL (untruncated) description/notes ("תיאור מלא"),
+  while the short reminder truncates to 200 chars — that is the point of the
+  "more details" tap.
+
+**Constraints honored:** no writes to `Task.status` (only `t.status::text` read);
+`preInspectionReminder.ts` and its tests untouched (verified via git diff —
+empty); existing approved `due_reminder` template NOT edited; `due_reminder_v2`
+is the new template; `WHATSAPP_TEMPLATE_DUE_REMINDER=due_reminder_v2` NOT
+enabled in any committed env (comment only).
+
+**Tests run:** `npx tsc --noEmit` clean; the 4 target files 43/43 pass; full
+suite **1244 passed, 7 skipped, 0 failed** (67 files; trailing worker-exit is
+the known pre-existing OOM). Template `--dry-run` validated (body passes the
+no-trailing-variable check; well-formed payload).
+
+**Remaining follow-ups:**
+1. **LIVE Meta submission not done here** — this environment has no
+   `META_WABA_ID` / `WHATSAPP_ACCESS_TOKEN`. Run
+   `npx tsx scripts/create-due-reminder-v2-template.ts` (then
+   `list-whatsapp-templates.ts` to confirm PENDING) where the creds exist.
+2. After Meta APPROVES `due_reminder_v2`, set
+   `WHATSAPP_TEMPLATE_DUE_REMINDER=due_reminder_v2` in Render.
+3. Phase 2 (documented, not done): CRM URL button; provide `CRM_TASK_URL_TEMPLATE`.
+
+**Priority:** feature — CEO-requested richer reminders. Freeform path is fully
+functional immediately; template path activates on Meta approval.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:

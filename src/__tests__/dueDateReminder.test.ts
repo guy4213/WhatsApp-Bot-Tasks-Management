@@ -1,9 +1,16 @@
 /**
- * dueDateReminder.ts — "mark before send" regression coverage.
+ * dueDateReminder.ts tests.
  *
- * Verifies the send → mark-only-on-success ordering: a WhatsApp send failure
- * must NOT insert the WhatsappReminderLog row (so the next tick can retry),
- * and a successful send must insert it (so the next tick skips it).
+ * Two concerns:
+ *  1. "mark before send" regression (D5-T20): the WhatsappReminderLog row is
+ *     inserted only AFTER a successful send; a failed send is retried next tick.
+ *  2. Enhanced reminder (TASK_ENHANCED_DUE_REMINDER.md): the body is
+ *     `formatTaskReminderBody`, notify() carries the button + templateButtonParams,
+ *     and setActiveTask fires after a successful send.
+ *
+ * `getTaskDetailsForReminder` and `setActiveTask` are mocked so the pool.query
+ * queue stays [due-tasks SELECT, dedup check, INSERT] and the pure formatter
+ * output can be asserted directly.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,16 +24,22 @@ vi.mock('../whatsapp/templates', () => ({
   notify: (...args: unknown[]) => notify(...args),
 }));
 
-beforeEach(() => {
-  poolQuery.mockReset();
-  notify.mockReset();
-  notify.mockResolvedValue(undefined);
-});
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+const getTaskDetailsForReminder = vi.fn();
+vi.mock('../services/tasks', () => ({
+  getTaskDetailsForReminder: (...a: unknown[]) => getTaskDetailsForReminder(...a),
+}));
+
+const setActiveTask = vi.fn();
+vi.mock('../services/taskContext', () => ({
+  setActiveTask: (...a: unknown[]) => setActiveTask(...a),
+}));
 
 import { runDueDateReminder } from '../scheduler/jobs/dueDateReminder';
+import {
+  type TaskDetailForReminder,
+  formatTaskReminderBody,
+  reminderTemplateParams,
+} from '../services/taskDetailFormatter';
 
 const EMPTY = { rowCount: 0, rows: [] };
 const NOT_REMINDED = { rowCount: 0, rows: [] };
@@ -39,33 +52,58 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     owner_name: 'דני',
     owner_phone: '972501111111',
     title: 'תיקון מזגן',
-    due_date: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    due_date: new Date('2026-07-06T11:00:00Z').toISOString(),
     ...overrides,
   };
 }
 
-describe('runDueDateReminder', () => {
+function makeDetails(overrides: Partial<TaskDetailForReminder> = {}): TaskDetailForReminder {
+  return {
+    taskId: 't-1',
+    taskTitle: 'תיקון מזגן',
+    customerName: 'משה כהן',
+    customerPhone: '03-1234567',
+    contactName: 'דנה',
+    contactPhone: '050-1112222',
+    dueDate: new Date('2026-07-06T11:00:00Z'),
+    assignedTo: 'דני',
+    description: 'תיאור',
+    processNotes: 'הערה',
+    address: 'הרצל 10',
+    city: 'תל אביב',
+    status: 'OPEN',
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  poolQuery.mockReset();
+  notify.mockReset();
+  notify.mockResolvedValue(undefined);
+  getTaskDetailsForReminder.mockReset();
+  getTaskDetailsForReminder.mockResolvedValue(makeDetails());
+  setActiveTask.mockReset();
+  delete process.env.CRM_TASK_URL_TEMPLATE;
+});
+afterEach(() => { vi.restoreAllMocks(); });
+
+describe('runDueDateReminder — mark-before-send regression (D5-T20)', () => {
   it('short-circuits when no tasks are due', async () => {
-    poolQuery.mockResolvedValueOnce(EMPTY); // due-tasks SELECT
+    poolQuery.mockResolvedValueOnce(EMPTY);
     await runDueDateReminder();
     expect(notify).not.toHaveBeenCalled();
     expect(poolQuery).toHaveBeenCalledTimes(1);
   });
 
   it('checks dedup, sends, then records as reminded (success path)', async () => {
-    const row = makeRow();
     poolQuery
-      .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // due-tasks SELECT
-      .mockResolvedValueOnce(NOT_REMINDED)                 // dedup check → not reminded
-      .mockResolvedValueOnce(INSERTED);                    // INSERT after successful send
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // due-tasks SELECT
+      .mockResolvedValueOnce(NOT_REMINDED)                       // dedup check
+      .mockResolvedValueOnce(INSERTED);                          // INSERT after send
 
     await runDueDateReminder();
 
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({ to: '972501111111', key: 'DUE_REMINDER' }),
-    );
-    // Dedup check ran BEFORE the send; INSERT ran AFTER.
     const checkCall = poolQuery.mock.calls[1];
     expect(checkCall[0]).toMatch(/SELECT 1 FROM "WhatsappReminderLog"/);
     const insertCall = poolQuery.mock.calls[2];
@@ -74,69 +112,96 @@ describe('runDueDateReminder', () => {
   });
 
   it('skips the send when already reminded (dedup)', async () => {
-    const row = makeRow();
     poolQuery
-      .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // due-tasks SELECT
-      .mockResolvedValueOnce(ALREADY_REMINDED);            // dedup check → already reminded
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] })
+      .mockResolvedValueOnce(ALREADY_REMINDED);
+    await runDueDateReminder();
+    expect(notify).not.toHaveBeenCalled();
+    expect(poolQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT record as reminded when the WhatsApp send fails (retry next tick)', async () => {
+    notify.mockRejectedValueOnce(new Error('WhatsApp API error'));
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] })
+      .mockResolvedValueOnce(NOT_REMINDED);
+    await runDueDateReminder();
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(poolQuery).toHaveBeenCalledTimes(2); // no INSERT after a failed send
+    expect(setActiveTask).not.toHaveBeenCalled();
+  });
+
+  it('continues the batch when one task fails and another succeeds', async () => {
+    const rowA = makeRow({ task_id: 't-a' });
+    const rowB = makeRow({ task_id: 't-b', owner_phone: '972502222222' });
+    getTaskDetailsForReminder
+      .mockResolvedValueOnce(makeDetails({ taskId: 't-a' }))
+      .mockResolvedValueOnce(makeDetails({ taskId: 't-b' }));
+    notify.mockRejectedValueOnce(new Error('A failed')).mockResolvedValueOnce(undefined);
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 2, rows: [rowA, rowB] }) // SELECT
+      .mockResolvedValueOnce(NOT_REMINDED) // dedup A
+      .mockResolvedValueOnce(NOT_REMINDED) // dedup B
+      .mockResolvedValueOnce(INSERTED);    // INSERT B (A failed → no insert)
+    await runDueDateReminder();
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('runDueDateReminder — enhanced reminder body + button + context', () => {
+  it('sends the enriched body with button + templateButtonParams', async () => {
+    const details = makeDetails();
+    getTaskDetailsForReminder.mockResolvedValue(details);
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] })
+      .mockResolvedValueOnce(NOT_REMINDED)
+      .mockResolvedValueOnce(INSERTED);
+
+    await runDueDateReminder();
+
+    expect(getTaskDetailsForReminder).toHaveBeenCalledWith('t-1');
+    expect(notify).toHaveBeenCalledWith({
+      to: '972501111111',
+      key: 'DUE_REMINDER',
+      bodyParams: reminderTemplateParams(details, null),
+      fallbackText: formatTaskReminderBody(details, null),
+      buttons: [{ id: 'TASK_DETAILS_t-1', title: 'פרטים נוספים' }],
+      templateButtonParams: [{ subType: 'quick_reply', index: 0, payload: 'TASK_DETAILS_t-1' }],
+    });
+  });
+
+  it('calls setActiveTask(phone, taskId, title) after a successful send', async () => {
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] })
+      .mockResolvedValueOnce(NOT_REMINDED)
+      .mockResolvedValueOnce(INSERTED);
+
+    await runDueDateReminder();
+
+    expect(setActiveTask).toHaveBeenCalledWith('972501111111', 't-1', 'תיקון מזגן');
+  });
+
+  it('skips the row (no send, no INSERT) when task details are not found', async () => {
+    getTaskDetailsForReminder.mockResolvedValue(null);
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // SELECT
+      .mockResolvedValueOnce(NOT_REMINDED);                      // dedup check
 
     await runDueDateReminder();
 
     expect(notify).not.toHaveBeenCalled();
-    expect(poolQuery).toHaveBeenCalledTimes(2); // no INSERT attempted
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(poolQuery).toHaveBeenCalledTimes(2); // no INSERT
   });
 
-  it('does NOT record as reminded when the WhatsApp send fails (retry next tick)', async () => {
-    const row = makeRow();
-    notify.mockRejectedValueOnce(new Error('WhatsApp API error'));
+  it('a setActiveTask failure does not throw or block the reminder', async () => {
+    setActiveTask.mockImplementation(() => { throw new Error('ctx store down'); });
     poolQuery
-      .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // due-tasks SELECT
-      .mockResolvedValueOnce(NOT_REMINDED);                // dedup check → not reminded
-
-    await runDueDateReminder();
-
-    expect(notify).toHaveBeenCalledTimes(1);
-    // No third pool.query call — the failed send never reached the INSERT.
-    expect(poolQuery).toHaveBeenCalledTimes(2);
-  });
-
-  it('a failed send followed by a successful retry eventually records as reminded', async () => {
-    const row = makeRow();
-
-    // First tick: send fails.
-    notify.mockRejectedValueOnce(new Error('transient error'));
-    poolQuery
-      .mockResolvedValueOnce({ rowCount: 1, rows: [row] })
-      .mockResolvedValueOnce(NOT_REMINDED);
-    await runDueDateReminder();
-    expect(poolQuery).toHaveBeenCalledTimes(2); // no INSERT after the failure
-
-    // Second tick (retry): send succeeds.
-    poolQuery.mockReset();
-    poolQuery
-      .mockResolvedValueOnce({ rowCount: 1, rows: [row] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] })
       .mockResolvedValueOnce(NOT_REMINDED)
       .mockResolvedValueOnce(INSERTED);
-    await runDueDateReminder();
 
-    expect(notify).toHaveBeenCalledTimes(2);
-    const insertCall = poolQuery.mock.calls[2];
-    expect(insertCall[0]).toMatch(/INSERT INTO "WhatsappReminderLog"/);
-  });
-
-  it('continues the batch when one task fails and another succeeds', async () => {
-    const rowA = makeRow({ task_id: 't-a', owner_phone: '972501111111' });
-    const rowB = makeRow({ task_id: 't-b', owner_phone: '972502222222' });
-    notify
-      .mockRejectedValueOnce(new Error('A failed'))
-      .mockResolvedValueOnce(undefined);
-    poolQuery
-      .mockResolvedValueOnce({ rowCount: 2, rows: [rowA, rowB] }) // due-tasks SELECT
-      .mockResolvedValueOnce(NOT_REMINDED) // dedup check A
-      .mockResolvedValueOnce(NOT_REMINDED) // dedup check B
-      .mockResolvedValueOnce(INSERTED);    // INSERT for B (A's send failed, no INSERT for A)
-
-    await runDueDateReminder();
-
-    expect(notify).toHaveBeenCalledTimes(2);
+    await expect(runDueDateReminder()).resolves.not.toThrow();
+    expect(notify).toHaveBeenCalledTimes(1);
   });
 });

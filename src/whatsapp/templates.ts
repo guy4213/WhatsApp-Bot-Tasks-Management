@@ -23,7 +23,7 @@
  *   REQUEST_EXPIRED          : {{1}} task title
  *   REQUEST_EXPIRED_MANAGER  : {{1}} requester   {{2}} task title
  */
-import { sendTextMessage, sendTemplateMessage, sendButtonMessage } from './sender';
+import { sendTextMessage, sendTemplateMessage, sendButtonMessage, type TemplateButtonParam } from './sender';
 import { type NotificationKey, templateName, templateLang } from './templateNames';
 
 // Re-export so existing importers of NotificationKey from this module keep working.
@@ -48,6 +48,12 @@ export interface NotifyArgs {
    * are ignored), so the template definition must declare matching button payloads.
    */
   buttons?: Array<{ id: string; title: string }>;
+  /**
+   * Optional dynamic button parameters for the OUT-OF-WINDOW template path (e.g.
+   * a quick-reply button's per-send payload). Ignored on the freeform path,
+   * where `buttons` is used instead.
+   */
+  templateButtonParams?: TemplateButtonParam[];
 }
 
 /**
@@ -56,12 +62,12 @@ export interface NotifyArgs {
  * When `buttons` are supplied and we're on the free-form path, the message is sent
  * as an interactive reply-button message so the user can act without typing.
  */
-export async function notify({ to, key, bodyParams, fallbackText, buttons }: NotifyArgs): Promise<void> {
+export async function notify({ to, key, bodyParams, fallbackText, buttons, templateButtonParams }: NotifyArgs): Promise<void> {
   const name = templateName(key);
   if (templatesEnabled() && name) {
-    // Template path: quick-reply buttons (if any) live in the approved template,
-    // not in this call. Body params unchanged.
-    await sendTemplateMessage({ to, name, languageCode: templateLang(), bodyParams });
+    // Template path: the button's static text lives in the approved template;
+    // any dynamic per-send button payload is passed via `templateButtonParams`.
+    await sendTemplateMessage({ to, name, languageCode: templateLang(), bodyParams, buttonParams: templateButtonParams });
     return;
   }
 
