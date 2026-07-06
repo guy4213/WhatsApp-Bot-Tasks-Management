@@ -56,7 +56,8 @@
       "Bash(echo \"exit=$?\")",
       "Bash(echo \"tsc=$?\")",
       "Bash(findstr \"passed\\\\|failed\\\\|Tests\")",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(powershell *)"
     ]
   }
 }
