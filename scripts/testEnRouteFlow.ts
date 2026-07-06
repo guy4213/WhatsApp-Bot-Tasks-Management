@@ -129,6 +129,19 @@ async function main() {
   console.log(`  ✓ TaskField ${taskFieldId}`);
   console.log(`     family=radon | fieldContactPhone=${GUY_PHONE} | fieldStatus=CONFIRMED\n`);
 
+  if (setupOnly) {
+    console.log('═══ --setup-only: NOT firing DEPARTED — the deployed bot will do it ═══');
+    console.log(`\nNext step:`);
+    console.log(`  1. Deploy the bot to Render (if you haven't).`);
+    console.log(`  2. Set CUSTOMER_NOTIFICATIONS_ENABLED=true in Render env → restart.`);
+    console.log(`  3. Open your WhatsApp chat with the bot and send: "יצאתי"`);
+    console.log(`  4. The bot should update this TaskField's fieldStatus to EN_ROUTE`);
+    console.log(`     and you should receive TWO WhatsApp messages (customer + worker feedback).`);
+    console.log(`\nTaskField id: ${taskFieldId}`);
+    await pool.end();
+    return;
+  }
+
   console.log('═══ Step 5: fire advanceFieldStatus({ DEPARTED }) ═══');
   console.log('  → EXPECTED (WhatsApp):');
   console.log(`     Message 1 (customer template): "שלום גיא בדיקה! ... יצא לדרך אליך..."`);
