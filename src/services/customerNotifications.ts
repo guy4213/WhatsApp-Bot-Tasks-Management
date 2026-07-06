@@ -277,9 +277,12 @@ async function auditCustomerNotification(
     detectedIntent: 'customer_notification_worker_en_route',
     detectedAction: null,
     confidence: null,
-    targetTaskId: taskFieldId,
+    // WhatsappAuditLog.targetTaskId is a FK to "Task"(id) — TaskField ids
+    // aren't valid there. The taskFieldId lives in newValues instead, and
+    // the primary trail is the WhatsappCustomerNotification row itself.
+    targetTaskId: null,
     oldValues: null,
-    newValues: null,
+    newValues: { taskFieldId },
     confirmationStatus: null,
     approvalStatus: null,
     approverUserId: null,
