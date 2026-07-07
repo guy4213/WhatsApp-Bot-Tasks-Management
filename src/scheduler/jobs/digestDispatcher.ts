@@ -1,6 +1,7 @@
 import { pool } from '../../db/connection';
 import { notify } from '../../whatsapp/templates';
 import { sendButtonMessage, sendTextMessage } from '../../whatsapp/sender';
+import { recordOutboundRef } from '../../services/messageRefs';
 import { writeAuditLog } from '../../utils/auditLog';
 import { moduleLogger } from '../../utils/logger';
 import { claimDigestSend, isDigestAlreadySent, type DigestType } from '../../services/digestSendLog';
@@ -440,11 +441,12 @@ async function maybeDispatchEquipmentReminder(row: DueUserRow): Promise<void> {
     return;
   }
 
+  let equipWamid: string | null = null;
   try {
     // D5-T4 button-policy: `sendButtonMessage` is explicitly allowed here (see
     // JSDoc on `sendButtonMessage` in `src/whatsapp/sender.ts` and on
     // `formatEquipmentReminder` in `src/whatsapp/digestContent.ts`).
-    await sendButtonMessage({
+    equipWamid = await sendButtonMessage({
       to: row.user_phone,
       body: content.text,
       buttons: content.buttons,
@@ -457,6 +459,18 @@ async function maybeDispatchEquipmentReminder(row: DueUserRow): Promise<void> {
     await auditDigest(row, 'EQUIPMENT_MORNING', 'FAILED', (err as Error).message ?? 'unknown send error');
     return;
   }
+
+  // Phase 2: record a quoted-reply context ref (best-effort — never affects send).
+  // Rich payload so a reply like "חסר לי מד רעש" can be understood by the AI in
+  // the equipment-reminder context (worker + day + families).
+  await recordOutboundRef({
+    wamid: equipWamid,
+    entityType: 'equipment_reminder',
+    kind: 'equipment_reminder',
+    recipientUserId: row.user_id,
+    entityId: row.local_date,
+    payload: { workerId: row.user_id, workerName: row.user_name, localDate: row.local_date, families },
+  });
 
   // Mark as sent ONLY after the WhatsApp send actually succeeded.
   try {

@@ -81,6 +81,16 @@ vi.mock('../services/inspections', () => ({
   notifyOfficeNeedsMoreInfo: vi.fn().mockResolvedValue(true),
 }));
 
+// ── quoted-message context (Phase 2) ───────────────────────────────────────────
+const resolveQuotedContext = vi.fn().mockResolvedValue(null);
+const recordTaskFieldRef = vi.fn().mockResolvedValue(true);
+const recordOutboundRef = vi.fn().mockResolvedValue(true);
+vi.mock('../services/messageRefs', () => ({
+  resolveQuotedContext: (...a: unknown[]) => resolveQuotedContext(...a),
+  recordTaskFieldRef: (...a: unknown[]) => recordTaskFieldRef(...a),
+  recordOutboundRef: (...a: unknown[]) => recordOutboundRef(...a),
+}));
+
 // ── remaining service stubs the router touches ─────────────────────────────────
 vi.mock('../services/chatHistory', () => ({
   appendTurn: vi.fn().mockResolvedValue(undefined),
@@ -186,6 +196,9 @@ beforeEach(() => {
   resolveOpenTaskFieldByHint.mockReset().mockResolvedValue(null);
   advanceFieldStatus.mockReset().mockResolvedValue(undefined);
   writeTravelEta.mockReset().mockResolvedValue(undefined);
+  resolveQuotedContext.mockReset().mockResolvedValue(null);
+  recordTaskFieldRef.mockReset().mockResolvedValue(true);
+  recordOutboundRef.mockReset().mockResolvedValue(true);
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -299,5 +312,103 @@ describe('active-task context — status fallback when no valid pointer', () => 
     await handleAIMessage(u, 'הגעתי');
     expect(validateWorkerTaskField).toHaveBeenCalledWith(u.id, 'tf-B');
     expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-C', transition: 'ARRIVED', updatedBy: u.id });
+  });
+});
+
+// ── Phase 2: quoted-message reply ─────────────────────────────────────────────
+
+/** Seed an active pointer on task A (idle) so we can prove a quote beats it. */
+function seedPointerA(): void {
+  ctxStore = {
+    awaiting: 'idle_active_inspection',
+    taskFieldId: 'tf-A',
+    activeInspection: {
+      taskFieldId: 'tf-A',
+      departedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    },
+  };
+}
+
+const QUOTED_TF_B = {
+  wamid: 'wamid-B', recipientUserId: 'u-worker', entityType: 'task_field',
+  entityId: 'tf-B', taskFieldId: 'tf-B', kind: 'pre_reminder', payload: null,
+  createdAt: new Date(), expiresAt: null,
+};
+
+describe('quoted-message reply — TaskField status', () => {
+  it('reply "הגעתי" to task B\'s card BEATS the pointer on A, deterministically (no AI)', async () => {
+    const u = worker();
+    seedPointerA();
+    resolveQuotedContext.mockResolvedValueOnce(QUOTED_TF_B);
+    validateWorkerTaskField.mockResolvedValueOnce({ ok: true, taskFieldId: 'tf-B', fieldStatus: 'ASSIGNED', customerName: null, taskTitle: null });
+
+    await handleAIMessage(u, 'הגעתי', 'wamid-B');
+
+    expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-B', transition: 'ARRIVED', updatedBy: u.id });
+    expect(parseIntentMock).not.toHaveBeenCalled(); // fast path — no LLM
+  });
+
+  it('verbose reply (no bare keyword) resolves via the LLM path — still task B', async () => {
+    const u = worker();
+    seedPointerA();
+    resolveQuotedContext.mockResolvedValueOnce(QUOTED_TF_B);
+    // First validate call (LLM path priority#1) → ok for tf-B.
+    validateWorkerTaskField.mockResolvedValueOnce({ ok: true, taskFieldId: 'tf-B', fieldStatus: 'ASSIGNED', customerName: null, taskTitle: null });
+    statusIntent('ARRIVED', null);
+
+    await handleAIMessage(u, 'אני כבר אצל הלקוח', 'wamid-B');
+
+    expect(parseIntentMock).toHaveBeenCalled();
+    expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-B', transition: 'ARRIVED', updatedBy: u.id });
+  });
+
+  it('unknown quote → falls through to the pointer (A)', async () => {
+    const u = worker();
+    seedPointerA();
+    resolveQuotedContext.mockResolvedValueOnce(null); // not in the ref table
+    statusIntent('ARRIVED', null);
+
+    await handleAIMessage(u, 'הגעתי', 'wamid-unknown');
+
+    expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-A', transition: 'ARRIVED', updatedBy: u.id });
+  });
+
+  it('quoted TaskField closed / not the worker\'s → falls back to the pointer', async () => {
+    const u = worker();
+    seedPointerA();
+    resolveQuotedContext.mockResolvedValue(QUOTED_TF_B);
+    // tf-B is closed; tf-A (the pointer) is fine.
+    validateWorkerTaskField.mockImplementation(async (_uid: string, tfid: string) =>
+      tfid === 'tf-B'
+        ? { ok: false, reason: 'closed', fieldStatus: 'FINISHED_FIELD' }
+        : { ok: true, taskFieldId: tfid, fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null });
+    statusIntent('ARRIVED', null);
+
+    await handleAIMessage(u, 'הגעתי', 'wamid-B');
+
+    expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-A', transition: 'ARRIVED', updatedBy: u.id });
+  });
+
+  it('reply to a NON-TaskField message (equipment reminder) → context handed to the AI, no status write', async () => {
+    const u = worker();
+    resolveQuotedContext.mockResolvedValueOnce({
+      wamid: 'wamid-eq', recipientUserId: 'u-worker', entityType: 'equipment_reminder',
+      entityId: '2026-07-08', taskFieldId: null, kind: 'equipment_reminder',
+      payload: { workerId: 'u-worker', localDate: '2026-07-08' }, createdAt: new Date(), expiresAt: null,
+    });
+    parseIntentMock.mockResolvedValueOnce({
+      intent: 'missing_equipment_free', confidence: 0.95, task_reference: null, field: null,
+      new_value: null, params: { note: 'מד רעש' }, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false, transition: null, problem_type: null,
+    });
+
+    await handleAIMessage(u, 'חסר לי מד רעש', 'wamid-eq');
+
+    // The quoted context reached the AI parse…
+    const opts = parseIntentMock.mock.calls[0]?.[1] as { quotedContext?: { entityType?: string } };
+    expect(opts?.quotedContext?.entityType).toBe('equipment_reminder');
+    // …and it did NOT trigger a TaskField status write.
+    expect(advanceFieldStatus).not.toHaveBeenCalled();
   });
 });

@@ -62,26 +62,24 @@ export interface NotifyArgs {
  * When `buttons` are supplied and we're on the free-form path, the message is sent
  * as an interactive reply-button message so the user can act without typing.
  */
-export async function notify({ to, key, bodyParams, fallbackText, buttons, templateButtonParams }: NotifyArgs): Promise<void> {
+export async function notify({ to, key, bodyParams, fallbackText, buttons, templateButtonParams }: NotifyArgs): Promise<string | null> {
   const name = templateName(key);
   if (templatesEnabled() && name) {
     // Template path: the button's static text lives in the approved template;
     // any dynamic per-send button payload is passed via `templateButtonParams`.
-    await sendTemplateMessage({ to, name, languageCode: templateLang(), bodyParams, buttonParams: templateButtonParams });
-    return;
+    return await sendTemplateMessage({ to, name, languageCode: templateLang(), bodyParams, buttonParams: templateButtonParams });
   }
 
   if (buttons && buttons.length > 0) {
     if (fallbackText.length <= BUTTON_BODY_MAX) {
-      await sendButtonMessage({ to, body: fallbackText, buttons });
-    } else {
-      // Body too long for an interactive message — send the full text, then the
-      // buttons on a compact follow-up so nothing is truncated.
-      await sendTextMessage({ to, text: fallbackText });
-      await sendButtonMessage({ to, body: 'בחר פעולה:', buttons });
+      return await sendButtonMessage({ to, body: fallbackText, buttons });
     }
-    return;
+    // Body too long for an interactive message — send the full text, then the
+    // buttons on a compact follow-up so nothing is truncated. Return the
+    // actionable (buttons) message's wamid.
+    await sendTextMessage({ to, text: fallbackText });
+    return await sendButtonMessage({ to, body: 'בחר פעולה:', buttons });
   }
 
-  await sendTextMessage({ to, text: fallbackText });
+  return await sendTextMessage({ to, text: fallbackText });
 }

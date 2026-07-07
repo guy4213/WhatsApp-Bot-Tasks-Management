@@ -19,6 +19,19 @@ export interface ParseContext {
   history?: ChatTurn[];
   /** Optional note describing an in-progress clarification, injected into the prompt. */
   pendingNote?: string;
+  /**
+   * Phase 2: when the inbound message is a swipe-reply (quote), the resolved
+   * context of the quoted bot message. Structurally compatible with
+   * `QuotedContext` from `services/messageRefs`. Injected into the prompt so the
+   * AI interprets the reply relative to the original message.
+   */
+  quotedContext?: {
+    entityType: string;
+    kind: string;
+    entityId?: string | null;
+    taskFieldId?: string | null;
+    payload?: Record<string, unknown> | null;
+  } | null;
 }
 
 /** True when the user qualifies for the unified manager menu and manager intents. */
@@ -499,6 +512,18 @@ export function buildSystemPrompt(ctx: ParseContext, message?: string): string {
 
   const pendingNoteBlock = ctx.pendingNote ? `\nCONTEXT: ${ctx.pendingNote}` : '';
 
+  // Phase 2: when the user swipe-replied to a bot message, interpret the reply in
+  // that message's context. Guides the AI toward existing intents; never invents.
+  const quotedContextBlock = ctx.quotedContext
+    ? `\nQUOTED-REPLY CONTEXT: the user swipe-replied to a previous bot message ` +
+      `of type "${ctx.quotedContext.entityType}" (kind "${ctx.quotedContext.kind}").` +
+      (ctx.quotedContext.payload ? ` Original-message context: ${JSON.stringify(ctx.quotedContext.payload)}.` : '') +
+      ` Interpret the reply IN THAT CONTEXT.` +
+      ` If the original was a field inspection (task_field) and the user reports progress ("יצאתי"/"הגעתי"/"סיימתי"), emit set_field_status with the matching transition.` +
+      ` If the original was an equipment reminder and the user names missing equipment (e.g. "חסר לי מד רעש"), emit missing_equipment_free with params.note = the equipment described.` +
+      ` When the reply does not clearly map to an allowed intent, prefer a short Hebrew clarification (intent=unknown) over guessing — never invent an action outside the tool.`
+    : '';
+
   const sections = [
     intro,
     currentUserBlock,
@@ -517,6 +542,7 @@ export function buildSystemPrompt(ctx: ParseContext, message?: string): string {
     rulesBlock,
     historyBlock,
     pendingNoteBlock,
+    quotedContextBlock,
   ].filter((s) => s !== undefined && s !== null);
 
   return sections.join('\n');

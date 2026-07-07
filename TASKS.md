@@ -9,6 +9,61 @@ Conventions:
 
 ---
 
+## 0.5 Quoted-message context infrastructure — Phase 2 (2026-07-07)
+
+**Status:** DONE (local, uncommitted)
+
+General "reply/quote → context" infrastructure. When a worker swipe-replies to a
+bot message, Meta's webhook carries `context.id` = the quoted message's wamid; we
+record a general context row at send time (`WhatsappMessageRef`) and resolve the
+quote back to what the message was about. Builds on Phase 1.
+
+**Two behavior layers:**
+- **Deterministic (task_field):** swipe-reply to a TaskField message + "יצאתי"/
+  "הגעתי"/"סיימתי" → updates exactly that TaskField. **Beats the Phase-1 pointer**
+  and works with **no AI provider** (fast path before the `getProvider()` gate,
+  like button taps). Also honored on the LLM path for verbose phrasing.
+- **AI-with-context (non-task_field, minimal-safe):** the resolved `quotedContext`
+  is passed into `parseIntent` (prompt enrichment) so a reply to e.g. the equipment
+  reminder ("חסר לי מד רעש") routes through the existing `missing_equipment_free`
+  flow; ambiguity → ask. The AI only picks existing intents — no free actions.
+
+**Design guarantees:** `recordOutboundRef` is best-effort and NEVER throws (a ref
+failure can't break a WhatsApp send); a missing/unknown/expired/other quote falls
+through to the normal flow. task_field refs get `expiresAt = now()+30d`.
+
+**Files:** new `src/db/migrations/015_message_refs.sql` (general `WhatsappMessageRef`:
+wamid PK, recipientUserId, entityType, entityId, taskFieldId, kind, payload jsonb,
+createdAt, expiresAt; RLS deny-all) + `src/services/messageRefs.ts`
+(`recordOutboundRef`/`recordTaskFieldRef`/`resolveQuotedContext`, general
+`QuotedContext`). `src/whatsapp/sender.ts` + `templates.ts` — senders now return
+`Promise<string|null>` (the wamid; `post()` parses `messages[0].id`, non-fatal on
+parse failure). Ref capture: `preInspectionReminder.ts` (pre_reminder),
+`inspectionAssignment.ts` (assignment_card), `router.ts performTransition`
+(eta_prompt/status_confirm), `digestDispatcher.ts` (equipment_reminder, rich
+payload). `webhook.ts` parses `m.context.id` → threads `quotedWamid`.
+`router.ts` — quoted fast path in `handleAIMessage` + threads `quotedContext`
+through `routeIntent`/`executeIntent`/`runAdvanceStatusDirect` (priority #1).
+`intentParser.ts` — optional `quotedContext` in the prompt.
+
+**Env:** none new.
+
+**QA:** `npx tsc --noEmit` clean; full `vitest run` green (1295 passing on a clean
+run; the intermittent worker-exit pool flake pre-dates this). New tests:
+`messageRefs.test.ts` (record/resolve, task_field vs non, unknown/expired null,
+best-effort no-throw), `senderWamid.test.ts` (returns wamid / null-no-throw),
+`routerActiveInspection.test.ts` +5 (quote beats pointer deterministically w/o AI;
+verbose LLM path; unknown→pointer; closed/not-owner→fallback; equipment reply →
+context to AI, no status write). Existing suites unaffected (ref recording
+short-circuits on the `undefined` wamid mocked senders return).
+
+**Deviations / notes:** daily_digest / menu / CRM-task / lead refs are NOT captured
+yet (schema + service support them; a one-line `recordOutboundRef` per send-site
+adds them later) and have no reply behavior — per the agreed scope. Migration `015`
+not yet applied to Supabase. Not touched: GPS/OwnTracks/Google-Maps/customer page.
+
+---
+
 ## 0.4 Active-task context after "יצאתי" — Phase 1 (2026-07-07)
 
 **Status:** DONE (local, uncommitted)

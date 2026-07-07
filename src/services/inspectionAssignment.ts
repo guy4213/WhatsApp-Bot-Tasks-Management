@@ -19,6 +19,7 @@
  */
 import { pool } from '../db/connection';
 import { sendButtonMessage } from '../whatsapp/sender';
+import { recordTaskFieldRef } from './messageRefs';
 import { moduleLogger } from '../utils/logger';
 import { LABELS, PLACEHOLDERS } from '../ai/inspectionFormatters';
 
@@ -216,7 +217,7 @@ export async function sendAndStampAssignmentCard(row: UnnotifiedTaskFieldRow): P
   const equipmentLabels = await getEquipmentLabels(row.family);
   const body = formatInspectionCard(row, equipmentLabels);
 
-  await sendButtonMessage({
+  const wamid = await sendButtonMessage({
     to: row.workerPhone,
     body,
     buttons: [
@@ -225,6 +226,9 @@ export async function sendAndStampAssignmentCard(row: UnnotifiedTaskFieldRow): P
       { id: inspectionNeedInfoPayloadId(row.taskFieldId), title: '3. פרטים' },
     ],
   });
+
+  // Phase 2: record a quoted-reply context ref (best-effort — never affects send).
+  await recordTaskFieldRef(wamid, row.taskFieldId, row.workerId ?? null, 'assignment_card');
 
   const stamped = await pool.query(
     `UPDATE "TaskField"

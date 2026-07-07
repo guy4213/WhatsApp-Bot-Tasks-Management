@@ -38,9 +38,9 @@ export interface TextMessage {
   text: string;
 }
 
-export async function sendTextMessage({ to, text }: TextMessage): Promise<void> {
+export async function sendTextMessage({ to, text }: TextMessage): Promise<string | null> {
   const recipient = normalizeRecipient(to);
-  await deliver(
+  return await deliver(
     recipient,
     { messaging_product: 'whatsapp', to: recipient, type: 'text', text: { body: text } },
     text,
@@ -65,9 +65,9 @@ export interface ButtonMessage {
  * numbered text via `renderMenu` / `renderProblemTypeMenu`. Meta caps a reply-
  * button message at 3 buttons — most v2 menus exceed that.
  */
-export async function sendButtonMessage({ to, body, buttons }: ButtonMessage): Promise<void> {
+export async function sendButtonMessage({ to, body, buttons }: ButtonMessage): Promise<string | null> {
   const recipient = normalizeRecipient(to);
-  await deliver(
+  return await deliver(
     recipient,
     {
       messaging_product: 'whatsapp',
@@ -113,9 +113,9 @@ export interface ListMessage {
  *
  * Falls back silently to numbered text on send failure when caller wraps in try/catch.
  */
-export async function sendListMessage({ to, body, buttonLabel, sections }: ListMessage): Promise<void> {
+export async function sendListMessage({ to, body, buttonLabel, sections }: ListMessage): Promise<string | null> {
   const recipient = normalizeRecipient(to);
-  await deliver(
+  return await deliver(
     recipient,
     {
       messaging_product: 'whatsapp',
@@ -169,7 +169,7 @@ export interface TemplateMessage {
   buttonParams?: TemplateButtonParam[];
 }
 
-export async function sendTemplateMessage({ to, name, languageCode, bodyParams, buttonParams }: TemplateMessage): Promise<void> {
+export async function sendTemplateMessage({ to, name, languageCode, bodyParams, buttonParams }: TemplateMessage): Promise<string | null> {
   const recipient = normalizeRecipient(to);
   const params = (bodyParams ?? []).map(sanitizeParam);
 
@@ -203,7 +203,7 @@ export async function sendTemplateMessage({ to, name, languageCode, bodyParams, 
     template.components = components;
   }
 
-  await deliver(
+  return await deliver(
     recipient,
     { messaging_product: 'whatsapp', to: recipient, type: 'template', template },
     `template:${name}(${params.join(' | ')})`,
@@ -222,16 +222,16 @@ function normalizeRecipient(to: string): string {
 
 // ── Shared delivery (credential check → retry loop → DLQ) ─────────────────────
 
-async function deliver(to: string, payload: Record<string, unknown>, dlqText: string): Promise<void> {
+async function deliver(to: string, payload: Record<string, unknown>, dlqText: string): Promise<string | null> {
   // Guard against empty recipients (e.g. a User row with no phone) — Meta returns
   // a 400 "parameter to is required" and we'd needlessly retry + DLQ it.
   if (!to) {
     log.warn({ preview: dlqText.slice(0, 80) }, 'Empty recipient — message skipped');
-    return;
+    return null;
   }
   if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
     log.warn({ to, preview: dlqText.slice(0, 80) }, 'Missing credentials — message not sent');
-    return;
+    return null;
   }
 
   const url  = `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`;
@@ -240,8 +240,9 @@ async function deliver(to: string, payload: Record<string, unknown>, dlqText: st
   let lastErr: Error | undefined;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await post(url, body);
-      return;
+      // Returns the outbound wamid (messages[0].id) on success, or null if Meta's
+      // response can't be parsed — the send still succeeded either way.
+      return await post(url, body);
     } catch (err) {
       lastErr = err as Error;
       const httpStatus = parseStatus((err as Error).message);
@@ -262,7 +263,7 @@ async function deliver(to: string, payload: Record<string, unknown>, dlqText: st
 
 // ── Low-level HTTP ────────────────────────────────────────────────────────────
 
-function post(url: string, body: string): Promise<void> {
+function post(url: string, body: string): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const req = https.request(
@@ -283,7 +284,15 @@ function post(url: string, body: string): Promise<void> {
           if (res.statusCode && res.statusCode >= 400) {
             reject(new Error(`WhatsApp API error ${res.statusCode}: ${data.slice(0, 300)}`));
           } else {
-            resolve();
+            // Success — return the outbound wamid from `{ messages: [{ id }] }`.
+            // A parse failure is non-fatal: the message was sent, we just can't
+            // record a quoted-reply ref for it.
+            try {
+              const parsed = JSON.parse(data) as { messages?: Array<{ id?: string }> };
+              resolve(parsed?.messages?.[0]?.id ?? null);
+            } catch {
+              resolve(null);
+            }
           }
         });
       },

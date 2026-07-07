@@ -155,10 +155,15 @@ export async function processInbound(item: InboundMessage): Promise<void> {
     const m    = item.payload;
     const type = m.type as string;
 
+    // Phase 2: the wamid of the message this one is a swipe-reply to (if any).
+    // Meta puts it in messages[].context.id. Threaded downstream so a quoted
+    // reply can be resolved back to its original context.
+    const quotedWamid = ((m.context as Record<string, unknown>)?.id as string) || undefined;
+
     if (type === 'text') {
       const text = ((m.text as Record<string, unknown>)?.body as string) ?? '';
       log.info({ from: item.fromPhone, msgId: item.msgId }, 'Inbound text message');
-      await handleIncomingMessage(item.fromPhone, text);
+      await handleIncomingMessage(item.fromPhone, text, quotedWamid);
     } else if (type === 'interactive') {
       // A tapped reply button (or list item) — its `id` carries the text command
       // (e.g. "כן <uuid>"); fall back to the visible title for older clients.
@@ -206,7 +211,7 @@ export async function processInbound(item: InboundMessage): Promise<void> {
       });
 
       if (transcript) {
-        await handleIncomingMessage(item.fromPhone, transcript);
+        await handleIncomingMessage(item.fromPhone, transcript, quotedWamid);
       } else {
         const { sendTextMessage } = await import('../whatsapp/sender');
         await sendTextMessage({
@@ -278,7 +283,7 @@ export async function recoverInboundQueue(): Promise<void> {
 
 // ── Message router ────────────────────────────────────────────────────────────
 
-async function handleIncomingMessage(from: string, text: string): Promise<void> {
+async function handleIncomingMessage(from: string, text: string, quotedWamid?: string): Promise<void> {
   const { sendTextMessage } = await import('../whatsapp/sender');
 
   if (!checkRateLimit(from)) {
@@ -355,5 +360,5 @@ async function handleIncomingMessage(from: string, text: string): Promise<void> 
   }
 
   const { handleAIMessage } = await import('../ai/router');
-  await handleAIMessage(auth.user, text);
+  await handleAIMessage(auth.user, text, quotedWamid);
 }

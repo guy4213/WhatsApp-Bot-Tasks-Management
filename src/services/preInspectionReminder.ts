@@ -20,6 +20,7 @@
  */
 import { pool } from '../db/connection';
 import { sendButtonMessage } from '../whatsapp/sender';
+import { recordTaskFieldRef } from './messageRefs';
 import { moduleLogger } from '../utils/logger';
 import { formatShortDateTimeIL } from '../ai/inspectionFormatters';
 
@@ -167,7 +168,7 @@ export async function sendAndStampPreReminder(row: DuePreReminderRow): Promise<v
 
   log.info({ taskFieldId: row.taskFieldId }, 'pre-reminder send — attempting');
 
-  await sendButtonMessage({
+  const wamid = await sendButtonMessage({
     to: row.workerPhone,
     body,
     buttons: [
@@ -176,6 +177,9 @@ export async function sendAndStampPreReminder(row: DuePreReminderRow): Promise<v
       { id: preReminderProblemPayloadId(row.taskFieldId),  title: 'יש בעיה' },
     ],
   });
+
+  // Phase 2: record a quoted-reply context ref (best-effort — never affects send).
+  await recordTaskFieldRef(wamid, row.taskFieldId, row.workerId ?? null, 'pre_reminder');
 
   const stamped = await pool.query(
     `UPDATE "TaskField"

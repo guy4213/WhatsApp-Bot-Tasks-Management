@@ -21,6 +21,7 @@ import {
   type ConversationState, type AwaitingKind,
 } from '../services/conversationContext';
 import { parseTravelMinutes } from './travelEta';
+import { resolveQuotedContext, recordTaskFieldRef, type QuotedContext } from '../services/messageRefs';
 import { setViewOwners, getViewOwners, clearViewOwners } from '../services/viewContext';
 import { setActiveTask, getActiveTask } from '../services/taskContext';
 import { getHistory, appendTurn } from '../services/chatHistory';
@@ -346,7 +347,7 @@ export const CORRECTION_RE = /^(תיקון|רגע|לא לזה התכוונתי|�
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 
-export async function handleAIMessage(user: ResolvedUser, text: string): Promise<void> {
+export async function handleAIMessage(user: ResolvedUser, text: string, quotedWamid?: string): Promise<void> {
   // Deterministic digest follow-up commands / quick-reply button taps. Handled
   // FIRST — before the AI provider check, before context, before NLU — so a
   // tapped digest button (its payload id arrives here as text) or the exact text
@@ -433,6 +434,31 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
     await setContext(user.phone, { awaiting: 'menu' });
     await continueConversation(user, text.trim(), { awaiting: 'menu' });
     return;
+  }
+
+  // ── Phase 2: quoted-message context (swipe-reply) ──────────────────────────
+  // Resolve the quoted (replied-to) message ONCE to a general context. It's the
+  // strongest signal about what the reply is about — used deterministically for
+  // TaskField status here, and passed to the AI for other kinds (equipment
+  // reminder, …) further down.
+  const quotedContext: QuotedContext | null = quotedWamid
+    ? await resolveQuotedContext(quotedWamid)
+    : null;
+
+  // Deterministic TaskField status fast path — works with NO AI provider (like a
+  // button tap). A swipe-reply to a TaskField message + an unambiguous status
+  // keyword updates exactly that TaskField, outranking the Phase-1 active pointer.
+  if (quotedContext?.entityType === 'task_field' && quotedContext.taskFieldId) {
+    const kw = extractDirectStatusKeyword(text);
+    if (kw) {
+      const v = await validateWorkerTaskField(user.id, quotedContext.taskFieldId);
+      if (v.ok) {
+        await performTransition(user, quotedContext.taskFieldId, kw);
+        return;
+      }
+      // Quoted TaskField no longer usable (closed / not owner / missing) → do NOT
+      // throw; fall through to the normal flow (pointer / ask).
+    }
   }
 
   if (!getProvider()) {
@@ -530,7 +556,7 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
       safePriorities(),
       getHistory(user.phone),
     ]);
-    intent = await parseIntent(text, { user, allowedTypes, allowedPriorities, history });
+    intent = await parseIntent(text, { user, allowedTypes, allowedPriorities, history, quotedContext });
   } catch (err) {
     log.error({ err }, 'Intent parse failed');
     await sendTextMessage({ to: user.phone, text: 'שגיאה בעיבוד הבקשה. נסה שוב או נסח מחדש.' });
@@ -540,7 +566,7 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   // Record the user's turn AFTER parsing (so it isn't fed back into its own parse).
   await appendTurn(user.phone, 'user', text);
 
-  await routeIntent(user, intent, text);
+  await routeIntent(user, intent, text, quotedContext);
 }
 
 // ── Threshold routing ──────────────────────────────────────────────────────────
@@ -549,6 +575,7 @@ async function routeIntent(
   user: ResolvedUser,
   intent: AIIntentResult,
   originalText?: string,
+  quotedContext?: QuotedContext | null,
 ): Promise<void> {
   // 1. Unknown or very low confidence → use the model's Hebrew clarification when it
   //    provided one (status-change / out-of-scope answers), else ask to rephrase.
@@ -633,7 +660,7 @@ async function routeIntent(
   }
 
   // 4. High confidence → execute
-  await executeIntent(user, intent);
+  await executeIntent(user, intent, undefined, quotedContext);
 }
 
 // ── Continuation (clarification loop) ───────────────────────────────────────────
@@ -1004,6 +1031,7 @@ async function executeIntent(
   user: ResolvedUser,
   intent: AIIntentResult,
   resolvedTaskId?: string,
+  quotedContext?: QuotedContext | null,
 ): Promise<void> {
   switch (intent.intent) {
     case 'help':
@@ -1102,7 +1130,7 @@ async function executeIntent(
       }
       if (transition === 'CONFIRM' || transition === 'DEPARTED' || transition === 'ARRIVED' || transition === 'FINISHED') {
         const hint = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
-        await runAdvanceStatusDirect(user, transition, hint || null);
+        await runAdvanceStatusDirect(user, transition, hint || null, quotedContext);
         return;
       }
       // No transition supplied — fall through to help.
@@ -2277,7 +2305,10 @@ async function performTransition(
     await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
       awaiting: 'status_eta_prompt',
     });
-    await sendTextMessage({ to: user.phone, text: departedEtaPrompt() });
+    const wamid = await sendTextMessage({ to: user.phone, text: departedEtaPrompt() });
+    // Phase 2: quoted-reply context ref (best-effort). A reply to the ETA prompt
+    // with "הגעתי"/"סיימתי" resolves back to this TaskField.
+    await recordTaskFieldRef(wamid, taskFieldId, user.id, 'eta_prompt');
     return;
   }
   if (transition === 'ARRIVED') {
@@ -2286,12 +2317,14 @@ async function performTransition(
     await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
       awaiting: 'idle_active_inspection',
     });
-    await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
+    const wamid = await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
+    await recordTaskFieldRef(wamid, taskFieldId, user.id, 'status_confirm');
     return;
   }
   // CONFIRM (and any other non-pointer transition).
   await clearContext(user.phone);
-  await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
+  const wamid = await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
+  await recordTaskFieldRef(wamid, taskFieldId, user.id, 'status_confirm');
 }
 
 /**
@@ -2436,7 +2469,22 @@ async function runAdvanceStatusDirect(
   user: ResolvedUser,
   transition: AdvanceTransition,
   hint: string | null,
+  quotedContext?: QuotedContext | null,
 ): Promise<void> {
+  // ── Phase 2: quoted-message context — STRONGEST signal ─────────────────────
+  // The worker swipe-replied to a specific TaskField message. That outranks the
+  // active pointer AND the free-text hint, for ANY transition. (The bare-keyword
+  // case is already handled in handleAIMessage's fast path; this covers verbose
+  // phrasing the LLM classified as set_field_status.)
+  if (quotedContext?.entityType === 'task_field' && quotedContext.taskFieldId) {
+    const v = await validateWorkerTaskField(user.id, quotedContext.taskFieldId);
+    if (v.ok) {
+      await performTransition(user, quotedContext.taskFieldId, transition);
+      return;
+    }
+    // Quoted TaskField unusable → fall through to the Phase-1 pointer / normal flow.
+  }
+
   // ── Active-task context (Phase 1) ──────────────────────────────────────────
   // For "continue the active inspection" transitions (ARRIVED/FINISHED) with no
   // explicit hint, the SOURCE OF TRUTH is the stored activeTaskFieldId set on
