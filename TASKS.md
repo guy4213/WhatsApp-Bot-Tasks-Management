@@ -9,6 +9,47 @@ Conventions:
 
 ---
 
+## 0.3 OwnTracks GPS POC (2026-07-06)
+
+**Status:** DONE (local, uncommitted)
+
+Standalone POC to validate OwnTracks as the live GPS source for a future
+customer arrival-tracking feature ("Wolt-lite"), BEFORE building the full
+feature. Source of truth: `docs/POC_OWNTRACKS.md` (research + plan + go/no-go
+criteria). Product decisions locked: success bar = a location update at least
+every 60s while driving; fleet ~50/50 iOS/Android → iOS background behavior is
+the deciding factor.
+
+**Scope (intentionally minimal — receive + store + measure only):**
+- Migration `013_owntracks_poc.sql` — one append-only table `"PocLocationPing"`
+  (RLS deny-all, additive-only; mirrors 012 conventions). Not yet applied to
+  Supabase.
+- `src/routes/owntracksPoc.ts` — PUBLIC `POST /owntracks` (per-worker HTTP Basic
+  auth via `POC_OWNTRACKS_USERS` allowlist; `workerKey` = authenticated
+  username, NOT trusted from payload; stores only `_type:location`, acks `[]`)
+  + INTERNAL `GET /owntracks/poc/debug` (x-internal-secret; latest location +
+  `secondsSinceLast` + `stale` + pings-last-10min + median/max gap per worker).
+- Registered in `src/app.ts`; env `POC_OWNTRACKS_USERS` + `POC_STALE_SECONDS`
+  added to `.env.example` (section 10).
+
+**Explicitly NOT built (deferred to full feature, only if POC passes):** customer
+page, Google Maps / Routes ETA, geocode cache, new customer template,
+`WorkerDevice`/`WorkerLiveLocation`/`TaskFieldTracking`, "יצאתי"/"הגעתי" flow
+wiring, WebSocket, MQTT.
+
+**QA done:** `npx tsc --noEmit` clean; full vitest suite 1258 passing (2 skip;
+1 unrelated pool-worker flake); smoke test via buildApp+inject confirmed 401 on
+missing/wrong/unknown creds and 200 `[]` on non-location. DB-insert path
+(valid location) + real-device frequency measurement remain to be run against
+Supabase during the field test.
+
+**Remaining before field test:** apply migration `013` to Supabase; set
+`POC_OWNTRACKS_USERS`; ensure a public HTTPS ingress to `POST /owntracks`;
+configure OwnTracks (HTTP mode, Move, "Always"/background perms) on one Android
++ one iPhone; run the drive scenarios and fill the go/no-go table.
+
+---
+
 ## 0.2 Dev-observer routing (2026-07-01)
 
 Extended the special-user routing to include internal dev admins. Now:
