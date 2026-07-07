@@ -473,7 +473,7 @@ export async function handleAIMessage(user: ResolvedUser, text: string, quotedWa
   // `runAdvanceStatusDirect` via getActiveInspection.
   const ctx = await getContext(user.phone);
   if (ctx && ctx.awaiting !== 'idle_active_inspection') {
-    await continueConversation(user, text, ctx);
+    await continueConversation(user, text, ctx, quotedWamid);
     return;
   }
 
@@ -669,6 +669,7 @@ async function continueConversation(
   user: ResolvedUser,
   text: string,
   ctx: ConversationState,
+  quotedWamid?: string,
 ): Promise<void> {
   const trimmed = text.trim();
 
@@ -773,7 +774,7 @@ async function continueConversation(
     return;
   }
   if (ctx.awaiting === 'status_eta_prompt') {
-    await handleStatusEtaReply(user, text, ctx);
+    await handleStatusEtaReply(user, text, ctx, quotedWamid);
     return;
   }
   if (ctx.awaiting === 'finished_followup') {
@@ -2339,11 +2340,12 @@ async function handleStatusEtaReply(
   user: ResolvedUser,
   text: string,
   ctx: ConversationState,
+  quotedWamid?: string,
 ): Promise<void> {
   const taskFieldId = ctx.activeInspection?.taskFieldId ?? ctx.taskFieldId;
   if (!taskFieldId) {
     await clearContext(user.phone);
-    await handleAIMessage(user, text);
+    await handleAIMessage(user, text, quotedWamid);
     return;
   }
   const departedAt = ctx.activeInspection?.departedAt ?? new Date().toISOString();
@@ -2375,7 +2377,7 @@ async function handleStatusEtaReply(
   await setActiveInspection(user.phone, taskFieldId, departedAt, {
     awaiting: 'idle_active_inspection',
   });
-  await handleAIMessage(user, text);
+  await handleAIMessage(user, text, quotedWamid);
 }
 
 /** Send the finished follow-up menu as a List Message (fallback: numbered text). */

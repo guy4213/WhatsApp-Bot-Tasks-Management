@@ -412,3 +412,76 @@ describe('quoted-message reply — TaskField status', () => {
     expect(advanceFieldStatus).not.toHaveBeenCalled();
   });
 });
+
+// ── QA-FIX-1: quoted context must survive the status_eta_prompt live await ─────
+//
+// Bug: while the worker is answering the travel-ETA prompt (awaiting
+// 'status_eta_prompt', pointer on tf-A), a swipe-reply to a DIFFERENT
+// TaskField's card (tf-B) with VERBOSE text (no bare status keyword) lost the
+// quote during the recursion in `handleStatusEtaReply` case 3, so the update
+// landed on the pointer (tf-A) instead of the quoted card (tf-B).
+
+/** Seed the ETA-prompt live await with the active pointer on task A. */
+function seedEtaPromptA(): void {
+  ctxStore = {
+    awaiting: 'status_eta_prompt',
+    taskFieldId: 'tf-A',
+    activeInspection: {
+      taskFieldId: 'tf-A',
+      departedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    },
+  };
+}
+
+describe('quoted-message reply during the status_eta_prompt await (QA-FIX-1)', () => {
+  it('REGRESSION: verbose quoted reply to tf-B updates tf-B, NOT the pointer tf-A', async () => {
+    const u = worker();
+    seedEtaPromptA();
+    // Quote resolves on BOTH the initial pass and the post-recursion pass.
+    resolveQuotedContext.mockResolvedValue(QUOTED_TF_B);
+    validateWorkerTaskField.mockResolvedValue({ ok: true, taskFieldId: 'tf-B', fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null });
+    statusIntent('ARRIVED', null); // LLM classifies the verbose text, no task_reference
+
+    await handleAIMessage(u, 'אני כבר אצל הלקוח', 'wamid-B');
+
+    // The quoted TaskField (B) wins over the ETA pointer (A).
+    expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-B', transition: 'ARRIVED', updatedBy: u.id });
+    expect(advanceFieldStatus).not.toHaveBeenCalledWith(expect.objectContaining({ taskFieldId: 'tf-A' }));
+  });
+
+  it('quoted reply with a bare keyword hits tf-B via the fast path (no LLM), pointer on A ignored', async () => {
+    const u = worker();
+    seedEtaPromptA();
+    resolveQuotedContext.mockResolvedValueOnce(QUOTED_TF_B);
+    validateWorkerTaskField.mockResolvedValueOnce({ ok: true, taskFieldId: 'tf-B', fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null });
+
+    await handleAIMessage(u, 'הגעתי', 'wamid-B');
+
+    // Deterministic fast path runs before the context dispatch → tf-B, no parse.
+    expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-B', transition: 'ARRIVED', updatedBy: u.id });
+    expect(parseIntentMock).not.toHaveBeenCalled();
+  });
+
+  it('no quote + unclear ETA reply keeps the pointer on tf-A (no stray tf-B write)', async () => {
+    const u = worker();
+    seedEtaPromptA();
+    // Neither a status keyword nor a parseable ETA → not trapped, pointer kept, idle.
+    parseIntentMock.mockResolvedValueOnce({
+      intent: 'unknown', confidence: 0.2, task_reference: null, field: null, new_value: null,
+      params: {}, missing_fields: [], clarification: 'לא הבנתי', requires_confirmation: false,
+      requires_manager_approval: false, transition: null, problem_type: null,
+    });
+
+    await handleAIMessage(u, 'בלה בלה בלה');
+
+    expect(ctxStore).toMatchObject({ awaiting: 'idle_active_inspection', activeInspection: { taskFieldId: 'tf-A' } });
+    expect(advanceFieldStatus).not.toHaveBeenCalled();
+
+    // A follow-up bare keyword (still no quote) resolves to the KEPT pointer tf-A.
+    validateWorkerTaskField.mockResolvedValueOnce({ ok: true, taskFieldId: 'tf-A', fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null });
+    statusIntent('ARRIVED', null);
+    await handleAIMessage(u, 'הגעתי');
+    expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-A', transition: 'ARRIVED', updatedBy: u.id });
+  });
+});

@@ -2775,6 +2775,44 @@ functional immediately; template path activates on Meta approval.
 
 ---
 
+## 4.13 — QA-FIX-1: quoted context lost during the status_eta_prompt live await (2026-07-07)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+
+**What to do:** Fix the medium-severity bug found in the Phase 1+2 QA review:
+while a worker is answering the travel-ETA prompt (awaiting `status_eta_prompt`,
+active pointer on task A), a swipe-reply (quote) to a DIFFERENT TaskField's
+message (B) with verbose text containing no bare status keyword lost the quote —
+`handleStatusEtaReply` case 3 recursed into `handleAIMessage(user, text)`
+without the `quotedWamid`, so the LLM-classified transition resolved via the
+Phase-1 pointer and updated A instead of the quoted B.
+
+**Definition of Done:** the quoted TaskField wins over the pointer in the
+`status_eta_prompt` state for both keyword and verbose phrasings; regression
+test proves the pre-fix code fails; no other await handler's behavior changes.
+
+**Fix:** thread an optional `quotedWamid` through `continueConversation` →
+`handleStatusEtaReply` → both of its recursive `handleAIMessage` calls
+(`src/ai/router.ts`, +6/−4). The recursion re-resolves the quoted context and
+the existing (already-tested) quote-beats-pointer priority in
+`runAdvanceStatusDirect` does the rest — no duplicated logic, no new DB writes.
+
+**Files changed:** `src/ai/router.ts`,
+`src/__tests__/routerActiveInspection.test.ts` (+3 tests: the regression, the
+fast-path keyword case in the same state, and no-quote pointer preservation).
+
+**Implemented by an Opus sub-agent; orchestrator QA:** diff reviewed line by
+line (only the 2 allowed files touched); regression test verified to FAIL on
+the pre-fix router (1 failed | 13 passed) and pass after; `npx tsc --noEmit`
+clean; 280/280 tests pass across 12 router-related files.
+
+**Known remaining (documented, out of scope):** other live-await handlers that
+recurse via `handleAIMessage(user, text)` still drop `quotedWamid`; the
+deterministic keyword fast path covers those states, and a similar one-line
+threading can be applied if a real case surfaces.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:
