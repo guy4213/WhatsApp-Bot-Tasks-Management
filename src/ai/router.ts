@@ -17,8 +17,10 @@ import { parseIntent } from './intentParser';
 import { resolveTask } from './taskResolver';
 import {
   getContext, setContext, clearContext,
+  setActiveInspection, getActiveInspection,
   type ConversationState, type AwaitingKind,
 } from '../services/conversationContext';
+import { parseTravelMinutes } from './travelEta';
 import { setViewOwners, getViewOwners, clearViewOwners } from '../services/viewContext';
 import { setActiveTask, getActiveTask } from '../services/taskContext';
 import { getHistory, appendTurn } from '../services/chatHistory';
@@ -41,6 +43,9 @@ import {
 } from './menu';
 import {
   findOpenTaskFieldForWorker,
+  findActiveInProgressTaskFieldForWorker,
+  validateWorkerTaskField,
+  writeTravelEta,
   resolveOpenTaskFieldByHint,
   advanceFieldStatus,
   writeFieldNotes,
@@ -436,8 +441,12 @@ export async function handleAIMessage(user: ResolvedUser, text: string): Promise
   }
 
   // Mid-conversation? Continue the clarification flow.
+  // EXCEPTION: `idle_active_inspection` is not a live await — the row exists only
+  // to hold the active-task pointer after "יצאתי". Treat it as "no context" so the
+  // message flows through fresh intent parsing; the pointer is read later by
+  // `runAdvanceStatusDirect` via getActiveInspection.
   const ctx = await getContext(user.phone);
-  if (ctx) {
+  if (ctx && ctx.awaiting !== 'idle_active_inspection') {
     await continueConversation(user, text, ctx);
     return;
   }
@@ -734,6 +743,10 @@ async function continueConversation(
   }
   if (ctx.awaiting === 'status_choice') {
     await handleStatusChoiceReply(user, trimmed, ctx);
+    return;
+  }
+  if (ctx.awaiting === 'status_eta_prompt') {
+    await handleStatusEtaReply(user, text, ctx);
     return;
   }
   if (ctx.awaiting === 'finished_followup') {
@@ -2229,9 +2242,22 @@ async function handleStatusChoiceReply(
   await performTransition(user, ctx.taskFieldId, chosen.transition);
 }
 
+/** The binding travel-ETA prompt shown right after "יצאתי". */
+function departedEtaPrompt(): string {
+  return (
+    'עדכנתי שיצאת לדרך 🚗\n' +
+    'כמה זמן נסיעה משוער עד הלקוח? (למשל: 20 דקות)\n' +
+    'חשוב לדייק — הזמן מחייב ויוצג ללקוח.'
+  );
+}
+
 /**
- * Shared write + reply path. FINISHED opens the 4-option follow-up + keeps
- * the awaiting state alive (`finished_followup`); DEPARTED / ARRIVED clear it.
+ * Shared write + reply path.
+ *  - FINISHED  → 4-option follow-up (`finished_followup`), drops the active pointer.
+ *  - DEPARTED  → stores the active-task pointer (source of truth for follow-ups)
+ *               and asks for the binding travel ETA (`status_eta_prompt`).
+ *  - ARRIVED   → refreshes the active pointer (window re-anchored), goes idle.
+ *  - CONFIRM   → clears context (no pointer).
  */
 async function performTransition(
   user: ResolvedUser,
@@ -2240,12 +2266,83 @@ async function performTransition(
 ): Promise<void> {
   await advanceFieldStatus({ taskFieldId, transition, updatedBy: user.id });
   if (transition === 'FINISHED') {
+    // finished_followup carries no activeInspection → the pointer is dropped.
     await setContext(user.phone, { awaiting: 'finished_followup', taskFieldId });
     await sendFinishedFollowUpMenu(user.phone);
     return;
   }
+  if (transition === 'DEPARTED') {
+    // Store the exact TaskField as the worker's active pointer IMMEDIATELY — this
+    // is the source of truth for the next "הגעתי"/"סיימתי", independent of the ETA.
+    await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
+      awaiting: 'status_eta_prompt',
+    });
+    await sendTextMessage({ to: user.phone, text: departedEtaPrompt() });
+    return;
+  }
+  if (transition === 'ARRIVED') {
+    // Keep the pointer (re-anchor its window to arrival) so "סיימתי" resolves to
+    // the same TaskField; go idle (neutral holder, not a live await).
+    await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
+      awaiting: 'idle_active_inspection',
+    });
+    await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
+    return;
+  }
+  // CONFIRM (and any other non-pointer transition).
   await clearContext(user.phone);
   await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
+}
+
+/**
+ * Handle the worker's reply to the travel-ETA prompt (`status_eta_prompt`).
+ * The ETA is OPTIONAL and must NEVER trap the worker or weaken the active
+ * context:
+ *  - a status keyword ("הגעתי"/"סיימתי") → dispatch it on the pointer's TaskField;
+ *  - a parseable duration → store it (TaskField columns), keep the pointer, go idle;
+ *  - anything else → go idle (keep the pointer) and re-process as a fresh message.
+ */
+async function handleStatusEtaReply(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+): Promise<void> {
+  const taskFieldId = ctx.activeInspection?.taskFieldId ?? ctx.taskFieldId;
+  if (!taskFieldId) {
+    await clearContext(user.phone);
+    await handleAIMessage(user, text);
+    return;
+  }
+  const departedAt = ctx.activeInspection?.departedAt ?? new Date().toISOString();
+
+  // 1. Status keyword → advance now (short drives / "כבר הגעתי").
+  const kw = extractDirectStatusKeyword(text);
+  if (kw) {
+    await performTransition(user, taskFieldId, kw);
+    return;
+  }
+
+  // 2. Parseable travel time → store it (optional data), keep the pointer, idle.
+  const minutes = parseTravelMinutes(text);
+  if (minutes !== null) {
+    await writeTravelEta({ taskFieldId, minutes, updatedBy: user.id });
+    await setActiveInspection(user.phone, taskFieldId, departedAt, {
+      awaiting: 'idle_active_inspection',
+      etaMinutes: minutes,
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: `מעולה, רשמתי זמן נסיעה משוער: ${minutes} דק׳. עדכן אותי כשתגיע.`,
+    });
+    return;
+  }
+
+  // 3. Neither → don't trap: keep the pointer, go idle, and handle the message
+  //    fresh (so an unrelated request isn't swallowed by the ETA prompt).
+  await setActiveInspection(user.phone, taskFieldId, departedAt, {
+    awaiting: 'idle_active_inspection',
+  });
+  await handleAIMessage(user, text);
 }
 
 /** Send the finished follow-up menu as a List Message (fallback: numbered text). */
@@ -2340,6 +2437,41 @@ async function runAdvanceStatusDirect(
   transition: AdvanceTransition,
   hint: string | null,
 ): Promise<void> {
+  // ── Active-task context (Phase 1) ──────────────────────────────────────────
+  // For "continue the active inspection" transitions (ARRIVED/FINISHED) with no
+  // explicit hint, the SOURCE OF TRUTH is the stored activeTaskFieldId set on
+  // "יצאתי" — NOT a status search. DEPARTED/CONFIRM identify a (fresh) inspection
+  // and keep the existing open-inspection resolution below.
+  if (!hint && (transition === 'ARRIVED' || transition === 'FINISHED')) {
+    // 1. PRIMARY: the stored pointer, if still valid + owned + not closed.
+    const active = await getActiveInspection(user.phone);
+    if (active) {
+      const v = await validateWorkerTaskField(user.id, active.taskFieldId);
+      if (v.ok) {
+        await performTransition(user, active.taskFieldId, transition);
+        return;
+      }
+      // Pointer no longer usable (closed/reassigned) → fall through to fallback.
+    }
+    // 2. FALLBACK: live in-progress (EN_ROUTE/ARRIVED) within the window.
+    const inProg = await findActiveInProgressTaskFieldForWorker(user.id);
+    if (inProg !== null && !('ambiguous' in inProg)) {
+      await performTransition(user, inProg.taskFieldId, transition);
+      return;
+    }
+    if (inProg !== null && 'ambiguous' in inProg) {
+      await setContext(user.phone, {
+        awaiting: 'status_disambig',
+        pendingTransition: transition,
+        disambigTaskFieldIds: inProg.items.map((i) => i.taskFieldId),
+      });
+      await sendTextMessage({ to: user.phone, text: buildDisambigPrompt(inProg.items) });
+      return;
+    }
+    // 3. No pointer and nothing in-progress → fall through to the generic
+    //    open-inspection resolution below (single→apply, ≥2→ask, 0→"no open").
+  }
+
   const found = hint
     ? await resolveOpenTaskFieldByHint(user.id, hint)
     : await findOpenTaskFieldForWorker(user.id);
@@ -2740,9 +2872,11 @@ async function handlePreReminderTap(
         });
         return;
       }
-      await advanceFieldStatus({ taskFieldId, transition: 'DEPARTED', updatedBy: user.id });
-      await clearContext(user.phone);
-      await sendTextMessage({ to: user.phone, text: 'עדכנתי — יצאת לבדיקה. בהצלחה!' });
+      // Route through the shared status-transition path so DEPARTED stores the
+      // active-inspection pointer and prompts for the travel ETA — identical to a
+      // typed "יצאתי". This keeps follow-up "הגעתי"/"סיימתי" anchored to THIS
+      // TaskField instead of falling back to a status search.
+      await performTransition(user, taskFieldId, 'DEPARTED');
       return;
     }
     case 'NEED_INFO':

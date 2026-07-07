@@ -9,6 +9,59 @@ Conventions:
 
 ---
 
+## 0.4 Active-task context after "יצאתי" — Phase 1 (2026-07-07)
+
+**Status:** DONE (local, uncommitted)
+
+Follow-up status messages ("הגעתי"/"סיימתי") now attach to the exact inspection
+the worker departed for, instead of being re-resolved from scratch (which was
+ambiguous on a multi-inspection day). Plan approved in-session.
+
+**Core principle:** the moment "יצאתי" flips a TaskField to EN_ROUTE, its exact
+`taskFieldId` is stored as the worker's `activeInspection` pointer (in
+`WhatsappConversationContext.state`, keyed by phone, with its OWN 4h window that
+outlives the 10-min row TTL). That pointer — NOT a status search — is the source
+of truth for the next transition. Status (EN_ROUTE/ARRIVED) is only a validity
+check; a status search is a **fallback** used only when there is no valid pointer.
+
+**Behavior:**
+- "יצאתי" → EN_ROUTE + store pointer immediately (independent of ETA) + ask the
+  (binding, but OPTIONAL/non-blocking) travel ETA.
+- "הגעתי"/"סיימתי" → use the stored pointer after validating it still belongs to
+  the worker and isn't CANCELED/DECLINED/FINISHED_FIELD → ARRIVED / FINISHED_FIELD.
+- Fallback when no valid pointer: single in-progress EN_ROUTE/ARRIVED → use it;
+  several → ask (`status_disambig`); none → existing "any open" behavior.
+- ETA reply parsed (`parseTravelMinutes`) → stored on `TaskField.travelEtaMinutes`
+  + `expectedArrivalAt` (feeds the future customer-tracking ETA). No/unclear ETA
+  never weakens the context (default 4h window).
+
+**Files:** `src/db/migrations/014_travel_eta.sql` (2 additive columns);
+`src/services/conversationContext.ts` (`activeInspection` + `status_eta_prompt`/
+`idle_active_inspection` states + set/get/clear helpers);
+`src/services/inspections.ts` (`validateWorkerTaskField`,
+`findActiveInProgressTaskFieldForWorker`, `writeTravelEta`);
+`src/ai/travelEta.ts` (new); `src/ai/router.ts` (`performTransition`
+DEPARTED/ARRIVED, `handleStatusEtaReply`, pointer-first `runAdvanceStatusDirect`,
+`idle_active_inspection` fall-through); `.env.example`
+(`ACTIVE_INSPECTION_DEFAULT_WINDOW_MINUTES`, default 240).
+
+**QA:** `npx tsc --noEmit` clean; full `vitest run` green (1263 passing on a clean
+run; the intermittent "Worker exited unexpectedly" pool flake pre-dates this
+change). New tests: `routerActiveInspection.test.ts` (chained
+יצאתי→ETA→הגעתי→סיימתי on the SAME TaskField, follow-ups NOT disambiguated;
+pointer-primary; ETA-not-a-condition; keyword-during-ETA; 3 fallback cases) +
+`travelEta.test.ts`. Updated `routerInspections`/`detailViewAIContext` mocks +
+DEPARTED/ARRIVED assertions for the new prompt + persisted-pointer behavior.
+
+**Deviations / notes:** the ETA prompt replaces the old "עדכנתי — סטטוס: בדרך"
+confirmation on DEPARTED (approved). The 60-min pre-reminder "יצאתי" tap
+(`PREREMIND_DEPART`) still calls `advanceFieldStatus` directly and does NOT set
+the pointer — a later "הגעתי" resolves via the in-progress FALLBACK; wiring it
+through `performTransition` is a small follow-up. Migration `014` not yet applied
+to Supabase. Phase 2 (reply/quoted-message reference) deferred as agreed.
+
+---
+
 ## 0.3 OwnTracks GPS POC (2026-07-06)
 
 **Status:** DONE (local, uncommitted)

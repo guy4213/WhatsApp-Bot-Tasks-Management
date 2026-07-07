@@ -80,6 +80,9 @@ const notifyOfficeMissingInfoMock = vi.fn().mockResolvedValue(true);
 const notifyOfficeProblemMock = vi.fn().mockResolvedValue(true);
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: vi.fn().mockResolvedValue(null),
+  findActiveInProgressTaskFieldForWorker: vi.fn().mockResolvedValue(null),
+  validateWorkerTaskField: vi.fn().mockResolvedValue({ ok: true, taskFieldId: 'tf-abc', fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null }),
+  writeTravelEta: vi.fn().mockResolvedValue(undefined),
   resolveOpenTaskFieldByHint: vi.fn().mockResolvedValue(null),
   advanceFieldStatus: (...a: unknown[]) => advanceFieldStatusMock(...a),
   writeFieldNotes: vi.fn().mockResolvedValue(undefined),
@@ -135,10 +138,31 @@ let ctxStore: Record<string, unknown> | null = null;
 const setContext = vi.fn(async (_phone: string, state: unknown) => { ctxStore = state as Record<string, unknown>; });
 const getContext = vi.fn(async () => ctxStore);
 const clearContext = vi.fn(async () => { ctxStore = null; });
+// Active-task pointer (Phase 1) — stateful over the same ctxStore.
+const setActiveInspection = vi.fn(async (
+  _phone: string, taskFieldId: string, departedAt: string,
+  opts: { awaiting?: string; etaMinutes?: number } = {},
+) => {
+  ctxStore = {
+    awaiting: opts.awaiting ?? 'idle_active_inspection',
+    taskFieldId,
+    activeInspection: {
+      taskFieldId, departedAt,
+      expiresAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
+      etaMinutes: opts.etaMinutes,
+    },
+  };
+});
+const getActiveInspection = vi.fn(async () =>
+  (ctxStore as { activeInspection?: unknown } | null)?.activeInspection ?? null);
+const clearActiveInspection = vi.fn(async () => { ctxStore = null; });
 vi.mock('../services/conversationContext', () => ({
   setContext: (p: string, s: unknown) => setContext(p, s),
   getContext: (_p: string) => getContext(),
   clearContext: (_p: string) => clearContext(),
+  setActiveInspection: (...a: unknown[]) => (setActiveInspection as (...x: unknown[]) => unknown)(...a),
+  getActiveInspection: (_p: string) => getActiveInspection(),
+  clearActiveInspection: (_p: string) => clearActiveInspection(),
 }));
 
 vi.mock('../services/chatHistory', () => ({
