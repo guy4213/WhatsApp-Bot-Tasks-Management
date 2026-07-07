@@ -77,6 +77,11 @@ export interface TaskFieldContextValues {
   siteCity: string | null;
   inspectionTypeLabel: string | null;
   workerName: string | null;
+  // QA-FIX-3: current scheduled start of the TaskField the user is viewing.
+  // Pre-formatted "YYYY-MM-DD HH:MM" in Asia/Jerusalem — used by the LLM to
+  // default the date when a reschedule mentions only a time ("ל-21:00").
+  currentScheduledStartAtIL?: string | null;
+  currentDurationMinutes?: number | null;
 }
 
 export interface ExtractionRequest {
@@ -208,6 +213,8 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
         `- עיר: ${values.siteCity ?? '—'}`,
         `- סוג בדיקה: ${values.inspectionTypeLabel ?? '—'}`,
         `- עובד משויך: ${values.workerName ?? '—'}`,
+        `- תאריך ושעה נוכחיים (Asia/Jerusalem): ${values.currentScheduledStartAtIL ?? '—'}`,
+        `- משך נוכחי (דקות): ${values.currentDurationMinutes ?? '—'}`,
       ].join('\n')
     : '';
 
@@ -246,6 +253,12 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
     '- "שעה וחצי" / "90 דקות" / "שעתיים" → newDurationMinutes (60/90/120 וכו\').',
     '- תאריך יחסי: "מחר" = יום הבא, "יום ראשון" = ראשון הבא, "ב-10" / "בעשר" = 10:00.',
     '- אם ניתן תאריך בלבד ללא שעה — confidence < 0.60 (בקש הבהרה).',
+    // QA-FIX-3: time-only reschedule must default the date to the current TF's date.
+    '- **אם ניתנה שעה בלבד ללא תאריך** (למשל "עדכן שעה ל-21:00", "תעביר ל-9:30", "תזמן ל-14:00") →',
+    '    action=reschedule, newScheduledStartAt = **אותו התאריך של הבדיקה הנוכחית** (השדה "תאריך ושעה נוכחיים" למעלה) עם השעה החדשה, offset +03:00.',
+    '    זו פעולה תקינה עם confidence >= 0.85 — אל תבקש הבהרה.',
+    '    דוגמה: אם הבדיקה הנוכחית ב-2026-07-07 22:00 והמשתמש כותב "עדכן שעה ל-21:00" → newScheduledStartAt="2026-07-07T21:00:00+03:00".',
+    '    אם הבדיקה הנוכחית ריקה/לא ידועה — השתמש בתאריך היום.',
     '- "חזרה" / "תחזור" / "4" → action=back.',
     '- "ביטול" / "עצור" → action=cancel.',
     '- אם אינך בטוח מה הפעולה — החזר confidence נמוך מ-0.60.',

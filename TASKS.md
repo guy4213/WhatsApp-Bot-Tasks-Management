@@ -2813,6 +2813,63 @@ threading can be applied if a real case surfaces.
 
 ---
 
+## 4.15 — QA-FIX-3: time-only reschedule ("עדכן שעה ל-21:00") rejected by AI extractor (2026-07-07)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+
+**What to do:** Fix the frustration reported in real-user QA: while viewing a
+TaskField's detail card (scheduled 22:00), the user typed
+"עדכן את שעת הבדיקה ל-21:00" and got "לא ניתן לזהות שעה מדויקת. אנא ציין
+תאריך ושעה מלאים." The user's intent was unambiguous — reschedule to 21:00 on
+the SAME DAY the inspection is already on. The AI shouldn't demand a full date
+when it can be inferred from the TaskField being viewed.
+
+**Root cause:** `buildInspectionActionBlock` in `src/ai/contextExtractor.ts`
+never gave the LLM the current `scheduledStartAt`, only contact/site fields.
+The prompt only handled "date-only, no time" (confidence < 0.60), so a time-only
+input had no rule to fall back on — the LLM refused to guess and returned a
+clarification, which `handleMgrActionFreeText` surfaced verbatim.
+
+**Definition of Done:** "עדכן שעה ל-21:00" (or any time-only reschedule) while
+viewing a TaskField resolves to a single-action reschedule with
+`newScheduledStartAt` = current TaskField's date + the new time,
+confidence ≥ 0.85 — driving the normal single-action confirm path
+(`dispatchSingleAction` → success message "עודכן — תאריך ושעה: DD/MM בשעה HH:MM").
+
+**Fix:**
+1. `src/services/managerViews.ts` — add `scheduledStartAt` and `durationMinutes`
+   to `TaskFieldContextSnapshot` + query.
+2. `src/ai/contextExtractor.ts` — add `currentScheduledStartAtIL` +
+   `currentDurationMinutes` to `TaskFieldContextValues`; include them in
+   `buildInspectionActionBlock` and add an explicit rule + worked example:
+   "if only a time is given, use the SAME date as the current TaskField —
+   confidence ≥ 0.85, no clarification."
+3. `src/ai/inspectionFormatters.ts` — new helper `formatScheduledStartForPrompt`
+   (`YYYY-MM-DD HH:MM` in Asia/Jerusalem, Intl-based → UTC-server safe).
+4. `src/ai/router.ts` — thread the new snapshot fields into `ctxValues` inside
+   `handleMgrActionFreeText`.
+
+**Files changed:** `src/ai/contextExtractor.ts` (+7/−1),
+`src/ai/inspectionFormatters.ts` (+15/−0), `src/ai/router.ts` (+7/−0),
+`src/services/managerViews.ts` (+5/−0).
+
+**QA:** `npx tsc --noEmit` clean; 219/219 tests pass across
+`contextExtractor.test.ts`, `routerCorrections.test.ts`,
+`routerManagerDisplay.test.ts`, `managerSearchExpansion.test.ts`,
+`detailViewAIContext.test.ts`. Manual re-run on the live worker's phone still
+required — the change is on the AI prompt, so behavior depends on the LLM
+respecting the new rule (GPT-4o has honored analogous defaulting rules in this
+codebase).
+
+**Known caveat:** the fix targets the extractor path used by the `mgr_today_action`
+detail view (the flow the user was in). The other reschedule entry points
+(`schedule_time` intent from top-level free text, `schedule_task_field` flow)
+still parse dates the old way — they see the LLM's own `schedule_time` prompt,
+which is unchanged. If a similar "time-only" complaint surfaces there, mirror
+this rule into `INTENT_SYSTEM_BLOCKS.schedule_time`.
+
+---
+
 ## 4.14 — QA-FIX-2: swipe-reply on the "my inspections" detail card not resolving (2026-07-07)
 
 **Status:** DONE (local, uncommitted — awaiting user approval to commit/push).

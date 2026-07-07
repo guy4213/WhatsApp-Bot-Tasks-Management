@@ -933,6 +933,10 @@ export interface TaskFieldContextSnapshot {
   siteCity: string | null;
   inspectionTypeLabel: string | null;
   workerName: string | null;
+  // QA-FIX-3: current scheduled start, so the AI extractor can default the
+  // date when the user provides only a time (e.g. "עדכן שעה ל-21:00").
+  scheduledStartAt: Date | null;
+  durationMinutes: number | null;
 }
 
 /**
@@ -959,7 +963,9 @@ export async function getTaskFieldValuesForContext(
        tf."siteAddress"          AS "siteAddress",
        tf."siteCity"             AS "siteCity",
        it."labelHe"              AS "inspectionTypeLabel",
-       u.name                    AS "workerName"
+       u.name                    AS "workerName",
+       tf."scheduledStartAt"     AS "scheduledStartAt",
+       tf."durationMinutes"      AS "durationMinutes"
      FROM "TaskField" tf
      JOIN "Task" t             ON t.id  = tf."taskId"
      JOIN "InspectionType" it  ON it.id = tf."inspectionTypeId"

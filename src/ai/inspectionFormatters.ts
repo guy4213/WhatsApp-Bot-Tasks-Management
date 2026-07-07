@@ -132,6 +132,22 @@ export function formatShortDateTimeIL(d: Date | string): string {
   return `${get('day')}/${get('month')} בשעה ${get('hour')}:${get('minute')}`;
 }
 
+/**
+ * "YYYY-MM-DD HH:MM" in Asia/Jerusalem — unambiguous format fed to the LLM
+ * (`buildInspectionActionBlock`) so it can default the date when the user
+ * provides only a time in a reschedule request. Intl-based; UTC servers safe.
+ */
+export function formatScheduledStartForPrompt(d: Date | string): string {
+  const date = new Date(d);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jerusalem',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+}
+
 /** Returns 0 (Sun)…6 (Sat) for a Date in Asia/Jerusalem. */
 function getDowJerusalem(d: Date): number {
   // Use en-CA (YYYY-MM-DD) to get the local date string, then compute DOW

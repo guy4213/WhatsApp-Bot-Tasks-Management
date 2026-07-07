@@ -122,6 +122,7 @@ import {
   hebrewShortLabel,
   formatHebrewDateTime,
   formatShortDateTimeIL,
+  formatScheduledStartForPrompt,
   formatInspectionListRow,
   formatInspectionDetail,
   formatLeadListRow,
@@ -6125,6 +6126,12 @@ async function handleMgrActionFreeText(
         siteCity: snapshot.siteCity,
         inspectionTypeLabel: snapshot.inspectionTypeLabel,
         workerName: snapshot.workerName,
+        // QA-FIX-3: expose the current scheduled time to the LLM so a
+        // time-only reschedule ("עדכן שעה ל-21:00") can default the date.
+        currentScheduledStartAtIL: snapshot.scheduledStartAt
+          ? formatScheduledStartForPrompt(snapshot.scheduledStartAt)
+          : null,
+        currentDurationMinutes: snapshot.durationMinutes,
       }
     : undefined;
 
