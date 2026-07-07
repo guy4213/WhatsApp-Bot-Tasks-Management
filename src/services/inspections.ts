@@ -194,6 +194,139 @@ export async function findOpenTaskFieldForWorker(userId: string): Promise<OpenTa
   return { ambiguous: true, count: items.length, items };
 }
 
+// ── Active-task context (Phase 1): validate a specific TaskField for a worker ─
+// Used when the worker has a stored `activeTaskFieldId` (set on "יצאתי") and
+// sends a follow-up "הגעתי"/"סיימתי". The stored id is the source of truth; this
+// only confirms it is still usable before the next transition.
+
+export type ValidateTaskFieldResult =
+  | { ok: true; taskFieldId: string; fieldStatus: string; customerName: string | null; taskTitle: string | null }
+  | { ok: false; reason: 'missing' | 'not_owner' | 'closed'; fieldStatus?: string };
+
+/** Confirm a TaskField still belongs to the worker and is not terminal. */
+export async function validateWorkerTaskField(
+  userId: string,
+  taskFieldId: string,
+): Promise<ValidateTaskFieldResult> {
+  const { rows } = await pool.query<{
+    ownerId: string | null;
+    fieldStatus: string;
+    customerName: string | null;
+    taskTitle: string | null;
+  }>(
+    `SELECT t."ownerId"                                       AS "ownerId",
+            tf."fieldStatus"                                  AS "fieldStatus",
+            COALESCE(c.name, l."fullName",
+              NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+              l.company, p.client, il."fromName")             AS "customerName",
+            t.title                                           AS "taskTitle"
+       FROM "TaskField" tf
+       JOIN "Task"           t  ON t.id  = tf."taskId"
+       LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+       LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+       LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+       LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+      WHERE tf.id = $1`,
+    [taskFieldId],
+  );
+  const row = rows[0];
+  if (!row) return { ok: false, reason: 'missing' };
+  if (row.ownerId !== userId) return { ok: false, reason: 'not_owner', fieldStatus: row.fieldStatus };
+  if (['CANCELED', 'DECLINED', 'FINISHED_FIELD'].includes(row.fieldStatus)) {
+    return { ok: false, reason: 'closed', fieldStatus: row.fieldStatus };
+  }
+  return {
+    ok: true,
+    taskFieldId,
+    fieldStatus: row.fieldStatus,
+    customerName: row.customerName,
+    taskTitle: row.taskTitle,
+  };
+}
+
+// ── Active-task context (Phase 1): fallback resolver by live in-progress status ─
+// Only used when there is NO valid stored pointer. Returns the worker's
+// in-progress (EN_ROUTE/ARRIVED) TaskField(s) within the active window, using
+// the same null/single/ambiguous shape as findOpenTaskFieldForWorker so callers
+// can share the disambiguation path. Status here is a FALLBACK signal, never the
+// primary identifier.
+const IN_PROGRESS_FIELD_STATUSES = ['EN_ROUTE', 'ARRIVED'] as const;
+
+export async function findActiveInProgressTaskFieldForWorker(
+  userId: string,
+  windowMinutes?: number,
+): Promise<OpenTaskFieldResult> {
+  const window = windowMinutes
+    ?? parseInt(process.env.ACTIVE_INSPECTION_DEFAULT_WINDOW_MINUTES ?? '240', 10);
+  const result = await pool.query<{
+    taskFieldId: string;
+    customerName: string | null;
+    taskTitle: string | null;
+    siteAddress: string | null;
+    siteCity: string | null;
+    scheduledStartAt: Date | null;
+  }>(
+    `SELECT tf.id            AS "taskFieldId",
+            COALESCE(c.name, l."fullName",
+              NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
+              l.company, p.client, il."fromName")  AS "customerName",
+            t.title               AS "taskTitle",
+            tf."siteAddress"      AS "siteAddress",
+            tf."siteCity"         AS "siteCity",
+            tf."scheduledStartAt" AS "scheduledStartAt"
+       FROM "TaskField" tf
+       JOIN "Task"           t  ON t.id  = tf."taskId"
+       LEFT JOIN "Customer"     c  ON c.id  = t."customerId"
+       LEFT JOIN "Lead"         l  ON l.id  = t."leadId"
+       LEFT JOIN "Project"      p  ON p.id  = t."projectId"
+       LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
+      WHERE t."ownerId"      = $1
+        AND tf."fieldStatus" = ANY($2::text[])
+        AND COALESCE(tf."arrivedAt", tf."departedAt") >= now() - make_interval(mins => $3)
+      ORDER BY COALESCE(tf."arrivedAt", tf."departedAt") DESC`,
+    [userId, IN_PROGRESS_FIELD_STATUSES, window],
+  );
+  if (result.rowCount === 0) return null;
+  if (result.rowCount === 1) {
+    return {
+      taskFieldId: result.rows[0].taskFieldId,
+      customerName: result.rows[0].customerName,
+      taskTitle: result.rows[0].taskTitle,
+    };
+  }
+  const items: OpenTaskFieldPreview[] = result.rows.map((r) => ({
+    taskFieldId: r.taskFieldId,
+    customerName: r.customerName,
+    siteAddress: r.siteAddress,
+    siteCity: r.siteCity,
+    scheduledStartAt: r.scheduledStartAt,
+  }));
+  return { ambiguous: true, count: items.length, items };
+}
+
+// ── Active-task context (Phase 1): store the optional worker-declared travel ETA ─
+export interface WriteTravelEtaParams {
+  taskFieldId: string;
+  minutes: number;
+  updatedBy: string;
+}
+
+/** Persist the worker's stated travel time + precomputed expectedArrivalAt.
+ *  Optional data — never gates the active-task context. */
+export async function writeTravelEta(params: WriteTravelEtaParams): Promise<void> {
+  const { taskFieldId, minutes, updatedBy } = params;
+  await pool.query(
+    `UPDATE "TaskField"
+        SET "travelEtaMinutes"  = $2,
+            "expectedArrivalAt" = COALESCE("departedAt", now()) + make_interval(mins => $2),
+            "updatedByUserId"   = $3,
+            "updatedAt"         = now()
+      WHERE id = $1`,
+    [taskFieldId, minutes, updatedBy],
+  );
+  log.info({ taskFieldId, minutes, updatedBy }, 'writeTravelEta: travel ETA stored');
+}
+
 // ── D2-T5: on-demand status transitions (DEPARTED / ARRIVED / FINISHED) ─────
 // SPEC §7. These are the three worker-triggered transitions from the "status
 // update" menu (item 3) and from the D5-T3 free-text/voice intent

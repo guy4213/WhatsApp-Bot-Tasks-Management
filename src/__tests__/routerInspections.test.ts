@@ -29,8 +29,15 @@ const declineInspection = vi.fn().mockResolvedValue(undefined);
 const requestMoreInfo = vi.fn().mockResolvedValue(undefined);
 const notifyOfficeDeclined = vi.fn().mockResolvedValue(true);
 const notifyOfficeNeedsMoreInfo = vi.fn().mockResolvedValue(true);
+// Active-task context (Phase 1) — default: no in-progress match, validation ok.
+const findActiveInProgressTaskFieldForWorker = vi.fn().mockResolvedValue(null);
+const validateWorkerTaskField = vi.fn().mockResolvedValue({ ok: true, taskFieldId: 'tf-x', fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null });
+const writeTravelEta = vi.fn().mockResolvedValue(undefined);
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: (...a: unknown[]) => findOpenTaskFieldForWorker(...a),
+  findActiveInProgressTaskFieldForWorker: (...a: unknown[]) => findActiveInProgressTaskFieldForWorker(...a),
+  validateWorkerTaskField: (...a: unknown[]) => validateWorkerTaskField(...a),
+  writeTravelEta: (...a: unknown[]) => writeTravelEta(...a),
   resolveOpenTaskFieldByHint: (...a: unknown[]) => resolveOpenTaskFieldByHint(...a),
   advanceFieldStatus: (...a: unknown[]) => advanceFieldStatus(...a),
   writeFieldNotes: (...a: unknown[]) => writeFieldNotes(...a),
@@ -62,10 +69,31 @@ const setContext = vi.fn(async (_phone: string, state: unknown) => {
 });
 const getContext = vi.fn(async () => ctxStore);
 const clearContext = vi.fn(async () => { ctxStore = null; });
+// Active-task pointer (Phase 1) — stateful over the same ctxStore.
+const setActiveInspection = vi.fn(async (
+  _phone: string, taskFieldId: string, departedAt: string,
+  opts: { awaiting?: string; etaMinutes?: number } = {},
+) => {
+  ctxStore = {
+    awaiting: opts.awaiting ?? 'idle_active_inspection',
+    taskFieldId,
+    activeInspection: {
+      taskFieldId, departedAt,
+      expiresAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
+      etaMinutes: opts.etaMinutes,
+    },
+  };
+});
+const getActiveInspection = vi.fn(async () =>
+  (ctxStore as { activeInspection?: unknown } | null)?.activeInspection ?? null);
+const clearActiveInspection = vi.fn(async () => { ctxStore = null; });
 vi.mock('../services/conversationContext', () => ({
   setContext: (phone: string, state: unknown) => setContext(phone, state),
   getContext: (_phone: string) => getContext(),
   clearContext: (_phone: string) => clearContext(),
+  setActiveInspection: (...a: unknown[]) => (setActiveInspection as (...x: unknown[]) => unknown)(...a),
+  getActiveInspection: (_phone: string) => getActiveInspection(),
+  clearActiveInspection: (_phone: string) => clearActiveInspection(),
 }));
 
 // Chat history — a no-op stub is enough (the AI-intent path calls appendTurn).
@@ -136,6 +164,9 @@ beforeEach(() => {
   notifyOfficeNeedsMoreInfo.mockReset(); notifyOfficeNeedsMoreInfo.mockResolvedValue(true);
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
   sendListMessage.mockReset(); sendListMessage.mockResolvedValue(undefined);
+  findActiveInProgressTaskFieldForWorker.mockReset(); findActiveInProgressTaskFieldForWorker.mockResolvedValue(null);
+  validateWorkerTaskField.mockReset(); validateWorkerTaskField.mockResolvedValue({ ok: true, taskFieldId: 'tf-x', fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null });
+  writeTravelEta.mockReset(); writeTravelEta.mockResolvedValue(undefined);
   setContext.mockClear();
   clearContext.mockClear();
 });
@@ -496,7 +527,7 @@ describe('D2-T5 — status update flow via menu item 3', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'status_choice', taskFieldId: 'tf-1' });
   });
 
-  it('choice 1 → DEPARTED write + "בדרך" reply, awaiting cleared', async () => {
+  it('choice 1 → DEPARTED write + travel-ETA prompt, active pointer stored (Phase 1)', async () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 3);
@@ -510,11 +541,16 @@ describe('D2-T5 — status update flow via menu item 3', () => {
       transition: 'DEPARTED',
       updatedBy: user.id,
     });
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('בדרך');
-    expect(ctxStore).toBeNull();
+    // DEPARTED now asks for the (binding, optional) travel ETA and stores the
+    // active pointer — context is NOT cleared (source of truth for follow-ups).
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('נסיעה');
+    expect(ctxStore).toMatchObject({
+      awaiting: 'status_eta_prompt',
+      activeInspection: { taskFieldId: 'tf-1' },
+    });
   });
 
-  it('choice 2 → ARRIVED write + "באתר" reply', async () => {
+  it('choice 2 → ARRIVED write + "באתר" reply, active pointer kept', async () => {
     const user = makeUser();
     findOpenTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-1', customerName: null });
     await pressMenu(user, 3);
@@ -529,7 +565,11 @@ describe('D2-T5 — status update flow via menu item 3', () => {
       updatedBy: user.id,
     });
     expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('באתר');
-    expect(ctxStore).toBeNull();
+    // ARRIVED keeps the pointer (idle) so "סיימתי" resolves to the same TaskField.
+    expect(ctxStore).toMatchObject({
+      awaiting: 'idle_active_inspection',
+      activeInspection: { taskFieldId: 'tf-1' },
+    });
   });
 
   it('choice 3 → FINISHED write + follow-up menu emitted + awaiting=finished_followup', async () => {
@@ -708,7 +748,8 @@ describe('D5-T3 set_field_status intent → direct advanceFieldStatus', () => {
       transition: 'DEPARTED',
       updatedBy: user.id,
     });
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('בדרך');
+    // DEPARTED now prompts for the travel ETA (active-task context, Phase 1).
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('נסיעה');
   });
 
   it('"יצאתי ללקוח כהן" (taskRef) resolves via resolveOpenTaskFieldByHint → DEPARTED direct write', async () => {
@@ -854,8 +895,12 @@ describe('D2-T5 — free-text hint resolves ambiguous open TaskField', () => {
       transition: 'DEPARTED',
       updatedBy: user.id,
     });
-    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('בדרך');
-    expect(ctxStore).toBeNull();
+    // DEPARTED prompts for travel ETA + stores the active pointer (not cleared).
+    expect(sendTextMessage.mock.calls.at(-1)?.[0].text).toContain('נסיעה');
+    expect(ctxStore).toMatchObject({
+      awaiting: 'status_eta_prompt',
+      activeInspection: { taskFieldId: 'tf-9' },
+    });
   });
 
   it('no match → "לא הצלחתי לזהות" + keep awaiting', async () => {

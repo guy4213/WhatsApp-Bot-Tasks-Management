@@ -8,7 +8,7 @@
  *  - PREREMIND_NEED_INFO_... → sets awaiting pre_reminder_need_info_note
  *  - PREREMIND_PROBLEM_... → routes to problem_type_choice flow
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 // ── Pool mock (for the status check in DEPART handler) ───────────────────────
 
@@ -35,9 +35,16 @@ const declineInspection = vi.fn().mockResolvedValue(undefined);
 const requestMoreInfo = vi.fn().mockResolvedValue(undefined);
 const notifyOfficeDeclined = vi.fn().mockResolvedValue(true);
 const notifyOfficeNeedsMoreInfo = vi.fn().mockResolvedValue(true);
+// Active-task context (Phase 1) — default: no in-progress match, validation ok.
+const findActiveInProgressTaskFieldForWorker = vi.fn().mockResolvedValue(null);
+const validateWorkerTaskField = vi.fn().mockResolvedValue({ ok: true, taskFieldId: 'tf-x', fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null });
+const writeTravelEta = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../services/inspections', () => ({
   findOpenTaskFieldForWorker: (...a: unknown[]) => findOpenTaskFieldForWorker(...a),
+  findActiveInProgressTaskFieldForWorker: (...a: unknown[]) => findActiveInProgressTaskFieldForWorker(...a),
+  validateWorkerTaskField: (...a: unknown[]) => validateWorkerTaskField(...a),
+  writeTravelEta: (...a: unknown[]) => writeTravelEta(...a),
   resolveOpenTaskFieldByHint: (...a: unknown[]) => resolveOpenTaskFieldByHint(...a),
   advanceFieldStatus: (...a: unknown[]) => advanceFieldStatus(...a),
   writeFieldNotes: (...a: unknown[]) => writeFieldNotes(...a),
@@ -72,10 +79,31 @@ const setContext = vi.fn(async (_phone: string, state: unknown) => {
 });
 const getContext = vi.fn(async () => ctxStore);
 const clearContext = vi.fn(async () => { ctxStore = null; });
+// Active-task pointer (Phase 1) — stateful over the same ctxStore.
+const setActiveInspection = vi.fn(async (
+  _phone: string, taskFieldId: string, departedAt: string,
+  opts: { awaiting?: string; etaMinutes?: number } = {},
+) => {
+  ctxStore = {
+    awaiting: opts.awaiting ?? 'idle_active_inspection',
+    taskFieldId,
+    activeInspection: {
+      taskFieldId, departedAt,
+      expiresAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
+      etaMinutes: opts.etaMinutes,
+    },
+  };
+});
+const getActiveInspection = vi.fn(async () =>
+  (ctxStore as { activeInspection?: unknown } | null)?.activeInspection ?? null);
+const clearActiveInspection = vi.fn(async () => { ctxStore = null; });
 vi.mock('../services/conversationContext', () => ({
   setContext: (phone: string, state: unknown) => setContext(phone, state),
   getContext: (_phone: string) => getContext(),
   clearContext: (_phone: string) => clearContext(),
+  setActiveInspection: (...a: unknown[]) => (setActiveInspection as (...x: unknown[]) => unknown)(...a),
+  getActiveInspection: (_phone: string) => getActiveInspection(),
+  clearActiveInspection: (_phone: string) => clearActiveInspection(),
 }));
 
 // ── Other required mocks ──────────────────────────────────────────────────────
@@ -195,6 +223,7 @@ vi.mock('../ai/contextExtractor', () => ({
 }));
 
 import { handleAIMessage } from '../ai/router';
+import { parseIntent } from '../ai/intentParser';
 
 const TASK_FIELD_ID = '33333333-3333-3333-3333-333333333333';
 const UUID_RE = TASK_FIELD_ID;
@@ -222,6 +251,9 @@ beforeEach(() => {
   sendTextMessage.mockResolvedValue(undefined);
   sendListMessage.mockResolvedValue(undefined);
   advanceFieldStatus.mockResolvedValue(undefined);
+  findActiveInProgressTaskFieldForWorker.mockResolvedValue(null);
+  validateWorkerTaskField.mockResolvedValue({ ok: true, taskFieldId: 'tf-x', fieldStatus: 'EN_ROUTE', customerName: null, taskTitle: null });
+  writeTravelEta.mockResolvedValue(undefined);
   requestMoreInfo.mockResolvedValue(undefined);
   // D5-T19a: notifyOffice* return Promise<boolean> — default to true (happy path).
   notifyOfficeNeedsMoreInfo.mockResolvedValue(true);
@@ -352,9 +384,53 @@ describe('PREREMIND_DEPART on already-advanced status', () => {
       transition: 'DEPARTED',
       updatedBy: 'user-1',
     });
+    // DEPART now goes through performTransition → asks for the travel ETA
+    // (same as a typed "יצאתי").
     expect(sendTextMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringContaining('יצאת לבדיקה') }),
+      expect.objectContaining({ text: expect.stringContaining('נסיעה') }),
     );
+  });
+});
+
+// ── PREREMIND_DEPART feeds the active-task context (Phase 1) ───────────────────
+
+describe('PREREMIND_DEPART → active-task context (Phase 1)', () => {
+  it('stores the active pointer and, afterwards, "הגעתי"/"סיימתי" stay on the SAME TaskField', async () => {
+    // 1. Tap "יצאתי" from the pre-reminder card (status ASSIGNED → advances).
+    poolQuery.mockResolvedValueOnce({ rows: [{ fieldStatus: 'ASSIGNED' }] });
+    await handleAIMessage(makeUser(), `PREREMIND_DEPART_${TASK_FIELD_ID}`);
+    expect(advanceFieldStatus).toHaveBeenCalledWith({
+      taskFieldId: TASK_FIELD_ID, transition: 'DEPARTED', updatedBy: 'user-1',
+    });
+    // Pointer stored (not a direct advance that bypasses the mechanism).
+    expect(ctxStore).toMatchObject({
+      awaiting: 'status_eta_prompt',
+      activeInspection: { taskFieldId: TASK_FIELD_ID },
+    });
+
+    // 2. "הגעתי" (keyword during the ETA prompt) → ARRIVED on the SAME TaskField.
+    advanceFieldStatus.mockClear();
+    await handleAIMessage(makeUser(), 'הגעתי');
+    expect(advanceFieldStatus).toHaveBeenCalledWith({
+      taskFieldId: TASK_FIELD_ID, transition: 'ARRIVED', updatedBy: 'user-1',
+    });
+
+    // 3. "סיימתי" (fresh AI message, resolved via the stored pointer) → FINISHED
+    //    on the SAME TaskField.
+    advanceFieldStatus.mockClear();
+    validateWorkerTaskField.mockResolvedValueOnce({ ok: true, taskFieldId: TASK_FIELD_ID, fieldStatus: 'ARRIVED', customerName: null, taskTitle: null });
+    (parseIntent as unknown as Mock).mockResolvedValueOnce({
+      intent: 'set_field_status', confidence: 0.96, task_reference: null, field: null,
+      new_value: null, params: {}, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: 'FINISHED', problem_type: null,
+    });
+    await handleAIMessage(makeUser(), 'סיימתי');
+    expect(advanceFieldStatus).toHaveBeenCalledWith({
+      taskFieldId: TASK_FIELD_ID, transition: 'FINISHED', updatedBy: 'user-1',
+    });
+    // Resolution used the stored pointer (not the "any open" fallback).
+    expect(findOpenTaskFieldForWorker).not.toHaveBeenCalled();
   });
 });
 
