@@ -462,6 +462,29 @@ export async function handleAIMessage(user: ResolvedUser, text: string, quotedWa
     }
   }
 
+  // QA-FIX-5: no-quote deterministic status fast path — when the worker types
+  // an unambiguous status verb ("הגעתי" / "סיימתי" / "יצאתי") without a quote
+  // AND has an active-inspection pointer set (from a prior "יצאתי"), dispatch
+  // on that pointer BEFORE the LLM runs. Fixes the case where the AI parser
+  // occasionally returns unknown/low-confidence for a bare verb because the
+  // recent history is noisy (customer notifications, ETA acks, …).
+  // The quote path above still wins when both are present (a quote is a
+  // stronger signal than the pointer).
+  if (!(quotedContext?.entityType === 'task_field' && quotedContext.taskFieldId)) {
+    const kw = extractDirectStatusKeyword(text);
+    if (kw) {
+      const active = await getActiveInspection(user.phone);
+      if (active) {
+        const v = await validateWorkerTaskField(user.id, active.taskFieldId);
+        if (v.ok) {
+          await performTransition(user, active.taskFieldId, kw);
+          return;
+        }
+        // Pointer's TF closed / not owned / missing → fall through.
+      }
+    }
+  }
+
   if (!getProvider()) {
     await sendTextMessage({ to: user.phone, text: 'שירות ה-AI אינו מוגדר עדיין. נסה שוב מאוחר יותר.' });
     return;

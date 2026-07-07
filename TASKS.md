@@ -2813,6 +2813,79 @@ threading can be applied if a real case surfaces.
 
 ---
 
+## 4.17 — QA-FIX-5: no-quote keyword+active-pointer fast path (2026-07-07)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+
+**What to do:** Fix the live bug: worker tapped "יוצא בזמן" on the 60-min
+pre-reminder → active pointer set on tf-B → ETA "45 דקות" logged → then
+worker typed a bare "הגעתי" (no quote) → bot answered
+"לא ברור מה הכוונה. אנא נסח מחדש." The correct answer was
+ARRIVED on tf-B via the active pointer.
+
+**Root cause:** the deterministic keyword fast path in `handleAIMessage`
+(`router.ts:452`) is gated on `quotedContext` — it only fires for a
+swipe-reply. With no quote, the flow depends on the AI parser correctly
+classifying "הגעתי" as `set_field_status`. In practice the AI parser
+occasionally returns `unknown` / low-confidence when the recent history is
+noisy (customer notifications, ETA acks). When that happened, the router hit
+the `unknown` fallback ("לא ברור...") without ever consulting the active
+pointer — even though the pointer + a strong verb are together an
+unambiguous signal.
+
+**Definition of Done:** a bare status verb ("יצאתי" / "הגעתי" / "סיימתי")
+with no quote AND an active pointer whose TaskField validates → dispatch
+transitions on the pointer's TaskField BEFORE the AI parser runs. Quote path
+still wins when both are present. No pointer → unchanged fallback.
+
+**Fix:** `src/ai/router.ts` — added a second deterministic gate right after
+the quote path, before `getProvider()`:
+```ts
+if (!(quotedContext?.entityType === 'task_field' && quotedContext.taskFieldId)) {
+  const kw = extractDirectStatusKeyword(text);
+  if (kw) {
+    const active = await getActiveInspection(user.phone);
+    if (active) {
+      const v = await validateWorkerTaskField(user.id, active.taskFieldId);
+      if (v.ok) {
+        await performTransition(user, active.taskFieldId, kw);
+        return;
+      }
+    }
+  }
+}
+```
+
+**Files changed:** `src/ai/router.ts` (+17/−0),
+`src/__tests__/routerActiveInspection.test.ts` (+123/−2: 5 new QA-FIX-5 tests +
+2-line mock robustness fix on the existing "pointer closed → fallback" test —
+persistent `mockResolvedValue` instead of `mockResolvedValueOnce` because both
+the new fast path AND the existing `runAdvanceStatusDirect` fallback now
+validate the pointer).
+
+**QA:**
+- `npx tsc --noEmit` clean.
+- `routerActiveInspection.test.ts` 19/19 pass (5 new QA-FIX-5 tests: bare
+  "הגעתי" bypasses AI, bare "סיימתי" bypasses AI, no-pointer keyword falls
+  through to AI, pointer-with-invalid-TF falls through, quote still beats
+  pointer).
+- Broader run (9 test files including router*, detailView, contextExtractor,
+  messageRefs) — 321/321 pass. No regressions.
+
+**Behavioral notes:**
+- Order of priority preserved: (1) quoted TaskField ref + keyword — strongest,
+  (2) active pointer + keyword — new, (3) AI parse + `runAdvanceStatusDirect`
+  which itself consults the pointer as a fallback.
+- The fast path does NOT fire for status verbs during a mid-conversation live
+  await (`status_eta_prompt`, `finished_followup`, etc.) — the `getContext`
+  check + `continueConversation` on line 476 still runs; only `idle_active_inspection`
+  falls through to the fresh-message path where the new gate sits.
+- Ambiguous phrasing ("אני בדרך", "אני אצל הלקוח") isn't in
+  `extractDirectStatusKeyword`'s vocabulary — those still go through the AI,
+  matching the QA doc's Phase 1 expectations.
+
+---
+
 ## 4.16 — QA-FIX-4: hybrid smart confirmation gate for AI-inferred single actions (2026-07-07)
 
 **Status:** DONE (local, uncommitted — awaiting user approval to commit/push).

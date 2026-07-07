@@ -274,6 +274,144 @@ describe('active-task context — chained flow with 3 open inspections', () => {
   });
 });
 
+// ── QA-FIX-5: no-quote deterministic keyword-with-pointer fast path ─────────
+// Live bug: worker taps "יוצא בזמן" on a pre-reminder → active pointer set on
+// tf-B → ETA logged → worker types bare "הגעתי" → AI parser sometimes returns
+// unknown/low-confidence (history noise) → bot showed "לא ברור מה הכוונה"
+// instead of advancing the pointer. This new fast path fires BEFORE the AI so
+// the bot never depends on the LLM correctly classifying an unambiguous verb.
+describe('QA-FIX-5: no-quote keyword + active pointer bypasses the AI parser', () => {
+  it('bare "הגעתי" with pointer on tf-B → advances tf-B without calling parseIntent', async () => {
+    const u = worker();
+    // Seed the pointer directly, as if a prior "יצאתי" already ran.
+    ctxStore = {
+      awaiting: 'idle_active_inspection',
+      taskFieldId: 'tf-B',
+      activeInspection: {
+        taskFieldId: 'tf-B',
+        departedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
+        etaMinutes: 45,
+      },
+    };
+    // Simulate the real bug: the AI parser would have returned unknown here.
+    parseIntentMock.mockResolvedValue({
+      intent: 'unknown', confidence: 0.2, task_reference: null, field: null,
+      new_value: null, params: {}, missing_fields: [], clarification: 'לא ברור',
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+
+    await handleAIMessage(u, 'הגעתי');
+
+    // The fast path fired BEFORE the AI.
+    expect(advanceFieldStatus).toHaveBeenCalledWith({
+      taskFieldId: 'tf-B', transition: 'ARRIVED', updatedBy: u.id,
+    });
+    expect(parseIntentMock).not.toHaveBeenCalled();
+  });
+
+  it('bare "סיימתי" with pointer on tf-B → FINISHED on tf-B, no AI call', async () => {
+    const u = worker();
+    ctxStore = {
+      awaiting: 'idle_active_inspection',
+      taskFieldId: 'tf-B',
+      activeInspection: {
+        taskFieldId: 'tf-B',
+        departedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
+      },
+    };
+    validateWorkerTaskField.mockResolvedValueOnce({
+      ok: true, taskFieldId: 'tf-B', fieldStatus: 'ARRIVED',
+      customerName: null, taskTitle: null,
+    });
+
+    await handleAIMessage(u, 'סיימתי');
+
+    expect(advanceFieldStatus).toHaveBeenCalledWith({
+      taskFieldId: 'tf-B', transition: 'FINISHED', updatedBy: u.id,
+    });
+    expect(parseIntentMock).not.toHaveBeenCalled();
+  });
+
+  it('no pointer + "הגעתי" → falls through to the AI path (no keyword fast path)', async () => {
+    const u = worker(); // ctxStore stays null → no pointer
+    findActiveInProgressTaskFieldForWorker.mockResolvedValueOnce({
+      taskFieldId: 'tf-C', customerName: 'לוי', taskTitle: null,
+    });
+    statusIntent('ARRIVED', null);
+    await handleAIMessage(u, 'הגעתי');
+    // AI parser WAS invoked (no active pointer → no fast path).
+    expect(parseIntentMock).toHaveBeenCalledOnce();
+    // The runAdvanceStatusDirect fallback still resolves via the in-progress lookup.
+    expect(advanceFieldStatus).toHaveBeenCalledWith({
+      taskFieldId: 'tf-C', transition: 'ARRIVED', updatedBy: u.id,
+    });
+  });
+
+  it('pointer present but validateWorkerTaskField fails → falls through, no write on the pointer', async () => {
+    const u = worker();
+    ctxStore = {
+      awaiting: 'idle_active_inspection',
+      taskFieldId: 'tf-closed',
+      activeInspection: {
+        taskFieldId: 'tf-closed',
+        departedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
+      },
+    };
+    // Pointer's TaskField is no longer usable (closed / not owner). Persistent
+    // so both the fast path AND runAdvanceStatusDirect's fallback see it closed.
+    validateWorkerTaskField.mockResolvedValue({ ok: false, reason: 'not_open' });
+    // AI path picks up and finds a different in-progress TF (or asks — here we
+    // just verify the pointer's TF was NOT advanced, i.e. the fast path aborted).
+    statusIntent('ARRIVED', null);
+    findActiveInProgressTaskFieldForWorker.mockResolvedValueOnce(null);
+    findOpenTaskFieldForWorker.mockResolvedValueOnce(null);
+
+    await handleAIMessage(u, 'הגעתי');
+
+    // The pointer's TF was NOT written (validate failed).
+    expect(advanceFieldStatus).not.toHaveBeenCalledWith(
+      expect.objectContaining({ taskFieldId: 'tf-closed' }),
+    );
+  });
+
+  it('quote wins over pointer + keyword (existing Phase-2 priority preserved)', async () => {
+    const u = worker();
+    ctxStore = {
+      awaiting: 'idle_active_inspection',
+      taskFieldId: 'tf-A',
+      activeInspection: {
+        taskFieldId: 'tf-A',
+        departedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
+      },
+    };
+    // The quoted context resolves to a DIFFERENT TF (tf-B).
+    resolveQuotedContext.mockResolvedValueOnce({
+      wamid: 'w-B', recipientUserId: u.id, entityType: 'task_field',
+      entityId: 'tf-B', taskFieldId: 'tf-B', kind: 'assignment_card',
+      payload: null, createdAt: new Date(), expiresAt: null,
+    });
+    validateWorkerTaskField.mockResolvedValueOnce({
+      ok: true, taskFieldId: 'tf-B', fieldStatus: 'EN_ROUTE',
+      customerName: null, taskTitle: null,
+    });
+
+    await handleAIMessage(u, 'הגעתי', 'w-B');
+
+    // Quote wins — tf-B advances, not the pointer's tf-A.
+    expect(advanceFieldStatus).toHaveBeenCalledWith({
+      taskFieldId: 'tf-B', transition: 'ARRIVED', updatedBy: u.id,
+    });
+    expect(advanceFieldStatus).not.toHaveBeenCalledWith(
+      expect.objectContaining({ taskFieldId: 'tf-A' }),
+    );
+  });
+});
+
 // ── Fallback (only when there is no valid pointer) ─────────────────────────────
 
 describe('active-task context — status fallback when no valid pointer', () => {
@@ -306,7 +444,10 @@ describe('active-task context — status fallback when no valid pointer', () => 
     // Seed a pointer, but validation says it is closed.
     await setActiveInspection('x', 'tf-B', new Date().toISOString(), { awaiting: 'idle_active_inspection' });
     setActiveInspection.mockClear();
-    validateWorkerTaskField.mockResolvedValueOnce({ ok: false, reason: 'closed', fieldStatus: 'FINISHED_FIELD' });
+    // Persistent (not `once`) — the QA-FIX-5 keyword fast path AND the
+    // runAdvanceStatusDirect fallback both validate the pointer, so BOTH calls
+    // must see the closed status.
+    validateWorkerTaskField.mockResolvedValue({ ok: false, reason: 'closed', fieldStatus: 'FINISHED_FIELD' });
     findActiveInProgressTaskFieldForWorker.mockResolvedValueOnce({ taskFieldId: 'tf-C', customerName: 'לוי', taskTitle: null });
     statusIntent('ARRIVED', null);
     await handleAIMessage(u, 'הגעתי');
