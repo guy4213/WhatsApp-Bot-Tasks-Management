@@ -2601,6 +2601,26 @@ no-trailing-variable check; well-formed payload).
 3. Phase 2 (documented, not done): CRM URL button; provide `CRM_TASK_URL_TEMPLATE`
    (user is configuring this themselves — no bot-side action needed).
 
+**Post-push production-safety fix (same day):** the user confirmed
+`WHATSAPP_TEMPLATES_ENABLED=true` in prod. The still-approved `due_reminder`
+v1 template is body-only (2 vars: title, time; no button) — but the initial
+implementation unconditionally sent the new 10-var/button shape to whichever
+template name `DUE_REMINDER` resolved to. Since `WHATSAPP_TEMPLATE_DUE_REMINDER`
+is intentionally NOT overridden until Meta approves `due_reminder_v2` (per this
+task's own constraint), every out-of-window reminder would have hit the v1
+template with a param-count/component mismatch and been rejected by Meta —
+silently retried forever, never delivered. Fixed in
+`src/scheduler/jobs/dueDateReminder.ts`: the job now checks whether
+`templateName('DUE_REMINDER')` still resolves to the legacy default name; if so
+it sends the legacy 2-var/no-button contract on the template path (preserving
+today's working behavior), and only sends the enriched 10-var + button contract
+once an operator points the env var at `due_reminder_v2`. The in-window
+freeform path (`fallbackText` + `buttons`) is unaffected either way — it always
+gets the full enriched body. Added a regression test
+(`REGRESSION: without WHATSAPP_TEMPLATE_DUE_REMINDER override, uses the legacy
+2-var/no-button template contract`) plus a test for the post-approval enriched
+path. `npx tsc --noEmit` clean; 4 target files 45/45 pass.
+
 **Priority:** feature — CEO-requested richer reminders. Freeform path is fully
 functional immediately; template path activates on Meta approval.
 

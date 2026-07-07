@@ -84,6 +84,7 @@ beforeEach(() => {
   getTaskDetailsForReminder.mockResolvedValue(makeDetails());
   setActiveTask.mockReset();
   delete process.env.CRM_TASK_URL_TEMPLATE;
+  delete process.env.WHATSAPP_TEMPLATE_DUE_REMINDER;
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -149,7 +150,7 @@ describe('runDueDateReminder — mark-before-send regression (D5-T20)', () => {
 });
 
 describe('runDueDateReminder — enhanced reminder body + button + context', () => {
-  it('sends the enriched body with button + templateButtonParams', async () => {
+  it('always sends the full enriched fallbackText + buttons (freeform/in-window path is unconditional)', async () => {
     const details = makeDetails();
     getTaskDetailsForReminder.mockResolvedValue(details);
     poolQuery
@@ -160,6 +161,40 @@ describe('runDueDateReminder — enhanced reminder body + button + context', () 
     await runDueDateReminder();
 
     expect(getTaskDetailsForReminder).toHaveBeenCalledWith('t-1');
+    const call = notify.mock.calls[0][0];
+    expect(call.to).toBe('972501111111');
+    expect(call.key).toBe('DUE_REMINDER');
+    expect(call.fallbackText).toBe(formatTaskReminderBody(details, null));
+    expect(call.buttons).toEqual([{ id: 'TASK_DETAILS_t-1', title: 'פרטים נוספים' }]);
+  });
+
+  it('REGRESSION: without WHATSAPP_TEMPLATE_DUE_REMINDER override, uses the legacy 2-var/no-button template contract (the still-approved v1 template cannot accept 10 vars + a button)', async () => {
+    const details = makeDetails();
+    getTaskDetailsForReminder.mockResolvedValue(details);
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] })
+      .mockResolvedValueOnce(NOT_REMINDED)
+      .mockResolvedValueOnce(INSERTED);
+
+    await runDueDateReminder();
+
+    const call = notify.mock.calls[0][0];
+    expect(call.bodyParams).toEqual([details.taskTitle, expect.any(String)]);
+    expect(call.bodyParams).toHaveLength(2);
+    expect(call.templateButtonParams).toBeUndefined();
+  });
+
+  it('once WHATSAPP_TEMPLATE_DUE_REMINDER=due_reminder_v2 is configured, sends the enriched 10-var bodyParams + templateButtonParams', async () => {
+    process.env.WHATSAPP_TEMPLATE_DUE_REMINDER = 'due_reminder_v2';
+    const details = makeDetails();
+    getTaskDetailsForReminder.mockResolvedValue(details);
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] })
+      .mockResolvedValueOnce(NOT_REMINDED)
+      .mockResolvedValueOnce(INSERTED);
+
+    await runDueDateReminder();
+
     expect(notify).toHaveBeenCalledWith({
       to: '972501111111',
       key: 'DUE_REMINDER',
