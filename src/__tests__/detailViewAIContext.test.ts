@@ -59,11 +59,15 @@ const reassignTask = vi.fn().mockResolvedValue({ resetCount: 1, hadInProgressRow
 const correctInspectionType = vi.fn().mockResolvedValue({ oldProductName: 'old', newProductName: 'new' });
 const listInspectionTypes = vi.fn().mockResolvedValue([]);
 const getTaskFieldForCorrection = vi.fn().mockResolvedValue(null);
+// QA-FIX-4.b: needed to prove the single-action fast path DOES write when
+// nothing was inferred, and DOESN'T write when confirmation is required.
+const updateTaskFieldSchedule = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../services/taskFieldCorrections', () => ({
   updateSiteMetadata: (...a: unknown[]) => updateSiteMetadata(...a),
   reassignTask: (...a: unknown[]) => reassignTask(...a),
   correctInspectionType: (...a: unknown[]) => correctInspectionType(...a),
+  updateTaskFieldSchedule: (...a: unknown[]) => updateTaskFieldSchedule(...a),
   ClosedInspectionError: class ClosedInspectionError extends Error {
     constructor(msg: string) { super(msg); this.name = 'ClosedInspectionError'; }
   },
@@ -322,6 +326,7 @@ beforeEach(() => {
   extractFromContextMock.mockClear();
   extractInspectionActionsMock.mockClear();
   updateSiteMetadata.mockClear();
+  updateTaskFieldSchedule.mockClear();
   findUsersByName.mockClear();
   listInspectionTypes.mockClear();
   getTaskFieldValuesForContext.mockReset();
@@ -1323,5 +1328,148 @@ describe('D5-T15 — worker-intent inline dispatch (mgr_today_action)', () => {
     // No write happened.
     expect(updateSiteMetadata).not.toHaveBeenCalled();
     expect(reassignTask).not.toHaveBeenCalled();
+  });
+});
+
+// ── QA-FIX-4: single-action inferred-field confirmation gate ─────────────────
+// Product rule: any single AI-extracted destructive action whose LLM-inferred
+// fields are non-empty must be CONFIRMED before writing. Explicit-only actions
+// still execute immediately (fast path preserved). Reuses the existing
+// mgr_multi_action_confirm state with a 1-element pendingMultiActions batch.
+
+describe('QA-FIX-4: single-action inferred-field confirmation gate', () => {
+  it('explicit-only reschedule (inferredFields=[]) → executes immediately, no confirm prompt', async () => {
+    seedActionCtx('mgr_today_action');
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{
+        action: 'reschedule',
+        newScheduledStartAt: '2026-07-11T14:00:00+03:00',
+        inferredFields: [], // explicit — no confirmation
+      }],
+      confidence: 0.93,
+      clarification: null,
+    });
+
+    await handleAIMessage(manager, 'לתזמן מחדש ל-11/7 14:00');
+
+    // Wrote directly.
+    expect(updateTaskFieldSchedule).toHaveBeenCalledOnce();
+    expect(updateTaskFieldSchedule).toHaveBeenCalledWith(
+      'tf-abc',
+      'u-mgr',
+      expect.objectContaining({ scheduledStartAt: expect.any(Date) }),
+    );
+    // No confirmation button was sent.
+    expect(sendButtonMessage).not.toHaveBeenCalled();
+    // Context cleared after success.
+    expect(clearContext).toHaveBeenCalled();
+  });
+
+  it('inferred reschedule (inferredFields=["newScheduledStartAt"]) → confirm prompt, no write yet', async () => {
+    seedActionCtx('mgr_today_action');
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{
+        action: 'reschedule',
+        newScheduledStartAt: '2026-07-07T21:00:00+03:00',
+        inferredFields: ['newScheduledStartAt'], // LLM filled in the date
+      }],
+      confidence: 0.9,
+      clarification: null,
+    });
+
+    await handleAIMessage(manager, 'עדכן שעה ל-21:00');
+
+    // Did NOT write.
+    expect(updateTaskFieldSchedule).not.toHaveBeenCalled();
+    // Sent a button confirmation.
+    expect(sendButtonMessage).toHaveBeenCalledOnce();
+    const call = sendButtonMessage.mock.calls[0][0];
+    expect(call.body).toContain('הבנתי — נקבע:');
+    expect(call.body).toContain('השלמתי מההקשר: תאריך ושעה');
+    expect(call.body).toContain('אישור לביצוע?');
+    const buttonIds = call.buttons.map((b: { id: string }) => b.id);
+    expect(buttonIds).toContain('CONFIRM_YES_MULTI_ACTION');
+    expect(buttonIds).toContain('CONFIRM_NO_MULTI_ACTION');
+    // Context set to the multi-action confirm state with a 1-element batch.
+    expect(ctxStore).toMatchObject({
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: [
+        expect.objectContaining({
+          action: 'reschedule',
+          newScheduledStartAt: '2026-07-07T21:00:00+03:00',
+          inferredFields: ['newScheduledStartAt'],
+        }),
+      ],
+    });
+  });
+
+  it('inferred + user taps אישור → executes the write via the existing multi-action confirm handler', async () => {
+    // Seed the confirm state as if promptSingleActionConfirmation had just fired.
+    ctxStore = {
+      awaiting: 'mgr_multi_action_confirm',
+      mgrSelectedTaskFieldId: 'tf-abc',
+      mgrSelectedTaskId: 't-xyz',
+      pendingMultiActions: [{
+        action: 'reschedule',
+        newScheduledStartAt: '2026-07-07T21:00:00+03:00',
+        inferredFields: ['newScheduledStartAt'],
+      }],
+    };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(manager, 'CONFIRM_YES_MULTI_ACTION');
+
+    expect(updateTaskFieldSchedule).toHaveBeenCalledOnce();
+    expect(updateTaskFieldSchedule).toHaveBeenCalledWith(
+      'tf-abc',
+      'u-mgr',
+      expect.objectContaining({ scheduledStartAt: expect.any(Date) }),
+    );
+    expect(clearContext).toHaveBeenCalled();
+    expect(lastMsg()).toContain('בוצע');
+  });
+
+  it('inferred correct_site (e.g. inferredFields=["newSiteAddress"]) → confirm prompt, no write yet', async () => {
+    seedActionCtx('mgr_today_action');
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{
+        action: 'correct_site',
+        newSiteAddress: 'רחוב הבדיקה 1',
+        inferredFields: ['newSiteAddress'],
+      }],
+      confidence: 0.88,
+      clarification: null,
+    });
+
+    await handleAIMessage(manager, 'תיקח את הכתובת מהמערכת');
+
+    expect(updateSiteMetadata).not.toHaveBeenCalled();
+    expect(sendButtonMessage).toHaveBeenCalledOnce();
+    const call = sendButtonMessage.mock.calls[0][0];
+    expect(call.body).toContain('השלמתי מההקשר: כתובת האתר');
+  });
+
+  it('non-destructive action (back/cancel) with inferredFields → still not gated', async () => {
+    // Defensive: back/cancel never reach the multi-action confirm path anyway
+    // (the multi-action fork filters them). For single-action, isDestructive is
+    // false so we route to dispatchSingleAction which handles null/back/cancel.
+    seedActionCtx('mgr_today_action');
+    extractInspectionActionsMock.mockResolvedValue({
+      actions: [{ action: 'back', inferredFields: ['whatever'] }],
+      confidence: 0.9,
+      clarification: null,
+    });
+
+    await handleAIMessage(manager, 'חזור אחורה');
+
+    // sendButtonMessage should NOT have been called with a confirm — a `back`
+    // action goes to the menu.
+    const confirmCalls = sendButtonMessage.mock.calls.filter((c) => {
+      const body = (c[0] as { body?: string }).body ?? '';
+      return body.includes('השלמתי מההקשר');
+    });
+    expect(confirmCalls.length).toBe(0);
   });
 });

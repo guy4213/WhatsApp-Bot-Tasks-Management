@@ -6172,8 +6172,20 @@ async function handleMgrActionFreeText(
   }
 
   // ── Single action fast-path ────────────────────────────────────────────────
+  // QA-FIX-4.b: any LLM-inferred field on a destructive action must be
+  // confirmed by the user before it's written. Explicit-only actions still
+  // execute immediately (fast path preserved).
   if (actions.length === 1) {
-    await dispatchSingleAction(user, ctx, taskFieldId, taskId, actions[0], confidence, clarification);
+    const only = actions[0];
+    const inferred = only.inferredFields ?? [];
+    const isDestructive =
+      only.action === 'correct_site' || only.action === 'correct_type' ||
+      only.action === 'reassign'     || only.action === 'reschedule';
+    if (inferred.length > 0 && isDestructive) {
+      await promptSingleActionConfirmation(user, ctx, taskFieldId, taskId, only, confidence);
+      return;
+    }
+    await dispatchSingleAction(user, ctx, taskFieldId, taskId, only, confidence, clarification);
     return;
   }
 
@@ -6247,6 +6259,102 @@ async function handleMgrActionFreeText(
       { id: CONFIRM_NO_MULTI,  title: 'ביטול' },
     ],
   });
+}
+
+/**
+ * QA-FIX-4.b: Hebrew labels for the raw inferred-field property names
+ * returned by extractInspectionActions. Used to explain to the user WHICH
+ * fields the LLM filled in from context (as opposed to explicit user text).
+ */
+const HEB_INFERRED_LABEL: Record<string, string> = {
+  newScheduledStartAt: 'תאריך ושעה',
+  newDurationMinutes: 'משך',
+  newSiteAddress: 'כתובת האתר',
+  newSiteCity: 'עיר',
+  newContactName: 'שם איש קשר',
+  newContactPhone: 'טלפון איש קשר',
+  newInspectionTypeQuery: 'סוג בדיקה',
+  newWorkerName: 'עובד',
+};
+
+/**
+ * QA-FIX-4.b: prompt the user to confirm a single AI-extracted action when
+ * the LLM inferred one or more fields from context (rather than the user
+ * explicitly stating them). Reuses the existing `mgr_multi_action_confirm`
+ * state with a 1-element `pendingMultiActions` array so the existing confirm
+ * handler executes the action unchanged on "אישור".
+ */
+async function promptSingleActionConfirmation(
+  user: ResolvedUser,
+  ctx: ConversationState,
+  taskFieldId: string,
+  taskId: string,
+  act: NonNullable<ConversationState['pendingMultiActions']>[number],
+  confidence: number,
+): Promise<void> {
+  void ctx; // reserved — the confirm state is fully rebuilt below.
+  void confidence; // signalled to caller but not shown in the single-action prompt.
+
+  // ── One-line summary of the planned change ────────────────────────────────
+  let summary = '';
+  if (act.action === 'reschedule') {
+    if (act.newScheduledStartAt) {
+      const d = new Date(act.newScheduledStartAt);
+      const durNote = act.newDurationMinutes ? ` (${act.newDurationMinutes} דק')` : '';
+      if (!isNaN(d.getTime())) {
+        summary = `תאריך ושעה → ${formatShortDateTimeIL(d)}${durNote}`;
+      } else {
+        summary = `תאריך ושעה → ${act.newScheduledStartAt}${durNote}`;
+      }
+    } else {
+      summary = 'תאריך ושעה → (לא צוין)';
+    }
+  } else if (act.action === 'correct_site') {
+    const parts: string[] = [];
+    if (act.newSiteAddress)  parts.push(`כתובת → ${act.newSiteAddress}`);
+    if (act.newSiteCity)     parts.push(`עיר → ${act.newSiteCity}`);
+    if (act.newContactName)  parts.push(`שם איש קשר → ${act.newContactName}`);
+    if (act.newContactPhone) parts.push(`טלפון איש קשר → ${act.newContactPhone}`);
+    summary = parts.join(', ');
+  } else if (act.action === 'correct_type') {
+    summary = `סוג בדיקה → ${act.newInspectionTypeQuery ?? '(לא צוין)'}`;
+  } else if (act.action === 'reassign') {
+    summary = `עובד → ${act.newWorkerName ?? '(לא צוין)'}`;
+  }
+
+  const inferred = act.inferredFields ?? [];
+  const inferredLabels = inferred.map((k) => HEB_INFERRED_LABEL[k] ?? k);
+
+  const confirmBody =
+    `הבנתי — נקבע:\n\n${summary}\n\n` +
+    `השלמתי מההקשר: ${inferredLabels.join(', ')}\n` +
+    `אישור לביצוע?`;
+
+  await setContext(user.phone, {
+    awaiting: 'mgr_multi_action_confirm',
+    mgrSelectedTaskFieldId: taskFieldId,
+    mgrSelectedTaskId: taskId,
+    pendingMultiActions: [act],
+  });
+
+  // Buttons preferred; fall back to text prompt on send failure (mirror of the
+  // pattern used elsewhere in this file for confirm-state prompts).
+  try {
+    await sendButtonMessage({
+      to: user.phone,
+      body: confirmBody,
+      buttons: [
+        { id: CONFIRM_YES_MULTI, title: 'אישור' },
+        { id: CONFIRM_NO_MULTI,  title: 'ביטול' },
+      ],
+    });
+  } catch (err) {
+    log.warn({ err }, 'sendButtonMessage failed for single-action inferred confirm — falling back to text');
+    await sendTextMessage({
+      to: user.phone,
+      text: `${confirmBody}\nהשב 'כן' לאישור או 'לא' לביטול.`,
+    });
+  }
 }
 
 /**

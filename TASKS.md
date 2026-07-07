@@ -2813,6 +2813,114 @@ threading can be applied if a real case surfaces.
 
 ---
 
+## 4.16 — QA-FIX-4: hybrid smart confirmation gate for AI-inferred single actions (2026-07-07)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+**Model roles:** Opus orchestrator + 2 Sonnet sub-agents (extractor + router) in parallel.
+
+**What to do:** Fix the systemic complaint reported after QA-FIX-3: users want the
+AI to be smart enough to infer defaults from context AND to confirm before
+writing, so that a mis-inferred date/name/address never hits the DB silently.
+Currently single-action extractions execute immediately (only multi-action asks
+for confirmation). The product decision (Width 3): if the LLM inferred any
+field from context, gate on confirmation; if everything was explicit, execute
+immediately (fast path preserved).
+
+**Definition of Done:**
+- A single-action extraction with `inferredFields.length > 0` on a destructive
+  action (`correct_site`/`correct_type`/`reassign`/`reschedule`) routes to a
+  confirm prompt using the existing `mgr_multi_action_confirm` state and
+  buttons; no DB write yet.
+- The confirm reply ("אישור" / `CONFIRM_YES_MULTI_ACTION` / "כן") executes the
+  action via the existing multi-action confirm handler (1-element batch).
+- Explicit-only single actions (`inferredFields=[]`) execute immediately —
+  fast path unchanged.
+- Multi-action path unchanged.
+
+**Fix:**
+1. `src/ai/contextExtractor.ts`:
+   - New `inferredFields?: string[]` on `InspectionActionExtractionItem`.
+   - `INSPECTION_ACTION_ITEM_SCHEMA`: adds `inferredFields` (array of strings,
+     required at the JSON-schema level so the LLM always emits at least `[]`).
+   - Parser coerces missing/null/non-array to `[]`, filters to trimmed non-empty
+     strings.
+   - Prompt: new "עקרון AI-first" block + "דוגמאות ל-inferredFields" section
+     with 6 worked examples covering explicit, inferred (date-from-current-TF),
+     name-only, phone-only, next-day + inferred time, and "don't invent a
+     missing value" (low confidence).
+   - QA-FIX-3's time-only reschedule rule preserved verbatim; a one-line note
+     appended to mark it as an `inferredFields=["newScheduledStartAt"]` case.
+2. `src/services/conversationContext.ts`:
+   - `pendingMultiActions` element type gains `inferredFields?: string[]`.
+3. `src/ai/router.ts`:
+   - `handleMgrActionFreeText` single-action fast path: if
+     `only.inferredFields.length > 0` and action is destructive → call
+     `promptSingleActionConfirmation`; else preserve the immediate dispatch.
+   - New helper `promptSingleActionConfirmation` builds a one-line summary
+     ("תאריך ושעה → 07/07 בשעה 21:00"), lists which fields were inferred
+     ("השלמתי מההקשר: תאריך ושעה"), sets state to `mgr_multi_action_confirm`
+     with a 1-element `pendingMultiActions` array, and sends buttons with the
+     existing `CONFIRM_YES_MULTI` / `CONFIRM_NO_MULTI` IDs (falls back to
+     text on send failure).
+   - `HEB_INFERRED_LABEL` map translates raw property names → Hebrew labels.
+   - `handleMgrMultiActionConfirmReply` untouched — its existing iterator
+     handles the 1-element batch identically.
+4. `src/__tests__/detailViewAIContext.test.ts`:
+   - Added 5 tests in a new "QA-FIX-4" describe block:
+     - Explicit reschedule (`inferredFields=[]`) → immediate write, no confirm
+       button.
+     - Inferred reschedule (`inferredFields=["newScheduledStartAt"]`) → confirm
+       button + `mgr_multi_action_confirm` state + `pendingMultiActions=[act]`,
+       no write.
+     - Confirm reply "CONFIRM_YES_MULTI_ACTION" → `updateTaskFieldSchedule`
+       called with the parsed Date.
+     - Inferred `correct_site` → confirm body includes
+       "השלמתי מההקשר: כתובת האתר".
+     - `back`/`cancel` with `inferredFields` → not gated (isDestructive=false).
+   - `updateTaskFieldSchedule` mock added to the shared `taskFieldCorrections`
+     `vi.mock` block + `mockClear()` in `beforeEach`.
+
+**Files changed:** `src/ai/contextExtractor.ts` (+42/−1), `src/ai/router.ts`
+(+112/−1), `src/services/conversationContext.ts` (+5/−0),
+`src/__tests__/detailViewAIContext.test.ts` (+140/−0).
+
+**QA (orchestrator, independently verified — not sub-agent summaries):**
+- Read the actual diff from both sub-agents (contextExtractor prompt lines
+  260–272 + parser lines 610–631; router lines 6178–6190 + 6269–6358). Verified
+  the contract (`inferredFields?: string[]`) is honored both sides.
+- Verified the confirm handler (`handleMgrMultiActionConfirmReply` L6640+) has
+  an existing `reschedule` branch (L6748) that calls `updateTaskFieldSchedule`
+  with the parsed date — so a 1-element batch from the new path writes exactly
+  once on approval and is cancelable.
+- `npx tsc --noEmit` clean.
+- Focused test run: `detailViewAIContext.test.ts` 56/56 (includes 5 new
+  QA-FIX-4 tests). Individual runs of `contextExtractor.test.ts`,
+  `routerCorrections.test.ts`, `routerManagerDisplay.test.ts`,
+  `managerSearchExpansion.test.ts`, `routerActiveInspection.test.ts`,
+  `messageRefs.test.ts`, `routerInspections.test.ts`, `routerAssignLead.test.ts`,
+  `routerDaySummary.test.ts`, `routerFreeTextAwait.test.ts`,
+  `routerScheduleTaskField.test.ts` — all pass individually (162/162 across the
+  6 heavier ones together).
+- Full-suite run has 3 pre-existing failures caused by heap pressure when 71
+  files run in one process (JS heap OOM even at 8 GB); these are NOT caused by
+  the QA-FIX-4 changes (they fail in the same shape on `main` if the process
+  runs out of memory).
+
+**Manual re-run required by the user:** bot restart, open detail card, type
+"עדכן שעה ל-21:00", verify the bot shows the confirm prompt with the
+"השלמתי מההקשר: תאריך ושעה" line, tap "אישור", verify the DB update.
+
+**Known follow-ups (documented, out of scope):**
+- The pre-existing test-suite OOM in single-process runs is unrelated but
+  worth a `pool.forks.singleFork=false` / test-file-splitting fix in a future
+  round.
+- The AI-first principle currently applies only to the `inspection_action`
+  extractor. Other intents (`schedule_time`, general intent parser) still parse
+  strictly. If a similar time-only / name-only complaint surfaces there, mirror
+  the pattern.
+
+---
+
 ## 4.15 — QA-FIX-3: time-only reschedule ("עדכן שעה ל-21:00") rejected by AI extractor (2026-07-07)
 
 **Status:** DONE (local, uncommitted — awaiting user approval to commit/push).

@@ -41,6 +41,20 @@ export interface InspectionActionExtractionItem {
   newWorkerName?: string;
   newScheduledStartAt?: string;   // ISO 8601 datetime
   newDurationMinutes?: number;
+  /**
+   * QA-FIX-4.a: Names of properties on THIS action item that the LLM filled in
+   * from context (current TaskField values, "today", current inspection date, …)
+   * rather than being explicitly stated by the user.
+   *
+   * Declared optional to match the QA-FIX-4.a contract (`inferredFields?: string[]`),
+   * but the parser (extractInspectionActions) always populates it (empty [] when
+   * nothing was inferred, never null/undefined). Router code may therefore treat
+   * the extractor's output as if the field is always present.
+   *
+   * A non-empty value signals to the router to trigger a "hybrid smart
+   * confirmation" step before writing.
+   */
+  inferredFields?: string[];
 }
 
 /**
@@ -136,8 +150,13 @@ const INSPECTION_ACTION_ITEM_SCHEMA = {
     newWorkerName:          { type: ['string', 'null'], description: 'New worker name (for reassign).' },
     newScheduledStartAt:    { type: ['string', 'null'], description: 'New scheduled start time ISO 8601 (for reschedule). Include timezone offset +03:00 for Israel.' },
     newDurationMinutes:     { type: ['number', 'null'], description: 'New duration in minutes (for reschedule, optional).' },
+    inferredFields: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Names of action properties the LLM filled in from context rather than explicit user input. Empty [] when everything was explicit. The router uses a non-empty value to trigger a confirmation step before writing.',
+    },
   },
-  required: ['action'],
+  required: ['action', 'inferredFields'],
 };
 
 const EXTRACT_MULTI_ACTION_SCHEMA: Record<string, unknown> = {
@@ -241,6 +260,16 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
     '',
     currentValues,
     '',
+    'עקרון AI-first (חשוב מאוד!): אתה סוכן חכם עם הבנת שפה. כשההקשר בהיר — השלם ברירות מחדל מההקשר במקום לבקש הבהרה. תבקש הבהרה רק כשיש דו-משמעות אמיתית (שני פירושים סבירים באותה מידה), לא כשחסר ערך שברור מהקשר. כל שדה שהשלמת מההקשר (במקום מדברי המשתמש הישירים) — הכנס את שמו למערך inferredFields של אותה פעולה. שדה שהמשתמש כתב במפורש — אל תכלול אותו במערך. הכלל: inferredFields ריק → הראוטר יבצע מיד; inferredFields לא-ריק → הראוטר יבקש אישור לפני ביצוע (מגן על טעויות פרשנות שלך).',
+    '',
+    'דוגמאות ל-inferredFields:',
+    '- "עדכן שעה ל-21:00" בזמן שהבדיקה הנוכחית ב-2026-07-07 22:00 → action=reschedule, newScheduledStartAt="2026-07-07T21:00:00+03:00", inferredFields=["newScheduledStartAt"] (התאריך הושלם מהבדיקה הנוכחית).',
+    '- "לתזמן מחדש ל-11/7 14:00" → newScheduledStartAt="2026-07-11T14:00:00+03:00", inferredFields=[] (הכל מפורש).',
+    '- "תעביר לדני" (המשתמש כתב רק שם, לא תפקיד/מספר) → action=reassign, newWorkerName="דני", inferredFields=[] (השם מפורש — לא השלמת מההקשר).',
+    '- "עדכן טלפון של איש הקשר ל-050-1234567" → action=correct_site, newContactPhone="050-1234567", inferredFields=[].',
+    '- "תעביר למחר" (אין שעה) בזמן שהבדיקה הנוכחית ב-2026-07-07 22:00 → אם מיישם ברירת שעה מהבדיקה הנוכחית: newScheduledStartAt="2026-07-08T22:00:00+03:00", inferredFields=["newScheduledStartAt"] (השעה הושלמה). אם לא בטוח לגבי השעה → confidence<0.60 ובקש הבהרה.',
+    '- "תשנה את הכתובת" בלי ערך חדש → confidence<0.60, action=null, clarification="לאיזו כתובת?" (אל תמציא כתובת מההקשר!).',
+    '',
     'כללים חשובים — פעולה יחידה:',
     '- אם המשתמש מזכיר שם/טלפון של איש קשר קיים (כפי שמופיע בערכים הנוכחיים) — זה הקשר לאישור, לא מונח חיפוש לזיהוי המשימה. המשתמש כבר מסתכל על הבדיקה הנכונה.',
     '- "החלף את איש הקשר מ-X ל-Y" → action=correct_site, newContactName=Y (ו-newContactPhone אם ניתן טלפון).',
@@ -259,6 +288,7 @@ function buildInspectionActionBlock(values?: TaskFieldContextValues): string {
     '    זו פעולה תקינה עם confidence >= 0.85 — אל תבקש הבהרה.',
     '    דוגמה: אם הבדיקה הנוכחית ב-2026-07-07 22:00 והמשתמש כותב "עדכן שעה ל-21:00" → newScheduledStartAt="2026-07-07T21:00:00+03:00".',
     '    אם הבדיקה הנוכחית ריקה/לא ידועה — השתמש בתאריך היום.',
+    '    הערה (QA-FIX-4.a): במקרה הזה התאריך הושלם מההקשר (מהבדיקה הנוכחית או מהיום) — לכן חייב לכלול inferredFields=["newScheduledStartAt"]. כך הראוטר יבקש אישור לפני ביצוע.',
     '- "חזרה" / "תחזור" / "4" → action=back.',
     '- "ביטול" / "עצור" → action=cancel.',
     '- אם אינך בטוח מה הפעולה — החזר confidence נמוך מ-0.60.',
@@ -577,6 +607,16 @@ export async function extractInspectionActions(
       return undefined;
     };
 
+    // QA-FIX-4.a: coerce inferredFields. Missing/null/non-array → []. Only keep
+    // trimmed, non-empty strings inside the array.
+    const rawInferred = obj.inferredFields;
+    const inferredFields: string[] = Array.isArray(rawInferred)
+      ? rawInferred
+          .filter((x): x is string => typeof x === 'string')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0)
+      : [];
+
     actions.push({
       action,
       newSiteAddress:         str('newSiteAddress'),
@@ -587,6 +627,7 @@ export async function extractInspectionActions(
       newWorkerName:          str('newWorkerName'),
       newScheduledStartAt:    str('newScheduledStartAt'),
       newDurationMinutes:     numVal('newDurationMinutes'),
+      inferredFields,
     });
   }
 

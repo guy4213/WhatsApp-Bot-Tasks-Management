@@ -218,6 +218,10 @@ export interface ConversationState {
     newWorkerName?: string;
     newScheduledStartAt?: string;
     newDurationMinutes?: number;
+    // QA-FIX-4.b: raw property names of fields the LLM inferred from context
+    // (as opposed to explicitly stated by the user). Non-empty = the router
+    // must confirm before writing. Populated by extractInspectionActions.
+    inferredFields?: string[];
   }>;
 }
 
