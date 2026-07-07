@@ -2521,8 +2521,8 @@ production. D5-T20f: IMPORTANT, deferred pending a product decision.
 
 ## 4.12 — D5-T21: Enhanced CRM due-date reminder (contact details + "פרטים נוספים", freeform + due_reminder_v2 template)
 
-**Status:** DONE (local, uncommitted — NOT pushed; awaiting user go-ahead per
-the session's pull-only instruction). Meta LIVE template submission still
+**Status:** DONE (commit a8b4297, pushed to main +
+claude/employee-visibility-issue-52i6yw). Meta LIVE template submission still
 pending (no Meta credentials in this environment — see below).
 
 **Spec:** `TASK_ENHANCED_DUE_REMINDER.md` (implemented verbatim). Enrich the
@@ -2598,7 +2598,8 @@ no-trailing-variable check; well-formed payload).
    `list-whatsapp-templates.ts` to confirm PENDING) where the creds exist.
 2. After Meta APPROVES `due_reminder_v2`, set
    `WHATSAPP_TEMPLATE_DUE_REMINDER=due_reminder_v2` in Render.
-3. Phase 2 (documented, not done): CRM URL button; provide `CRM_TASK_URL_TEMPLATE`.
+3. Phase 2 (documented, not done): CRM URL button; provide `CRM_TASK_URL_TEMPLATE`
+   (user is configuring this themselves — no bot-side action needed).
 
 **Priority:** feature — CEO-requested richer reminders. Freeform path is fully
 functional immediately; template path activates on Meta approval.
