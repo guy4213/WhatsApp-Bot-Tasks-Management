@@ -5662,7 +5662,11 @@ async function showMgrTaskFieldDetail(
   const detailText = formatInspectionDetail(detailData, '');
   const detailBody = detailText.replace(/\n\s*$/, ''); // trim trailing newlines
   try {
-    await sendTextMessage({ to: user.phone, text: detailBody.trim() });
+    const detailWamid = await sendTextMessage({ to: user.phone, text: detailBody.trim() });
+    // Phase 2: record the detail card as a task_field ref so a swipe-reply on
+    // it (with "יצאתי"/"הגעתי"/"סיימתי") resolves back to THIS TaskField,
+    // deterministically, before the AI runs. Best-effort; never throws.
+    await recordTaskFieldRef(detailWamid, taskFieldId, user.id, 'detail_view');
     await sendListMessage({
       to: user.phone,
       body: 'מה תרצה לעשות?',
@@ -5671,7 +5675,11 @@ async function showMgrTaskFieldDetail(
     });
   } catch (err) {
     log.warn({ err }, 'sendListMessage failed for action prompt — falling back to text');
-    await sendTextMessage({ to: user.phone, text: `${detailBody.trim()}\n\nמה תרצה לעשות?\n${MGR_TASK_INLINE_ACTIONS}` });
+    const fallbackWamid = await sendTextMessage({
+      to: user.phone,
+      text: `${detailBody.trim()}\n\nמה תרצה לעשות?\n${MGR_TASK_INLINE_ACTIONS}`,
+    });
+    await recordTaskFieldRef(fallbackWamid, taskFieldId, user.id, 'detail_view');
   }
 }
 

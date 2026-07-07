@@ -2813,6 +2813,47 @@ threading can be applied if a real case surfaces.
 
 ---
 
+## 4.14 — QA-FIX-2: swipe-reply on the "my inspections" detail card not resolving (2026-07-07)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+
+**What to do:** Fix the Phase-2 gap discovered in real-user QA: after opening a
+task from the "הבדיקות שלי" list ("1"), the worker got the detail card and later
+swipe-replied to it with "הגעתי". The bot answered "לא ברור לאיזו משימה אתה
+מתכוון." — the quote never resolved, and the LLM (with 2 open TFs visible in
+history) fell back to a clarification instead of the active pointer.
+
+**Root cause:** `showMgrTaskFieldDetail` (`src/ai/router.ts`) sent the detail
+text without calling `recordTaskFieldRef`. Every other TaskField-scoped outbound
+(assignment card, morning reminder, ETA prompt, status confirm) DOES record a
+`WhatsappMessageRef`, so quotes on those messages resolve. The detail card was
+the one omission — a swipe-reply on it returned `resolveQuotedContext = null`,
+so the deterministic fast path (`handleAIMessage` around L451) never triggered,
+and the flow depended on the LLM classifying the bare "הגעתי" correctly (which
+it failed to do when history mentioned multiple open TFs).
+
+**Definition of Done:** any swipe-reply on the detail card with an unambiguous
+status keyword ("יצאתי" / "הגעתי" / "סיימתי") updates the exact quoted TaskField
+deterministically, before the AI parser runs. Behavior for lists/menus/digests
+is unchanged (they intentionally don't record TF-scoped refs).
+
+**Fix:** capture the wamid from `sendTextMessage` in `showMgrTaskFieldDetail`
+and call `recordTaskFieldRef(wamid, taskFieldId, user.id, 'detail_view')` in
+BOTH the happy path AND the list-message-failure fallback (which also carries
+the detail body). Added `'detail_view'` to the `MessageRefKind` union
+(TypeScript-only; the DB `kind` column has no CHECK — no migration needed).
+
+**Files changed:** `src/ai/router.ts` (+8/−2), `src/services/messageRefs.ts`
+(+1/−0).
+
+**QA:** `npx tsc --noEmit` clean; 119/119 tests pass across `messageRefs.test.ts`,
+`routerActiveInspection.test.ts`, `routerManagerDisplay.test.ts`,
+`detailViewAIContext.test.ts`; manual re-run of the reported scenario is still
+required by the user (bot restart needed for the change to take effect on the
+live worker's phone). No behavioral change for messages already recording refs.
+
+---
+
 ## 5. Out of scope — later
 
 Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — NO tasks created for any of these:

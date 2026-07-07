@@ -29,6 +29,7 @@ export type MessageRefEntityType =
 
 export type MessageRefKind =
   | 'pre_reminder' | 'assignment_card' | 'eta_prompt' | 'status_confirm'
+  | 'detail_view'
   | 'equipment_reminder' | 'daily_digest' | 'menu' | 'general';
 
 export interface RecordOutboundRefParams {

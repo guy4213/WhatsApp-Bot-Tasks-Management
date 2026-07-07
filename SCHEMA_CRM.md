@@ -1,190 +1,1236 @@
-# CRM Schema Reference — for bot developers
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
 
-This is the CRM's Prisma-managed schema, used as a reference when writing bot
-queries. **The bot never manages this schema** (Prisma does), but every JOIN
-the bot performs must match the columns/types here exactly.
-
-Last synced: 2026-07-01. If Prisma migrations change these columns, update this
-file too.
-
----
-
-## Bot-owned tables (managed by our `/src/db/migrations/*.sql`)
-
-- `InspectionType`, `InspectionChecklist`, `TaskField` (migration 009)
-- `WhatsappLeadNotification` (migration 010)
-- `WhatsappAuditLog`, `WhatsappInboundQueue`, `WhatsappConversationContext`,
-  `WhatsappUserGreeting`, `WhatsappReminderLog`, `WhatsappChatHistory`,
-  `WhatsappDigestSendLog`, `WhatsappCompletionNotification`,
-  `WhatsappNotificationRecipient`, `WhatsappPendingAction`,
-  `UserDigestPreference` (migrations 001-008)
-
-## CRM-owned tables (Prisma-managed — read only from the bot, except the
-   documented CRM writes listed in `SPEC_FIELD_V2.md` Addendum)
-
-Key tables + the columns the bot actually references. **Ignore everything not
-listed** — the CRM has many other columns per table.
-
----
-
-### `User`
-- `id text NOT NULL` — PK, text (NOT uuid). Same id referenced by every FK.
-- `name text NOT NULL` — display name. Bot's primary routing key (see `specialUsers.ts`).
-- `email text NOT NULL`
-- `phone text` — nullable in the schema even though it's required for the bot.
-- `role` — enum `UserRole` (values include `ADMIN`, `MANAGER`, `SALES`, plus others).
-- `status` — enum `UserStatus` (values include `ACTIVE`).
-
-### `Customer`
-- `id text NOT NULL` — PK
-- `name text NOT NULL` — primary display name for the customer
-- `contactName text NOT NULL` — site contact
-- `phone text NOT NULL` — customer phone
-- `email text NOT NULL`
-- `city text NOT NULL`
-- `address text` — nullable
-- `status text NOT NULL DEFAULT 'ACTIVE'`
-- `type text NOT NULL` — customer type
-
-### `Task` ⚠️ IMPORTANT
-- `id text NOT NULL` — PK, text
-- `title text NOT NULL`
-- `description text`
-- `dueDate timestamp`
-- `priority` — enum `TaskPriority`
-- `status` — enum `TaskStatus` (values include `OPEN`, `DONE`; **CRM owns this**, bot must NEVER write it)
-- `ownerId text NOT NULL` — FK → `User.id` (the assigned inspector)
-- **`customerId text` — nullable** FK → `Customer.id`
-- **`leadId text` — nullable** FK → `Lead.id`
-- **`projectId text` — nullable** FK → `Project.id`
-- **`incomingLeadId text` — nullable** — implied FK → `IncomingLead.id`
-- `productName text` — matches `InspectionType.code` (§6 requirement)
-- `type text NOT NULL DEFAULT 'step1'`
-- `createdAt`, `updatedAt`
-
-⚠️ **A Task can have EITHER `customerId`, `leadId`, `projectId`, OR
-`incomingLeadId` — not always all four.** Bot queries that want to show the
-customer name MUST fall back across all four sources. See "Customer name
-resolution helper" below.
-
-### `Lead`
-- `id text NOT NULL` — PK
-- `firstName text NOT NULL`
-- `lastName text`
-- `fullName text` — often populated for imported/legacy leads
-- `company text` — company name for B2B leads
-- `email text`
-- `phone text`
-- `customerId text` — nullable FK → `Customer.id` (when the lead was converted)
-- `assignedUserId text` — nullable FK → `User.id`
-- `status`, `stage`, `leadStatus` — three (!) different enums
-- `city text`, `address text`, `service text`
-- `createdAt`, `updatedAt`
-
-### `Project`
-- `id text NOT NULL` — PK
-- `name text NOT NULL`
-- **`client text NOT NULL`** — TEXT customer name (not FK). Populated even
-  when `customerId` is null.
-- `customerId text` — nullable FK → `Customer.id`
-- `status` — enum `ProjectStatus`
-- `city text`, `address text`
-- `contactName text`, `contactPhone text`
-- `fieldContactName text`, `fieldContactPhone text`
-- `service text`
-- `assignedTechnicianId text` — FK → `User.id`
-
-### `IncomingLead`
-- `id text NOT NULL` — PK
-- `subject text NOT NULL`
-- `body text`
-- `fromName text`
-- `fromEmail text`
-- `receivedAt timestamp NOT NULL`
-- `status` — enum `IncomingLeadStatus` (values include `NEW`)
-- **`ownerId text` — nullable in practice.** The Prisma schema declares it as
-  `NOT NULL`, but in this database an unassigned lead has `ownerId IS NULL`.
-  All the bot's D3 flows (`findOvernightUnassignedLeads`,
-  `findEscalationCandidates`, `findUnassignedLeadsForAssignment`) correctly
-  filter `WHERE "ownerId" IS NULL` — do NOT change this to a sentinel-user
-  check.
-- `transferredToId text` — nullable
-- `taskId text` — nullable
-- `notifiedAt timestamp` — nullable
-
-### `TaskField` (bot-managed, migration 009)
-- Full schema in `src/db/migrations/009_field_inspections.sql`. Documented for
-  reference:
-- `id uuid NOT NULL DEFAULT gen_random_uuid()`
-- `taskId text NOT NULL` → `Task.id`
-- `inspectionTypeId uuid NOT NULL` → `InspectionType.id`
-- `family text NOT NULL` — 13-value CHECK (radiation / noise / air / …)
-- Scheduling: `appointmentTitle`, `scheduledStartAt`, `scheduledEndAt`,
-  `durationMinutes`, `workerNotifiedAt` (all with clear semantics)
-- Site: `siteAddress`, `siteCity`, `fieldContactName`, `fieldContactPhone`,
-  `navigationUrl`, `specialInstructions`
-- `fieldStatus text NOT NULL DEFAULT 'ASSIGNED'` — 10-value CHECK
-- Status timestamps: `assignedAt`, `confirmedAt`, `declinedAt`, `departedAt`,
-  `arrivedAt`, `finishedAt`
-- Problems: `problemType`, `problemNote`, `hasOpenProblem`
-- Missing info: `missingReportInfo`, `missingReportInfoNote`
-- `managerNotifiedAt`, `updatedByUserId`, `createdAt`, `updatedAt`, `fieldNotes`
-
----
-
-## Customer name resolution helper
-
-For ANY query that needs to display "the customer" of a Task, use this
-fallback pattern (do NOT hardcode `c.name`):
-
-```sql
-COALESCE(
-  c.name,
-  l."fullName",
-  NULLIF(TRIM(CONCAT_WS(' ', l."firstName", l."lastName")), ''),
-  l.company,
-  p.client,
-  il."fromName",
-  NULLIF(TRIM(t.title), ''),
-  NULLIF(TRIM(t.description), '')
-) AS "customerName"
-```
-
-with the JOINs:
-
-```sql
-LEFT JOIN "Customer"    c  ON c.id  = t."customerId"
-LEFT JOIN "Lead"        l  ON l.id  = t."leadId"
-LEFT JOIN "Project"     p  ON p.id  = t."projectId"
-LEFT JOIN "IncomingLead" il ON il.id = t."incomingLeadId"
-```
-
-(`t` must be the `"Task"` alias in the query — `t.title` and `t.description`
-refer to the Task row itself, no extra JOIN needed.)
-
-Order of precedence:
-1. Direct `Customer.name` (if `Task.customerId` is set)
-2. `Lead.fullName` (imported legacy leads store the full name here)
-3. `Lead.firstName + lastName` (composed)
-4. `Lead.company` (B2B leads with only company info)
-5. `Project.client` (project-based tasks; text field, not FK)
-6. `IncomingLead.fromName` (leads that came in via the mailbox)
-7. `Task.title` — last-resort fallback when ALL customer FKs are NULL
-8. `Task.description` — final fallback (often contains the address or job summary)
-
-If ALL eight are NULL/empty, the bot may display "לקוח לא ידוע" but this
-indicates a data-quality issue that should be flagged, not silenced.
-
----
-
-## SQL conventions in the CRM schema
-
-- Table names: **PascalCase, quoted** (`"Task"`, `"Customer"`, `"IncomingLead"`).
-- Column names: **camelCase, quoted** (`"customerId"`, `"scheduledStartAt"`,
-  `"fieldStatus"`).
-- Primary keys: text (except `TaskField` and `InspectionType` which use uuid
-  via bot migrations).
-- `TaskField.taskId` is text-FK to `Task.id` (both text) — no cast needed.
-- `TaskField.updatedByUserId` is text-FK to `User.id` (both text).
-- The CRM uses PostgreSQL `USER-DEFINED` types (enums) — the bot NEVER writes
-  to enum columns.
+CREATE TABLE public._prisma_migrations (
+  id character varying NOT NULL,
+  checksum character varying NOT NULL,
+  finished_at timestamp with time zone,
+  migration_name character varying NOT NULL,
+  logs text,
+  rolled_back_at timestamp with time zone,
+  started_at timestamp with time zone NOT NULL DEFAULT now(),
+  applied_steps_count integer NOT NULL DEFAULT 0,
+  CONSTRAINT _prisma_migrations_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.Lead (
+  id text NOT NULL,
+  company text,
+  phone text,
+  service text,
+  source text,
+  status text NOT NULL DEFAULT 'NEW'::text,
+  site text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  assignee text,
+  firstName text NOT NULL,
+  lastName text,
+  notes text,
+  assignedUserId text,
+  customerId text,
+  stage USER-DEFINED NOT NULL DEFAULT 'NEW'::"LeadStage",
+  address text,
+  city text,
+  email text,
+  followUp1Date timestamp without time zone,
+  followUp2Date timestamp without time zone,
+  fullName text,
+  importLegacyId text,
+  leadStatus USER-DEFINED NOT NULL DEFAULT 'NEW'::"LeadStatus",
+  nextFollowUpDate timestamp without time zone,
+  projectId text,
+  serviceType text,
+  updatedAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  utm_campaign text,
+  utm_content text,
+  utm_medium text,
+  utm_source text,
+  utm_term text,
+  referralCompany text,
+  CONSTRAINT Lead_pkey PRIMARY KEY (id),
+  CONSTRAINT Lead_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT Lead_assignedUserId_fkey FOREIGN KEY (assignedUserId) REFERENCES public.User(id),
+  CONSTRAINT Lead_projectId_fkey FOREIGN KEY (projectId) REFERENCES public.Project(id)
+);
+CREATE TABLE public.User (
+  id text NOT NULL,
+  name text NOT NULL,
+  email text NOT NULL,
+  passwordHash text NOT NULL,
+  role USER-DEFINED NOT NULL DEFAULT 'SALES'::"UserRole",
+  status USER-DEFINED NOT NULL DEFAULT 'ACTIVE'::"UserStatus",
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  department text,
+  phone text,
+  canDeleteCustomers boolean NOT NULL DEFAULT false,
+  canDeleteLeads boolean NOT NULL DEFAULT false,
+  canEditFinance boolean NOT NULL DEFAULT false,
+  canManagePermissions boolean NOT NULL DEFAULT false,
+  canManageUsers boolean NOT NULL DEFAULT false,
+  canViewAllRecords boolean NOT NULL DEFAULT false,
+  canViewFinance boolean NOT NULL DEFAULT false,
+  currentProjectId text,
+  currentWorkMode USER-DEFINED,
+  employeeNumber text,
+  isOnline boolean NOT NULL DEFAULT false,
+  lastSeenAt timestamp without time zone,
+  mailDisplayName text,
+  serviceDepartments ARRAY DEFAULT ARRAY[]::text[],
+  smtpFrom text,
+  smtpHost text,
+  smtpPassword text,
+  smtpPort integer,
+  smtpSecure boolean NOT NULL DEFAULT false,
+  smtpUser text,
+  workStatus USER-DEFINED NOT NULL DEFAULT 'OFFLINE'::"WorkStatus",
+  msEmail text,
+  msRefreshToken text,
+  msConnectedAt timestamp without time zone,
+  mailSignature text,
+  mailSignatureImage bytea,
+  mailSignatureImageType text,
+  CONSTRAINT User_pkey PRIMARY KEY (id),
+  CONSTRAINT User_currentProjectId_fkey FOREIGN KEY (currentProjectId) REFERENCES public.Project(id)
+);
+CREATE TABLE public.Customer (
+  id text NOT NULL,
+  name text NOT NULL,
+  contactName text NOT NULL,
+  phone text NOT NULL,
+  email text NOT NULL,
+  city text NOT NULL,
+  status text NOT NULL DEFAULT 'ACTIVE'::text,
+  services ARRAY,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  address text,
+  allowEmail boolean,
+  allowFax boolean,
+  allowMail boolean,
+  allowSms boolean,
+  balanceLegacy numeric,
+  birthdayLegacy timestamp without time zone,
+  cityCodeLegacy text,
+  companyAmount text,
+  companyRegNumber text,
+  companyWall text,
+  countryOrRegion text,
+  creditDays text,
+  creditEnabled boolean,
+  creditExpiry text,
+  creditNumber text,
+  customerSize text,
+  detailDate1 timestamp without time zone,
+  detailDate2 timestamp without time zone,
+  detailDate3 timestamp without time zone,
+  detailDate4 timestamp without time zone,
+  detectorLocation text,
+  detectorModel text,
+  employeeCount text,
+  fax text,
+  feature4 text,
+  feature7 text,
+  feature8 text,
+  financeToken text,
+  financeTokenActive boolean,
+  financeTokenDate timestamp without time zone,
+  financeUnnamed1 text,
+  financeUnnamed2 text,
+  financeUnnamed3 text,
+  financeUnnamed4 text,
+  financialNumber1 text,
+  financialNumber2 text,
+  financialNumber2Large text,
+  financialNumber3 text,
+  functionalLabel text,
+  importLegacyId text,
+  internalNotes text,
+  lastUpdateDate timestamp without time zone,
+  lastUpdateNote text,
+  lastUpdatedBy text,
+  legacyAccountNumber text,
+  legacySubClassificationCode text,
+  legacyUpdatedAt timestamp without time zone,
+  mailingAddress text,
+  mailingCity text,
+  mailingInvalidField text,
+  mailingNote text,
+  mailingPoBox text,
+  mailingZip text,
+  managementCustomerLabel text,
+  managementProfile text,
+  microwaveModel text,
+  paymentTerms text,
+  percentageValue numeric,
+  phone2 text,
+  phone3 text,
+  priceList text,
+  registrationDate timestamp without time zone,
+  registrationNote text,
+  roundedPricing text,
+  salesRepresentative text,
+  totalPurchases numeric,
+  totalSales numeric,
+  website text,
+  zipLegacy text,
+  type text NOT NULL,
+  leadSource text,
+  feedbackRequestedAt timestamp without time zone,
+  feedbackOptOut boolean,
+  autoFollowupEnabled boolean,
+  followupIntervalDays integer,
+  followupChannel text,
+  lastFollowupAt timestamp without time zone,
+  nextFollowupAt timestamp without time zone,
+  notRelevantReason text,
+  notRelevantNote text,
+  notRelevantAt timestamp without time zone,
+  companyname text,
+  CONSTRAINT Customer_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.Quote (
+  id text NOT NULL,
+  service text NOT NULL,
+  amount double precision NOT NULL,
+  status USER-DEFINED NOT NULL DEFAULT 'DRAFT'::"QuoteStatus",
+  validTo timestamp without time zone NOT NULL,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  customerId text NOT NULL,
+  leadId text,
+  description text,
+  pdfPath text,
+  quoteNumber text,
+  accountingNumber text,
+  addressSummary text,
+  amountBeforeVat double precision DEFAULT 0,
+  closeColor text,
+  closeProbabilityPercent text,
+  closingText text,
+  companyRegNumber text,
+  contentHtml text,
+  copiedFromOrder text,
+  customerContactId text,
+  customerName text,
+  digitalCertificateMeta jsonb,
+  digitalSignatureStatus USER-DEFINED NOT NULL DEFAULT 'NOT_REQUESTED'::"DigitalSignatureStatus",
+  discountType USER-DEFINED NOT NULL DEFAULT 'NONE'::"DiscountType",
+  discountValue double precision DEFAULT 0,
+  exchangeRate numeric,
+  executorName text,
+  faxSummary text,
+  followUpResponsibleUserId text,
+  followupDate timestamp without time zone,
+  forecastClosePercent text,
+  forecastColor text,
+  forecastFunctionalLabel text,
+  forecastUpdatedAt timestamp without time zone,
+  forecastUpdatedBy text,
+  forecastUpdatedTime text,
+  functionalLabel text,
+  importLegacyId text,
+  internalNotes text,
+  lastEmailedAt timestamp without time zone,
+  lastEmailedTo text,
+  lastMergedDocPath text,
+  lastUpdatedBy text,
+  lastUpdatedDate timestamp without time zone,
+  lastUpdatedTime text,
+  lineItemsJson jsonb,
+  linkedEntityId text,
+  notes text,
+  openingText text,
+  opportunityId text,
+  orderReferenceNumber text,
+  orderSource text,
+  paymentAmount numeric,
+  paymentDueDate timestamp without time zone,
+  paymentFactor numeric,
+  paymentReference text,
+  paymentStatus text,
+  paymentTerms text,
+  paymentTotal numeric,
+  paymentsCount integer,
+  performerName text,
+  performerUserId text,
+  phoneSummary text,
+  priceList text,
+  projectId text,
+  quoteDate timestamp without time zone,
+  quoteTemplateId text,
+  reminderCount integer DEFAULT 0,
+  reminderNextAt timestamp without time zone,
+  salesRepresentativeId text,
+  salesRepresentativeName text,
+  sentAt timestamp without time zone,
+  signatureRequestedAt timestamp without time zone,
+  signedAt timestamp without time zone,
+  signedPdfPath text,
+  totalAmount double precision DEFAULT 0,
+  validityDate timestamp without time zone,
+  validityDays integer,
+  vatPercent double precision DEFAULT 17,
+  onedriveItemId text,
+  onedriveWebUrl text,
+  onedriveOwnerId text,
+  lastEmailSubject text,
+  lastEmailBody text,
+  citySummary text,
+  onedriveAttachmentId text,
+  CONSTRAINT Quote_pkey PRIMARY KEY (id),
+  CONSTRAINT Quote_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT Quote_leadId_fkey FOREIGN KEY (leadId) REFERENCES public.Lead(id),
+  CONSTRAINT Quote_customerContactId_fkey FOREIGN KEY (customerContactId) REFERENCES public.CustomerContact(id),
+  CONSTRAINT Quote_projectId_fkey FOREIGN KEY (projectId) REFERENCES public.Project(id),
+  CONSTRAINT Quote_opportunityId_fkey FOREIGN KEY (opportunityId) REFERENCES public.Opportunity(id),
+  CONSTRAINT Quote_quoteTemplateId_fkey FOREIGN KEY (quoteTemplateId) REFERENCES public.QuoteTemplate(id),
+  CONSTRAINT Quote_salesRepresentativeId_fkey FOREIGN KEY (salesRepresentativeId) REFERENCES public.User(id),
+  CONSTRAINT Quote_performerUserId_fkey FOREIGN KEY (performerUserId) REFERENCES public.User(id),
+  CONSTRAINT Quote_followUpResponsibleUserId_fkey FOREIGN KEY (followUpResponsibleUserId) REFERENCES public.User(id)
+);
+CREATE TABLE public.Task (
+  id text NOT NULL,
+  title text NOT NULL,
+  description text,
+  dueDate timestamp without time zone,
+  priority USER-DEFINED NOT NULL DEFAULT 'MEDIUM'::"TaskPriority",
+  status USER-DEFINED NOT NULL DEFAULT 'OPEN'::"TaskStatus",
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  ownerId text NOT NULL,
+  customerId text,
+  leadId text,
+  projectId text,
+  type text NOT NULL DEFAULT 'step1'::text,
+  productName text,
+  currentStage integer,
+  currentStageChangedAt timestamp without time zone,
+  incomingLeadId text,
+  processNotes text,
+  CONSTRAINT Task_pkey PRIMARY KEY (id),
+  CONSTRAINT Task_ownerId_fkey FOREIGN KEY (ownerId) REFERENCES public.User(id),
+  CONSTRAINT Task_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT Task_leadId_fkey FOREIGN KEY (leadId) REFERENCES public.Lead(id),
+  CONSTRAINT Task_projectId_fkey FOREIGN KEY (projectId) REFERENCES public.Project(id)
+);
+CREATE TABLE public.Report (
+  id text NOT NULL,
+  title text NOT NULL,
+  type text,
+  filtersJson text DEFAULT '{}'::text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  createdById text NOT NULL,
+  customerId text,
+  clientNotes text,
+  importLegacyId text,
+  internalNotes text,
+  pdfPath text,
+  projectId text,
+  reportDate timestamp without time zone,
+  reportType USER-DEFINED NOT NULL DEFAULT 'OTHER'::"ReportType",
+  reviewedById text,
+  sentAt timestamp without time zone,
+  status USER-DEFINED NOT NULL DEFAULT 'WAITING_DATA'::"ReportStatus",
+  version integer NOT NULL DEFAULT 1,
+  CONSTRAINT Report_pkey PRIMARY KEY (id),
+  CONSTRAINT Report_createdById_fkey FOREIGN KEY (createdById) REFERENCES public.User(id),
+  CONSTRAINT Report_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT Report_projectId_fkey FOREIGN KEY (projectId) REFERENCES public.Project(id),
+  CONSTRAINT Report_reviewedById_fkey FOREIGN KEY (reviewedById) REFERENCES public.User(id)
+);
+CREATE TABLE public.Project (
+  id text NOT NULL,
+  importLegacyId text,
+  projectNumber text,
+  name text NOT NULL,
+  client text NOT NULL,
+  status USER-DEFINED NOT NULL DEFAULT 'NEW'::"ProjectStatus",
+  progress integer NOT NULL DEFAULT 0,
+  dueDate timestamp without time zone,
+  siteVisitDate timestamp without time zone,
+  siteVisitTime text,
+  city text,
+  address text,
+  service text,
+  serviceCategory text,
+  serviceSubType text,
+  contactName text,
+  contactPhone text,
+  urgency text,
+  fieldContactName text,
+  fieldContactPhone text,
+  requiresReport boolean NOT NULL DEFAULT true,
+  requiresSampling boolean NOT NULL DEFAULT false,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  customerId text,
+  assignedTechnicianId text,
+  assignedReportWriterId text,
+  CONSTRAINT Project_pkey PRIMARY KEY (id),
+  CONSTRAINT Project_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT Project_assignedTechnicianId_fkey FOREIGN KEY (assignedTechnicianId) REFERENCES public.User(id),
+  CONSTRAINT Project_assignedReportWriterId_fkey FOREIGN KEY (assignedReportWriterId) REFERENCES public.User(id)
+);
+CREATE TABLE public.CustomerClassification (
+  id text NOT NULL,
+  code text NOT NULL,
+  labelHe text NOT NULL,
+  sortOrder integer NOT NULL DEFAULT 0,
+  isPreset boolean NOT NULL DEFAULT false,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT CustomerClassification_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.CustomerReferralSource (
+  id text NOT NULL,
+  customerId text NOT NULL,
+  date timestamp without time zone,
+  sourceName text,
+  rowOrder integer NOT NULL DEFAULT 0,
+  importLegacyId text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT CustomerReferralSource_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerReferralSource_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.CustomerQuestionnaire (
+  id text NOT NULL,
+  customerId text NOT NULL,
+  questionnaireCode text,
+  questionnaireName text,
+  rowOrder integer NOT NULL DEFAULT 0,
+  importLegacyId text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT CustomerQuestionnaire_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerQuestionnaire_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.CustomerRelation (
+  id text NOT NULL,
+  customerId text NOT NULL,
+  relatedCustomerName text,
+  relationType text,
+  rowOrder integer NOT NULL DEFAULT 0,
+  importLegacyId text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT CustomerRelation_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerRelation_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.CustomerAdditionalDataRow (
+  id text NOT NULL,
+  customerId text NOT NULL,
+  numberValue text,
+  dValue text,
+  dateValue timestamp without time zone,
+  text1 text,
+  text2 text,
+  rowOrder integer NOT NULL DEFAULT 0,
+  importLegacyId text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT CustomerAdditionalDataRow_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerAdditionalDataRow_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.CustomerExternalDataRow (
+  id text NOT NULL,
+  customerId text NOT NULL,
+  rowOrder integer NOT NULL DEFAULT 0,
+  colA text,
+  colB text,
+  colC text,
+  colD text,
+  colE text,
+  colF text,
+  colG text,
+  colH text,
+  colI text,
+  colJ text,
+  importLegacyId text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT CustomerExternalDataRow_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerExternalDataRow_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.CustomerContact (
+  id text NOT NULL,
+  importLegacyId text NOT NULL,
+  customerId text NOT NULL,
+  fullName text NOT NULL,
+  phone text NOT NULL DEFAULT ''::text,
+  mobile text NOT NULL DEFAULT ''::text,
+  fax text NOT NULL DEFAULT ''::text,
+  email text NOT NULL DEFAULT ''::text,
+  address text NOT NULL DEFAULT ''::text,
+  city text NOT NULL DEFAULT ''::text,
+  zip text NOT NULL DEFAULT ''::text,
+  roleTitle text,
+  department text,
+  isPrimary boolean NOT NULL DEFAULT false,
+  isActive boolean NOT NULL DEFAULT true,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT CustomerContact_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerContact_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.SalesOrder (
+  id text NOT NULL,
+  importLegacyId text,
+  orderNumber text,
+  customerId text NOT NULL,
+  customerContactId text,
+  quoteId text,
+  status text NOT NULL DEFAULT 'IMPORTED'::text,
+  orderDate timestamp without time zone,
+  total double precision NOT NULL DEFAULT 0,
+  notes text,
+  internalNotes text,
+  deliverySummary text,
+  paymentTerms text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT SalesOrder_pkey PRIMARY KEY (id),
+  CONSTRAINT SalesOrder_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT SalesOrder_customerContactId_fkey FOREIGN KEY (customerContactId) REFERENCES public.CustomerContact(id),
+  CONSTRAINT SalesOrder_quoteId_fkey FOREIGN KEY (quoteId) REFERENCES public.Quote(id)
+);
+CREATE TABLE public.CustomerInteraction (
+  id text NOT NULL,
+  importLegacyId text,
+  customerId text NOT NULL,
+  customerContactId text,
+  activityType text,
+  status text,
+  subject text,
+  notes text,
+  dueDate timestamp without time zone,
+  completedDate timestamp without time zone,
+  activityDate timestamp without time zone,
+  legacyOwnerName text,
+  location text,
+  priority text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT CustomerInteraction_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerInteraction_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT CustomerInteraction_customerContactId_fkey FOREIGN KEY (customerContactId) REFERENCES public.CustomerContact(id)
+);
+CREATE TABLE public.ImportJob (
+  id text NOT NULL,
+  fileName text NOT NULL,
+  mimeType text,
+  fileType text NOT NULL,
+  status USER-DEFINED NOT NULL DEFAULT 'UPLOADED'::"ImportJobStatus",
+  storedPath text,
+  userId text,
+  previewJson jsonb,
+  resultJson jsonb,
+  errorMessage text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT ImportJob_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.ImportJobError (
+  id text NOT NULL,
+  jobId text NOT NULL,
+  entity text NOT NULL,
+  lineRef text,
+  message text NOT NULL,
+  rowData jsonb,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT ImportJobError_pkey PRIMARY KEY (id),
+  CONSTRAINT ImportJobError_jobId_fkey FOREIGN KEY (jobId) REFERENCES public.ImportJob(id)
+);
+CREATE TABLE public.LeadActivity (
+  id text NOT NULL,
+  leadId text NOT NULL,
+  type text NOT NULL,
+  message text,
+  createdById text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT LeadActivity_pkey PRIMARY KEY (id),
+  CONSTRAINT LeadActivity_leadId_fkey FOREIGN KEY (leadId) REFERENCES public.Lead(id),
+  CONSTRAINT LeadActivity_createdById_fkey FOREIGN KEY (createdById) REFERENCES public.User(id)
+);
+CREATE TABLE public.Opportunity (
+  id text NOT NULL,
+  customerId text,
+  leadId text,
+  projectOrServiceName text NOT NULL,
+  estimatedValue double precision NOT NULL DEFAULT 0,
+  pipelineStage USER-DEFINED NOT NULL DEFAULT 'NEW'::"OpportunityStage",
+  targetCloseDate timestamp without time zone,
+  assignedUserId text,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT Opportunity_pkey PRIMARY KEY (id),
+  CONSTRAINT Opportunity_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT Opportunity_leadId_fkey FOREIGN KEY (leadId) REFERENCES public.Lead(id),
+  CONSTRAINT Opportunity_assignedUserId_fkey FOREIGN KEY (assignedUserId) REFERENCES public.User(id)
+);
+CREATE TABLE public.QuoteTemplate (
+  id text NOT NULL,
+  name text NOT NULL,
+  serviceType text NOT NULL,
+  isActive boolean NOT NULL DEFAULT true,
+  introHtml text,
+  bodyHtml text,
+  closingHtml text,
+  termsHtml text,
+  variablesHelp text,
+  defaultLineItems jsonb,
+  docxTemplatePath text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT QuoteTemplate_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.Document (
+  id text NOT NULL,
+  importLegacyId text,
+  name text NOT NULL,
+  documentType USER-DEFINED NOT NULL DEFAULT 'OTHER'::"DocumentType",
+  filePath text NOT NULL,
+  description text,
+  mimeType text,
+  sizeBytes integer,
+  documentDate timestamp without time zone,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  projectId text,
+  customerId text,
+  reportId text,
+  uploadedById text,
+  dataBase64 text,
+  CONSTRAINT Document_pkey PRIMARY KEY (id),
+  CONSTRAINT Document_projectId_fkey FOREIGN KEY (projectId) REFERENCES public.Project(id),
+  CONSTRAINT Document_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT Document_reportId_fkey FOREIGN KEY (reportId) REFERENCES public.Report(id),
+  CONSTRAINT Document_uploadedById_fkey FOREIGN KEY (uploadedById) REFERENCES public.User(id)
+);
+CREATE TABLE public.LabSample (
+  id text NOT NULL,
+  sampleNumber text NOT NULL,
+  sampleType USER-DEFINED NOT NULL DEFAULT 'OTHER'::"LabSampleType",
+  sampleStatus USER-DEFINED NOT NULL DEFAULT 'COLLECTED'::"LabSampleStatus",
+  collectedAt timestamp without time zone,
+  receivedAt timestamp without time zone,
+  analyzedAt timestamp without time zone,
+  locationDescription text,
+  testType text,
+  method text,
+  resultValue text,
+  resultUnit text,
+  resultStatus USER-DEFINED NOT NULL DEFAULT 'PENDING'::"LabResultStatus",
+  resultFilePath text,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  projectId text,
+  customerId text,
+  collectedById text,
+  CONSTRAINT LabSample_pkey PRIMARY KEY (id),
+  CONSTRAINT LabSample_projectId_fkey FOREIGN KEY (projectId) REFERENCES public.Project(id),
+  CONSTRAINT LabSample_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id),
+  CONSTRAINT LabSample_collectedById_fkey FOREIGN KEY (collectedById) REFERENCES public.User(id)
+);
+CREATE TABLE public.SystemSetting (
+  key text NOT NULL,
+  value jsonb NOT NULL,
+  updatedAt timestamp without time zone NOT NULL,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT SystemSetting_pkey PRIMARY KEY (key)
+);
+CREATE TABLE public.QuoteItemCatalog (
+  id text NOT NULL,
+  itemCode text NOT NULL,
+  name text NOT NULL,
+  description text,
+  serviceCategory text,
+  serviceSubType text,
+  basePrice double precision NOT NULL DEFAULT 0,
+  billingUnit text NOT NULL,
+  vatPercent double precision NOT NULL DEFAULT 17,
+  isActive boolean NOT NULL DEFAULT true,
+  requiresQuantity boolean NOT NULL DEFAULT true,
+  requiresSiteVisit boolean NOT NULL DEFAULT false,
+  requiresReport boolean NOT NULL DEFAULT false,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT QuoteItemCatalog_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.PaymentTerm (
+  id text NOT NULL,
+  label text NOT NULL,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT PaymentTerm_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.CustomerQuoteItem (
+  id text NOT NULL,
+  quoteId text NOT NULL,
+  rowOrder integer NOT NULL DEFAULT 0,
+  productCode text,
+  sku text,
+  productDescription text,
+  distributionChannel text,
+  quantity numeric,
+  price numeric,
+  discountPercent numeric,
+  total numeric,
+  totalIls numeric,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT CustomerQuoteItem_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerQuoteItem_quoteId_fkey FOREIGN KEY (quoteId) REFERENCES public.Quote(id)
+);
+CREATE TABLE public.QuoteDocument (
+  id text NOT NULL,
+  quoteId text NOT NULL,
+  importLegacyId text,
+  rowOrder integer NOT NULL DEFAULT 0,
+  documentDescription text,
+  documentType text,
+  fileName text,
+  filePath text,
+  documentDate timestamp without time zone,
+  uploadedBy text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  data bytea,
+  mimeType text,
+  CONSTRAINT QuoteDocument_pkey PRIMARY KEY (id),
+  CONSTRAINT QuoteDocument_quoteId_fkey FOREIGN KEY (quoteId) REFERENCES public.Quote(id)
+);
+CREATE TABLE public.TaskAttachment (
+  id text NOT NULL,
+  taskId text NOT NULL,
+  fileName text NOT NULL,
+  mimeType text NOT NULL,
+  data bytea NOT NULL,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT TaskAttachment_pkey PRIMARY KEY (id),
+  CONSTRAINT TaskAttachment_taskId_fkey FOREIGN KEY (taskId) REFERENCES public.Task(id)
+);
+CREATE TABLE public.Inquiry (
+  id text NOT NULL,
+  importLegacyId text,
+  customerId text,
+  date timestamp without time zone,
+  time text,
+  customerCode text,
+  productCode text,
+  contactName text,
+  phone text,
+  hValue text,
+  productName text,
+  faultCode text,
+  eValue text,
+  dValue text,
+  treatmentCode text,
+  handlerName text,
+  followUp boolean,
+  description text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  trackingDate timestamp without time zone,
+  receivedDate timestamp without time zone,
+  hour text,
+  customerName text,
+  displayName text,
+  salesRepresentativeName text,
+  status text,
+  inquiryDuration text,
+  homePhone text,
+  mobilePhone text,
+  workPhone text,
+  isOpen boolean,
+  isClosed boolean,
+  isUrgent boolean,
+  campaignName text,
+  operationName text,
+  lastStatusNotes text,
+  faultDescription text,
+  CONSTRAINT Inquiry_pkey PRIMARY KEY (id),
+  CONSTRAINT Inquiry_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.TransactionJournalEntry (
+  id text NOT NULL,
+  importLegacyId text,
+  number text,
+  status text,
+  workStatus text,
+  weekday text,
+  date timestamp without time zone,
+  deliveryDate timestamp without time zone,
+  customerId text,
+  customerName text,
+  contactName text,
+  linkedCustomerName text,
+  transactionType text,
+  productName text,
+  quantity numeric,
+  price numeric,
+  deliveryLocation text,
+  coordinateDay text,
+  phone text,
+  basketOrRefNumber text,
+  stage text,
+  supplierName text,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT TransactionJournalEntry_pkey PRIMARY KEY (id),
+  CONSTRAINT TransactionJournalEntry_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.SalesRepCalendarEntry (
+  id text NOT NULL,
+  importLegacyId text,
+  salesRepresentativeId text,
+  salesRepresentativeName text,
+  date timestamp without time zone,
+  startTime text,
+  endTime text,
+  title text,
+  customerId text,
+  customerName text,
+  notes text,
+  entryType text,
+  relatedEntityType text,
+  relatedEntityId text,
+  status text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT SalesRepCalendarEntry_pkey PRIMARY KEY (id),
+  CONSTRAINT SalesRepCalendarEntry_salesRepresentativeId_fkey FOREIGN KEY (salesRepresentativeId) REFERENCES public.User(id),
+  CONSTRAINT SalesRepCalendarEntry_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.ExecutionCalendarEntry (
+  id text NOT NULL,
+  importLegacyId text,
+  date timestamp without time zone,
+  startTime text,
+  endTime text,
+  assignedUserId text,
+  assignedUserName text,
+  title text,
+  customerId text,
+  customerName text,
+  relatedEntityType text,
+  relatedEntityId text,
+  entryType text,
+  status text,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT ExecutionCalendarEntry_pkey PRIMARY KEY (id),
+  CONSTRAINT ExecutionCalendarEntry_assignedUserId_fkey FOREIGN KEY (assignedUserId) REFERENCES public.User(id),
+  CONSTRAINT ExecutionCalendarEntry_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.EventHistory (
+  id text NOT NULL,
+  importLegacyId text,
+  customerId text,
+  linkedCustomerId text,
+  customerName text,
+  linkedCustomerName text,
+  contactName text,
+  phone text,
+  mobilePhone text,
+  customerPhone1 text,
+  customerPhone2 text,
+  customerPhone3 text,
+  status text,
+  date timestamp without time zone,
+  time text,
+  notes text,
+  activityName text,
+  productName text,
+  salesRepresentativeName text,
+  executorName text,
+  sourceName text,
+  activityTreePath text,
+  productTreePath text,
+  communicationFlag boolean,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT EventHistory_pkey PRIMARY KEY (id),
+  CONSTRAINT EventHistory_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.CustomerOrder (
+  id text NOT NULL,
+  importLegacyId text,
+  customerId text,
+  customerName text,
+  orderDate timestamp without time zone,
+  followupDate timestamp without time zone,
+  status text,
+  salesRepresentativeName text,
+  contactName text,
+  executorName text,
+  linkedEntityId text,
+  parentOrderId text,
+  priceList text,
+  currencyOrReadyStatus text,
+  exchangeRate numeric,
+  quoteReference text,
+  addressSummary text,
+  phoneSummary text,
+  faxSummary text,
+  customerTypeSummary text,
+  accountingNumber text,
+  companyRegNumber text,
+  supplyAddressUntil text,
+  supplyPhone text,
+  supplyDate timestamp without time zone,
+  firstDate timestamp without time zone,
+  notes text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  internalNotes text,
+  extraCost numeric,
+  orderSource text,
+  lastUpdatedBy text,
+  confirmationSent boolean,
+  lastUpdatedAtLegacy timestamp without time zone,
+  lastUpdatedTime text,
+  billingSettings text,
+  nextBillingDate timestamp without time zone,
+  billingStatus text,
+  billingFromDate timestamp without time zone,
+  recurringChargesCount text,
+  billingEndMode text,
+  billingAfterValue text,
+  accountingReceiptNumber text,
+  accountingInvoiceNumber text,
+  accountingTransferDate timestamp without time zone,
+  accountingStatus text,
+  nextAccountingTransferDate timestamp without time zone,
+  accountingCategory text,
+  accountingReferenceText text,
+  CONSTRAINT CustomerOrder_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerOrder_customerId_fkey FOREIGN KEY (customerId) REFERENCES public.Customer(id)
+);
+CREATE TABLE public.CustomerOrderItem (
+  id text NOT NULL,
+  orderId text NOT NULL,
+  rowOrder integer NOT NULL DEFAULT 0,
+  productCode text,
+  sku text,
+  productDescription text,
+  distributionChannel text,
+  quantity numeric,
+  price numeric,
+  discountPercent numeric,
+  total numeric,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT CustomerOrderItem_pkey PRIMARY KEY (id),
+  CONSTRAINT CustomerOrderItem_orderId_fkey FOREIGN KEY (orderId) REFERENCES public.CustomerOrder(id)
+);
+CREATE TABLE public.OrderDocument (
+  id text NOT NULL,
+  orderId text NOT NULL,
+  importLegacyId text,
+  rowOrder integer NOT NULL DEFAULT 0,
+  documentDescription text,
+  documentType text,
+  fileName text,
+  filePath text,
+  documentDate timestamp without time zone,
+  uploadedBy text,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT OrderDocument_pkey PRIMARY KEY (id),
+  CONSTRAINT OrderDocument_orderId_fkey FOREIGN KEY (orderId) REFERENCES public.CustomerOrder(id)
+);
+CREATE TABLE public.OrderChargeTransaction (
+  id text NOT NULL,
+  orderId text NOT NULL,
+  importLegacyId text,
+  rowOrder integer NOT NULL DEFAULT 0,
+  periodNumber text,
+  approvalNumber text,
+  chargeDate timestamp without time zone,
+  billingMethod text,
+  transactionType text,
+  chargeAmount numeric,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  CONSTRAINT OrderChargeTransaction_pkey PRIMARY KEY (id),
+  CONSTRAINT OrderChargeTransaction_orderId_fkey FOREIGN KEY (orderId) REFERENCES public.CustomerOrder(id)
+);
+CREATE TABLE public.schema_migrations (
+  name text NOT NULL,
+  applied_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT schema_migrations_pkey PRIMARY KEY (name)
+);
+CREATE TABLE public.WhatsappPendingAction (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  requesterUserId text NOT NULL,
+  actionType text NOT NULL,
+  targetTaskId text,
+  payload jsonb NOT NULL,
+  state USER-DEFINED NOT NULL DEFAULT 'PENDING_EMPLOYEE_CONFIRM'::"WhatsappActionState",
+  approverUserId text,
+  expiresAt timestamp with time zone NOT NULL,
+  resolvedAt timestamp with time zone,
+  createdAt timestamp with time zone NOT NULL DEFAULT now(),
+  updatedAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappPendingAction_pkey PRIMARY KEY (id),
+  CONSTRAINT WhatsappPendingAction_requesterUserId_fkey FOREIGN KEY (requesterUserId) REFERENCES public.User(id),
+  CONSTRAINT WhatsappPendingAction_targetTaskId_fkey FOREIGN KEY (targetTaskId) REFERENCES public.Task(id),
+  CONSTRAINT WhatsappPendingAction_approverUserId_fkey FOREIGN KEY (approverUserId) REFERENCES public.User(id)
+);
+CREATE TABLE public.WhatsappAuditLog (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  userId text,
+  whatsappNumber text NOT NULL,
+  originalMessage text,
+  transcribedMessage text,
+  detectedIntent text,
+  detectedAction text,
+  confidence numeric,
+  targetTaskId text,
+  oldValues jsonb,
+  newValues jsonb,
+  confirmationStatus text,
+  approvalStatus text,
+  approverUserId text,
+  managerNotified boolean DEFAULT false,
+  executionStatus text,
+  errorMessage text,
+  pendingActionId uuid,
+  createdAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappAuditLog_pkey PRIMARY KEY (id),
+  CONSTRAINT WhatsappAuditLog_userId_fkey FOREIGN KEY (userId) REFERENCES public.User(id),
+  CONSTRAINT WhatsappAuditLog_targetTaskId_fkey FOREIGN KEY (targetTaskId) REFERENCES public.Task(id),
+  CONSTRAINT WhatsappAuditLog_approverUserId_fkey FOREIGN KEY (approverUserId) REFERENCES public.User(id),
+  CONSTRAINT WhatsappAuditLog_pendingActionId_fkey FOREIGN KEY (pendingActionId) REFERENCES public.WhatsappPendingAction(id)
+);
+CREATE TABLE public.WhatsappNotificationRecipient (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  userId text NOT NULL,
+  eventTypes ARRAY NOT NULL,
+  isActive boolean NOT NULL DEFAULT true,
+  createdAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappNotificationRecipient_pkey PRIMARY KEY (id),
+  CONSTRAINT WhatsappNotificationRecipient_userId_fkey FOREIGN KEY (userId) REFERENCES public.User(id)
+);
+CREATE TABLE public.WhatsappCompletionNotification (
+  taskId text NOT NULL,
+  notifiedAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappCompletionNotification_pkey PRIMARY KEY (taskId),
+  CONSTRAINT WhatsappCompletionNotification_taskId_fkey FOREIGN KEY (taskId) REFERENCES public.Task(id)
+);
+CREATE TABLE public.WhatsappInboundQueue (
+  msgId text NOT NULL,
+  fromPhone text NOT NULL,
+  payload jsonb NOT NULL,
+  status text NOT NULL DEFAULT 'pending'::text,
+  attempts integer NOT NULL DEFAULT 0,
+  error text,
+  receivedAt timestamp with time zone NOT NULL DEFAULT now(),
+  processedAt timestamp with time zone,
+  CONSTRAINT WhatsappInboundQueue_pkey PRIMARY KEY (msgId)
+);
+CREATE TABLE public.WhatsappConversationContext (
+  phone text NOT NULL,
+  state jsonb NOT NULL,
+  expiresAt timestamp with time zone NOT NULL,
+  updatedAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappConversationContext_pkey PRIMARY KEY (phone)
+);
+CREATE TABLE public.WhatsappUserGreeting (
+  phone text NOT NULL,
+  lastGreetedOn date NOT NULL,
+  CONSTRAINT WhatsappUserGreeting_pkey PRIMARY KEY (phone)
+);
+CREATE TABLE public.WhatsappReminderLog (
+  taskId text NOT NULL,
+  kind text NOT NULL,
+  sentAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappReminderLog_pkey PRIMARY KEY (taskId, kind),
+  CONSTRAINT WhatsappReminderLog_taskId_fkey FOREIGN KEY (taskId) REFERENCES public.Task(id)
+);
+CREATE TABLE public.WhatsappChatHistory (
+  phone text NOT NULL,
+  messages jsonb NOT NULL DEFAULT '[]'::jsonb,
+  expiresAt timestamp with time zone NOT NULL,
+  updatedAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappChatHistory_pkey PRIMARY KEY (phone)
+);
+CREATE TABLE public.UserSignature (
+  id text NOT NULL,
+  userId text NOT NULL,
+  title text NOT NULL,
+  image bytea NOT NULL,
+  imageType text NOT NULL DEFAULT 'image/png'::text,
+  sortOrder integer NOT NULL DEFAULT 0,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT UserSignature_pkey PRIMARY KEY (id),
+  CONSTRAINT UserSignature_userId_fkey FOREIGN KEY (userId) REFERENCES public.User(id)
+);
+CREATE TABLE public.IncomingLead (
+  id text NOT NULL,
+  messageId text NOT NULL,
+  subject text NOT NULL,
+  body text,
+  fromName text,
+  fromEmail text,
+  receivedAt timestamp without time zone NOT NULL,
+  status USER-DEFINED NOT NULL DEFAULT 'NEW'::"IncomingLeadStatus",
+  ownerId text NOT NULL,
+  transferredToId text,
+  taskId text,
+  notifiedAt timestamp without time zone,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt timestamp without time zone NOT NULL,
+  internetMessageId text,
+  CONSTRAINT IncomingLead_pkey PRIMARY KEY (id),
+  CONSTRAINT IncomingLead_ownerId_fkey FOREIGN KEY (ownerId) REFERENCES public.User(id)
+);
+CREATE TABLE public.UserDigestPreference (
+  userId text NOT NULL,
+  morningEnabled boolean NOT NULL DEFAULT true,
+  morningTime text NOT NULL DEFAULT '08:00'::text,
+  eveningEnabled boolean NOT NULL DEFAULT true,
+  eveningTime text NOT NULL DEFAULT '17:00'::text,
+  timezone text NOT NULL DEFAULT 'Asia/Jerusalem'::text,
+  createdAt timestamp with time zone NOT NULL DEFAULT now(),
+  updatedAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT UserDigestPreference_pkey PRIMARY KEY (userId),
+  CONSTRAINT UserDigestPreference_userId_fkey FOREIGN KEY (userId) REFERENCES public.User(id)
+);
+CREATE TABLE public.WhatsappDigestSendLog (
+  userId text NOT NULL,
+  digestType text NOT NULL,
+  localDate date NOT NULL,
+  sentAt timestamp with time zone NOT NULL DEFAULT now(),
+  status text NOT NULL DEFAULT 'SENT'::text,
+  CONSTRAINT WhatsappDigestSendLog_pkey PRIMARY KEY (userId, digestType, localDate),
+  CONSTRAINT WhatsappDigestSendLog_userId_fkey FOREIGN KEY (userId) REFERENCES public.User(id)
+);
+CREATE TABLE public.LeadSource (
+  id text NOT NULL,
+  name text NOT NULL,
+  sortOrder integer NOT NULL DEFAULT 0,
+  isPreset boolean NOT NULL DEFAULT false,
+  createdAt timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT LeadSource_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.InspectionType (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code text NOT NULL UNIQUE,
+  labelHe text NOT NULL,
+  family text NOT NULL CHECK (family = ANY (ARRAY['radiation'::text, 'noise'::text, 'air'::text, 'asbestos'::text, 'radon'::text, 'odor'::text, 'water'::text, 'soil'::text, 'occupational'::text, 'thermal'::text, 'green'::text, 'opinion'::text, 'general'::text])),
+  isActive boolean NOT NULL DEFAULT true,
+  sortOrder integer NOT NULL DEFAULT 0,
+  createdAt timestamp with time zone NOT NULL DEFAULT now(),
+  updatedAt timestamp with time zone NOT NULL DEFAULT now(),
+  isFieldInspection boolean NOT NULL DEFAULT true,
+  CONSTRAINT InspectionType_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.InspectionChecklist (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  family text NOT NULL CHECK (family = ANY (ARRAY['radiation'::text, 'noise'::text, 'air'::text, 'asbestos'::text, 'radon'::text, 'odor'::text, 'water'::text, 'soil'::text, 'occupational'::text, 'thermal'::text, 'green'::text, 'opinion'::text, 'general'::text])),
+  code text NOT NULL,
+  labelHe text NOT NULL,
+  isRequired boolean NOT NULL DEFAULT true,
+  sortOrder integer NOT NULL DEFAULT 0,
+  createdAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT InspectionChecklist_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.TaskField (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  taskId text NOT NULL,
+  inspectionTypeId uuid NOT NULL,
+  family text NOT NULL CHECK (family = ANY (ARRAY['radiation'::text, 'noise'::text, 'air'::text, 'asbestos'::text, 'radon'::text, 'odor'::text, 'water'::text, 'soil'::text, 'occupational'::text, 'thermal'::text, 'green'::text, 'opinion'::text, 'general'::text])),
+  appointmentTitle text,
+  scheduledStartAt timestamp with time zone NOT NULL,
+  scheduledEndAt timestamp with time zone NOT NULL,
+  durationMinutes integer NOT NULL CHECK ("durationMinutes" > 0),
+  workerNotifiedAt timestamp with time zone,
+  siteAddress text,
+  siteCity text,
+  fieldContactName text,
+  fieldContactPhone text,
+  navigationUrl text,
+  specialInstructions text,
+  fieldStatus text NOT NULL DEFAULT 'ASSIGNED'::text CHECK ("fieldStatus" = ANY (ARRAY['ASSIGNED'::text, 'CONFIRMED'::text, 'DECLINED'::text, 'NEEDS_MORE_INFO'::text, 'EN_ROUTE'::text, 'ARRIVED'::text, 'FINISHED_FIELD'::text, 'WAITING_FOR_INFO'::text, 'HAS_PROBLEM'::text, 'CANCELED'::text])),
+  assignedAt timestamp with time zone NOT NULL DEFAULT now(),
+  confirmedAt timestamp with time zone,
+  declinedAt timestamp with time zone,
+  declinedReason text,
+  departedAt timestamp with time zone,
+  arrivedAt timestamp with time zone,
+  finishedAt timestamp with time zone,
+  fieldNotes text,
+  problemType text CHECK ("problemType" IS NULL OR ("problemType" = ANY (ARRAY['CUSTOMER_NOT_ANSWERING'::text, 'NO_ACCESS'::text, 'CUSTOMER_NOT_PRESENT'::text, 'MISSING_EQUIPMENT'::text, 'CANNOT_PERFORM'::text, 'PROFESSIONAL_ISSUE'::text, 'OTHER'::text]))),
+  problemNote text,
+  hasOpenProblem boolean NOT NULL DEFAULT false,
+  missingReportInfo boolean NOT NULL DEFAULT false,
+  missingReportInfoNote text,
+  managerNotifiedAt timestamp with time zone,
+  updatedByUserId text,
+  createdAt timestamp with time zone NOT NULL DEFAULT now(),
+  updatedAt timestamp with time zone NOT NULL DEFAULT now(),
+  preReminderSentAt timestamp with time zone,
+  travelEtaMinutes integer,
+  expectedArrivalAt timestamp with time zone,
+  CONSTRAINT TaskField_pkey PRIMARY KEY (id),
+  CONSTRAINT TaskField_taskId_fkey FOREIGN KEY (taskId) REFERENCES public.Task(id),
+  CONSTRAINT TaskField_inspectionTypeId_fkey FOREIGN KEY (inspectionTypeId) REFERENCES public.InspectionType(id),
+  CONSTRAINT TaskField_updatedByUserId_fkey FOREIGN KEY (updatedByUserId) REFERENCES public.User(id)
+);
+CREATE TABLE public.WhatsappLeadNotification (
+  leadId text NOT NULL,
+  eventKind text NOT NULL CHECK ("eventKind" = ANY (ARRAY['ASSIGNED_TO_WORKER'::text, 'ESCALATED_1H'::text])),
+  notifiedAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappLeadNotification_pkey PRIMARY KEY (leadId, eventKind)
+);
+CREATE TABLE public.WhatsappCustomerNotification (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  taskFieldId uuid NOT NULL,
+  notificationType text NOT NULL CHECK ("notificationType" = 'WORKER_EN_ROUTE'::text),
+  recipientPhone text NOT NULL,
+  status text NOT NULL DEFAULT 'SENT'::text CHECK (status = ANY (ARRAY['SENT'::text, 'FAILED'::text])),
+  errorMessage text,
+  workerFeedbackSentAt timestamp with time zone,
+  sentAt timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT WhatsappCustomerNotification_pkey PRIMARY KEY (id),
+  CONSTRAINT WhatsappCustomerNotification_taskFieldId_fkey FOREIGN KEY (taskFieldId) REFERENCES public.TaskField(id)
+);
+CREATE TABLE public.PocLocationPing (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workerKey text NOT NULL,
+  deviceId text,
+  tid text,
+  lat double precision,
+  lng double precision,
+  accuracy real,
+  speed real,
+  battery real,
+  trigger text,
+  recordedAt timestamp with time zone,
+  receivedAt timestamp with time zone NOT NULL DEFAULT now(),
+  raw jsonb,
+  CONSTRAINT PocLocationPing_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.WhatsappMessageRef (
+  wamid text NOT NULL,
+  recipientUserId text,
+  entityType text NOT NULL CHECK ("entityType" = ANY (ARRAY['task_field'::text, 'equipment_reminder'::text, 'daily_digest'::text, 'menu'::text, 'task'::text, 'lead'::text, 'general'::text])),
+  entityId text,
+  taskFieldId uuid,
+  kind text NOT NULL,
+  payload jsonb,
+  createdAt timestamp with time zone NOT NULL DEFAULT now(),
+  expiresAt timestamp with time zone,
+  CONSTRAINT WhatsappMessageRef_pkey PRIMARY KEY (wamid),
+  CONSTRAINT WhatsappMessageRef_taskFieldId_fkey FOREIGN KEY (taskFieldId) REFERENCES public.TaskField(id),
+  CONSTRAINT WhatsappMessageRef_recipientUserId_fkey FOREIGN KEY (recipientUserId) REFERENCES public.User(id)
+);

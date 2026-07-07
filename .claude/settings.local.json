@@ -59,7 +59,8 @@
       "Bash(node -e ' *)",
       "Bash(powershell *)",
       "WebFetch(domain:owntracks.org)",
-      "Bash(cd \"c:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management\" && npx ts-node --transpile-only _smoke_owntracks.ts 2>&1 | grep -viE \"^\\\\{|service.*whatsapp|level.:|\\\\\"time\\\\\"\" | tail -20; echo \"---\"; rm -f _smoke_owntracks.ts && echo \"cleaned up\")"
+      "Bash(cd \"c:/Users/guy42/Documents/WhatsApp-Bot-Tasks-Management\" && npx ts-node --transpile-only _smoke_owntracks.ts 2>&1 | grep -viE \"^\\\\{|service.*whatsapp|level.:|\\\\\"time\\\\\"\" | tail -20; echo \"---\"; rm -f _smoke_owntracks.ts && echo \"cleaned up\")",
+      "Bash(node *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\guy42\\Documents\\WhatsApp-Bot-Tasks-Management"
