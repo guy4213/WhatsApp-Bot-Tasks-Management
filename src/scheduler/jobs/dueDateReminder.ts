@@ -1,5 +1,6 @@
 import { pool } from '../../db/connection';
 import { notify } from '../../whatsapp/templates';
+import { templateName, DEFAULT_TEMPLATE_NAMES } from '../../whatsapp/templateNames';
 import { moduleLogger } from '../../utils/logger';
 import { getTaskDetailsForReminder } from '../../services/tasks';
 import { setActiveTask } from '../../services/taskContext';
@@ -39,10 +40,14 @@ export function matchTaskDetailsPayload(raw: string): { taskId: string } | null 
  * being silently marked as handled.
  *
  * The reminder body is enriched (customer/contact/description + a "פרטים נוספים"
- * quick-reply button). Both delivery paths render identical text:
- *  - in-window recipients get the freeform body (`fallbackText`) + button;
- *  - out-of-window recipients get the `due_reminder_v2` template (10 body vars +
- *    quick-reply button), which Meta renders to the same string.
+ * quick-reply button):
+ *  - in-window recipients always get the full freeform body (`fallbackText`) + button;
+ *  - out-of-window recipients get the enriched `due_reminder_v2` template (10 body
+ *    vars + quick-reply button) ONLY once an operator points
+ *    WHATSAPP_TEMPLATE_DUE_REMINDER at it (after Meta approval). Until then, the
+ *    still-approved `due_reminder` v1 template (2 vars: title, time; no button) is
+ *    used for the template path, so out-of-window sends keep working today instead
+ *    of being rejected by Meta for a param/component mismatch.
  */
 export async function runDueDateReminder(): Promise<void> {
   const result = await pool.query<{
@@ -96,8 +101,23 @@ export async function runDueDateReminder(): Promise<void> {
       });
       const crmUrl = buildCrmTaskUrl(row.task_id);
       const body = formatTaskReminderBody(details, crmUrl);
-      const bodyParams = reminderTemplateParams(details, crmUrl);
       const payloadId = taskDetailsPayloadId(row.task_id);
+
+      // The still-approved `due_reminder` template (v1) is body-only: 2 vars
+      // (title, time), no button. Until an operator explicitly points
+      // WHATSAPP_TEMPLATE_DUE_REMINDER at the new `due_reminder_v2` (10 vars +
+      // button) once Meta approves it, the OUT-OF-WINDOW template path must
+      // keep sending the legacy 2-var/no-button shape — otherwise Meta rejects
+      // the send (param-count / component mismatch) on every out-of-window
+      // reminder. The in-window freeform path always gets the full enriched
+      // body regardless, since it never goes through template validation.
+      const usingLegacyTemplate = templateName('DUE_REMINDER') === DEFAULT_TEMPLATE_NAMES.DUE_REMINDER;
+      const bodyParams = usingLegacyTemplate
+        ? [details.taskTitle, dueTime]
+        : reminderTemplateParams(details, crmUrl);
+      const templateButtonParams = usingLegacyTemplate
+        ? undefined
+        : [{ subType: 'quick_reply' as const, index: 0, payload: payloadId }];
 
       try {
         await notify({
@@ -106,7 +126,7 @@ export async function runDueDateReminder(): Promise<void> {
           bodyParams,
           fallbackText: body,
           buttons: [{ id: payloadId, title: 'פרטים נוספים' }],
-          templateButtonParams: [{ subType: 'quick_reply', index: 0, payload: payloadId }],
+          templateButtonParams,
         });
       } catch (err) {
         log.error(
