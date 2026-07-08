@@ -118,6 +118,43 @@ describe('buildSystemPrompt — role-awareness', () => {
     expect(prompt).not.toContain('management_snapshot');
   });
 
+  // QA-FIX-6: managers asking "המשימות שלי למחר" used to fall through to the
+  // LLM without ever learning list_my_inspections exists, so it misrouted to
+  // list_today_field_inspections (org-wide, today-only) or unknown.
+  it('manager prompt now teaches list_my_inspections (own-list vs org-wide disambiguation)', () => {
+    const prompt = buildSystemPrompt(makeCtx(makeManager()));
+    expect(prompt).toContain('list_my_inspections');
+    // The disambiguation rule between "own list" and "org-wide list" must be present.
+    expect(prompt).toMatch(/list_my_inspections/);
+    expect(prompt).toContain('list_today_field_inspections');
+  });
+
+  it('manager prompt few-shot includes a "המשימות שלי למחר" example mapped to list_my_inspections', () => {
+    const prompt = buildSystemPrompt(makeCtx(makeManager()));
+    expect(prompt).toContain('תציג לי את המשימות שלי למחר');
+    expect(prompt).toContain('המשימות שלי');
+  });
+
+  it('manager prompt "ALSO support worker intents" line now lists list_my_inspections', () => {
+    const prompt = buildSystemPrompt(makeCtx(makeManager()));
+    expect(prompt).toMatch(/ALSO support these worker intents[\s\S]*list_my_inspections/);
+  });
+
+  it('buildDateRangeFewShot includes a tomorrow ("מחר") example for list_today_field_inspections', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-07T09:00:00Z'));
+    const prompt = buildSystemPrompt(makeCtx(makeManager()));
+    expect(prompt).toContain('בדיקות שטח למחר');
+    expect(prompt).toContain('dateRange={from:"2026-07-08", to:"2026-07-09"}');
+    vi.useRealTimers();
+  });
+
+  it('worker prompt does NOT gain list_my_inspections manager disambiguation text (worker block unaffected)', () => {
+    const prompt = buildSystemPrompt(makeCtx(makeWorker()));
+    expect(prompt).not.toContain('MANAGER-SIDE INTENTS');
+    expect(prompt).toContain('list_my_inspections'); // still present via WORKER_INTENT_LIST
+  });
+
   it('manager prompt contains role hint with manager-level=true', () => {
     const prompt = buildSystemPrompt(makeCtx(makeManager()));
     expect(prompt).toContain('Manager-level: true');

@@ -630,6 +630,59 @@ describe('list_my_inspections dateScope="all" (post-Phase-6 addition)', () => {
   });
 });
 
+// ── QA-FIX-6: manager "המשימות שלי" (משימות synonym) fast path ───────────────
+
+describe('QA-FIX-6 — manager "המשימות שלי למחר" hits the deterministic fast path', () => {
+  function makeManager(): ResolvedUser {
+    return {
+      id: 'u-mgr', name: 'מנהל', phone: '97250000010', role: 'ADMIN',
+      isElevated: true, canViewAllRecords: true, canManageUsers: true, canManagePermissions: true,
+    };
+  }
+
+  it('routes "המשימות שלי" (manager) without hitting the AI parser', async () => {
+    getContext.mockResolvedValue(null);
+    await handleAIMessage(makeManager(), 'המשימות שלי');
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    expect(getMyInspectionsInRange).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes "המשימות שלי למחר" (manager) to getMyInspectionsInRange with tomorrow\'s window, without AI', async () => {
+    getContext.mockResolvedValue(null);
+    await handleAIMessage(makeManager(), 'המשימות שלי למחר');
+
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    expect(getMyInspectionsInRange).toHaveBeenCalledTimes(1);
+
+    // Compute the expected tomorrow window the same way parseHebrewInspectionRange
+    // does: today (Asia/Jerusalem) + 1 day → + 2 days, half-open.
+    const now = new Date();
+    const todayIso = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now);
+    const addDaysISO = (iso: string, days: number): string => {
+      const [y, m, d] = iso.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d, 12));
+      dt.setUTCDate(dt.getUTCDate() + days);
+      return dt.toISOString().slice(0, 10);
+    };
+    const expectedFrom = addDaysISO(todayIso, 1);
+    const expectedTo = addDaysISO(todayIso, 2);
+
+    const [userId, from, to] = getMyInspectionsInRange.mock.calls[0] as [string, string, string];
+    expect(userId).toBe('u-mgr');
+    expect(from).toBe(expectedFrom);
+    expect(to).toBe(expectedTo);
+  });
+
+  it('routes "תציג לי את המשימות שלי למחר" (voice-style prefix, manager) without AI', async () => {
+    getContext.mockResolvedValue(null);
+    await handleAIMessage(makeManager(), 'תציג לי את המשימות שלי למחר');
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    expect(getMyInspectionsInRange).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ── AI-first fallback when regex matches but range fails ─────────────────────
 
 describe('Fast-path failure falls through to AI parser (post-Phase-6)', () => {

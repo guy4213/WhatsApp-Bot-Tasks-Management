@@ -217,14 +217,15 @@ const MANAGER_INTENT_LIST = [
   '',
   '- open_manager_menu: user wants to open or see the manager menu. Triggered by "תפריט", "מה יש כאן", "מה אפשר לעשות", "עזרה", "תראה לי את התפריט".',
   '- management_snapshot: user wants a high-level org-wide snapshot/overview. Triggered by "מה יש להיום", "מה קורה", "תמונת מצב", "מה המצב", "סיכום ניהולי", "מה קורה בשטח", "תן לי תמונת מצב".',
-  '- list_today_field_inspections: user wants to see ALL field inspections scheduled in a date window (org-wide). Triggered by "רשימת בדיקות היום", "בדיקות שטח להיום", "מה יש היום", "בדיקות של היום", "תציג לי את בדיקות השטח להיום", "הבדיקות היום". If the user names a date range ("בדיקות של השבוע", "בדיקות של אתמול", "בין 1/7 ל-3/7"), resolve it to params.dateRange={from:YYYY-MM-DD, to:YYYY-MM-DD} in Asia/Jerusalem local dates (half-open: from inclusive, to exclusive). Default to today (omit dateRange) when no date range is mentioned. For "כמה בדיקות היום" (quantitative), also set params.count_only=true.',
+  '- list_my_inspections: the MANAGER wants THEIR OWN assigned inspections/tasks (the manager can also be assigned field work), NOT the org-wide list. Triggered by phrases containing "שלי" / "לי" about their own list: "הבדיקות שלי", "המשימות שלי" (managers may say "משימות" instead of "בדיקות" — treat as the same intent), "מה יש לי", "תציג לי את המשימות שלי". Use params.dateScope: "today" (default), "tomorrow", "week", "next_week", or "all" (for "כל הזמנים" / "הכל" / "מכל הזמנים" / "בלי הגבלה" / "מאז ומעולם" / "מהתחלה"). Omit for today. If a Hebrew date range appears ("בין 1/7 ל-10/7", "מיום ראשון עד חמישי"), copy the raw suffix into params.rangeExpr so the backend parser resolves it. DISAMBIGUATION: phrasing with "שלי" / "לי" (the manager\'s own personal list) → list_my_inspections; org-wide phrasing without "שלי" ("בדיקות שטח", "כל הבדיקות", "מי בשטח", "רשימת בדיקות היום") → list_today_field_inspections.',
+  '- list_today_field_inspections: user wants to see ALL field inspections scheduled in a date window (org-wide, NOT scoped to the manager personally). Triggered by "רשימת בדיקות היום", "בדיקות שטח להיום", "מה יש היום", "בדיקות של היום", "תציג לי את בדיקות השטח להיום", "הבדיקות היום", "כל הבדיקות", "מי בשטח". If the user names a date range ("בדיקות של השבוע", "בדיקות של אתמול", "בין 1/7 ל-3/7"), resolve it to params.dateRange={from:YYYY-MM-DD, to:YYYY-MM-DD} in Asia/Jerusalem local dates (half-open: from inclusive, to exclusive). Default to today (omit dateRange) when no date range is mentioned. For "כמה בדיקות היום" (quantitative), also set params.count_only=true.',
   '- list_open_exceptions: user wants to see exceptions or deviations. Triggered by "תציג את החריגים", "יש חריגים?", "מה בעיות פתוחות", "משימות עם בעיה". Use params.filter: "open" (default), "has_problem" (when user says "בעיה"), "not_confirmed" (when "לא אושרו"), "waiting_for_info" (when "ממתין למידע" / "חסר מידע"), "not_closed" (when "לא סגרו יום"). If the user names a date range ("אתמול", "מאתמול", "של השבוע", "בשבוע שעבר", "בין 1/7 ל-3/7"), resolve it to params.dateRange={from:YYYY-MM-DD, to:YYYY-MM-DD} in Asia/Jerusalem local dates (half-open: from inclusive, to exclusive). Default to today (omit dateRange) when no date range is mentioned. For "כמה חריגים" (quantitative), also set params.count_only=true.',
   '- list_pending_leads: user wants to see leads. Triggered by "לידים ממתינים", "מה יש לידים", "לידים פתוחים". Use params.filter: "unassigned" (default), "escalated" (when "שעברו שעה" / "באיחור" / "לידים שעברו זמן" / "לידים בעיכוב" / "לידים עם עיכוב"). If the user asks for leads scoped to a specific person ("לידים שלי", "לידים של סשה") — owner scoping is NOT YET supported; emit list_pending_leads with params.filter="unassigned" and clarification="נכון לעכשיו אני מציג את כל הלידים הפתוחים. סינון לפי בעל טיפול טרם נתמך." If the user names a date range, resolve to params.dateRange={from, to} scoped on IncomingLead.receivedAt. Default (no dateRange) means all open leads regardless of receivedAt (existing behavior). For "כמה לידים לא שויכו" (quantitative), also set params.count_only=true.',
   '- workers_day_overview: user wants a summary of what workers did. Triggered by "סיכום עובדים", "מה כל עובד עשה", "עובדים היום", "ביצועי עובדים", "מי עשה מה". If the user names a specific worker ("סיכום של דני", "מה דני עשה היום") set params.workerName to that name; else leave params.workerName absent for the all-workers view. If the user names a date range ("השבוע", "אתמול", "מהשבוע שעבר", "בין 1/7 ל-3/7"), resolve to params.dateRange={from, to}. Default is today (omit dateRange). For "כמה עובדים בשטח היום" (quantitative), also set params.count_only=true.',
   '- search_task: user wants to search for a specific inspection/task. Set params.searchBy to one of: "customer" / "worker" / "product" / "address" / "phone" / "task_id" / "field_status", and params.query to the search term. Triggered by "חפש בדיקה של כהן" (searchBy=customer, query=כהן), "בדיקות של יוסי" (searchBy=worker, query=יוסי), "בדיקות מק"ט 10156" (searchBy=product, query=10156), "חפש לפי כתובת הרצל" (searchBy=address, query=הרצל), "בדיקות ברעננה" (searchBy=address, query=רעננה), "חפש לפי טלפון 054..." (searchBy=phone, query=054...), "מספר בדיקה 12345" (searchBy=task_id, query=12345), "בדיקות בסטטוס פתוח" (searchBy=field_status, query=ASSIGNED), "בדיקות שממתינות למידע" (searchBy=field_status, query=WAITING_FOR_INFO). If only intent is clear but neither dimension nor query: leave params empty and the router shows the search sub-menu.',
   '',
-  'For managers, ALSO support these worker intents (managers can also schedule, assign leads, and correct):',
-  '- schedule_task_field, assign_lead, correct_task_field_site, reassign_task, correct_inspection_type',
+  'For managers, ALSO support these worker intents (managers can also schedule, assign leads, correct, and view their own personal inspection list):',
+  '- list_my_inspections, schedule_task_field, assign_lead, correct_task_field_site, reassign_task, correct_inspection_type',
   '- help, unknown',
   '',
   'ASSIGN_LEAD ONE-SHOT (Phase 6): For `assign_lead`, if the user names BOTH the source lead AND the target worker in one message (e.g. "לשייך את הליד של יוסי ללירן"), set params.leadRef="יוסי" (customer/subject substring) and params.assigneeName="לירן" (worker name substring). The router will pre-populate the flow with these hints and jump straight to the confirmation step when both look-ups resolve unambiguously. If only one hint is present, still emit it — the router will fall through to the normal multi-step flow.',
@@ -251,6 +252,16 @@ const MANAGER_FEW_SHOT = [
   '- "הבדיקות שמשובצות להיום" → list_today_field_inspections.',
   '- "אני רוצה לראות בדיקות של היום" → list_today_field_inspections. [voice prefix "אני רוצה לראות"]',
   '- "תראה לי מי בשטח היום" → list_today_field_inspections.',
+  '',
+  '// My own inspections (manager\'s personal list) — "שלי"/"לי" phrasing, NOT org-wide',
+  '- "המשימות שלי" → list_my_inspections, params.dateScope="today".',
+  '- "הבדיקות שלי" → list_my_inspections, params.dateScope="today".',
+  '- "הבדיקות שלי למחר" → list_my_inspections, params.dateScope="tomorrow".',
+  '- "תציג לי את המשימות שלי למחר" → list_my_inspections, params.dateScope="tomorrow". [voice "תציג לי" prefix]',
+  '- "המשימות שלי לשבוע הבא" → list_my_inspections, params.dateScope="next_week".',
+  '- "המשימות שלי בין 1/7 ל-10/7" → list_my_inspections, params.rangeExpr="בין 1/7 ל-10/7".',
+  '- "מה יש לי מחר" → list_my_inspections, params.dateScope="tomorrow".',
+  '- "בדיקות שטח למחר" → list_today_field_inspections. [org-wide phrasing without "שלי" — contrast with the personal-list examples above; see the dynamic dateRange example in the date-range few-shot block below]',
   '',
   '// Open exceptions',
   '- "תציג את החריגים" → list_open_exceptions, params.filter="open".',
@@ -385,6 +396,8 @@ function isoDayOfWeek(iso: string): number {
 function buildDateRangeFewShot(todayIsrael: string): string {
   const yesterday = addDaysISO(todayIsrael, -1);
   const dayBeforeYesterday = addDaysISO(todayIsrael, -2);
+  const tomorrow = addDaysISO(todayIsrael, 1);
+  const dayAfterTomorrow = addDaysISO(todayIsrael, 2);
   const thisWeekSunday = addDaysISO(todayIsrael, -isoDayOfWeek(todayIsrael));
   const nextSunday = addDaysISO(thisWeekSunday, 7);
   const prevSunday = addDaysISO(thisWeekSunday, -7);
@@ -394,6 +407,7 @@ function buildDateRangeFewShot(todayIsrael: string): string {
     '// list_today_field_inspections — with date range (D5-T19g)',
     `- "בדיקות שטח של השבוע" → list_today_field_inspections, params.dateRange={from:"${thisWeekSunday}", to:"${nextSunday}"}.`,
     `- "בדיקות של אתמול" → list_today_field_inspections, params.dateRange={from:"${yesterday}", to:"${todayIsrael}"}.`,
+    `- "בדיקות שטח למחר" → list_today_field_inspections, params.dateRange={from:"${tomorrow}", to:"${dayAfterTomorrow}"}. [org-wide "מחר" — contrast with list_my_inspections "המשימות שלי למחר" above, which is the manager's OWN list]`,
     '- "בדיקות בין 1/7 ל-3/7" → list_today_field_inspections, params.dateRange={from:"2026-07-01", to:"2026-07-04"}. [explicit literal dates — resolve verbatim, do NOT relate to today]',
     '',
     '// list_open_exceptions — with date range',

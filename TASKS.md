@@ -2813,6 +2813,49 @@ threading can be applied if a real case surfaces.
 
 ---
 
+## 4.18 — QA-FIX-6: manager "המשימות שלי למחר" showed today-only / not understood (2026-07-07)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+
+**What to do:** A manager asking (text or voice) for their OWN tasks in any
+non-today scope — "תציג לי את המשימות שלי למחר", "המשימות שלי לשבוע הבא" —
+got today's list or an "I don't understand" reply.
+
+**Root cause (two gaps, orchestrator-verified):**
+1. `MY_INSPECTIONS_RE` (router.ts) fast-pathed only "בדיקות שלי" phrasings —
+   the word "משימות" never matched, so those messages fell through to the LLM.
+2. `MANAGER_INTENT_LIST` / `MANAGER_FEW_SHOT` (intentParser.ts) did not include
+   `list_my_inspections` AT ALL (worker-list only), so for manager users the
+   LLM misrouted to `list_today_field_inspections` (org-wide, defaults to
+   today) or `unknown`. The backend handler already supported managers — the
+   prompt just never told the model the intent existed.
+
+**Definition of Done:** "המשימות שלי (למחר/השבוע/בין X ל-Y)" resolves for a
+manager deterministically (no AI) via the existing fast path; free-form
+phrasings the regex misses are covered by the new manager-prompt intent line +
+few-shots (incl. explicit "שלי" vs org-wide disambiguation and a dynamic
+"בדיקות שטח למחר" dateRange example in buildDateRangeFewShot).
+
+**Files changed:** `src/ai/router.ts` (regex + JSDoc only),
+`src/ai/intentParser.ts` (manager prompt additions),
+`src/__tests__/myInspectionsIntent.test.ts` (+10 regex tests incl. the
+"משימות עם בעיה" / "משימות השטח שלי" negative collision cases),
+`src/__tests__/routerWorkerFreeText.test.ts` (+3 manager E2E tests, incl.
+exact tomorrow-window assertion on getMyInspectionsInRange, parseIntent NOT
+called), `src/__tests__/managerIntents.test.ts` (+5 prompt-content assertions).
+
+**Implemented by a Sonnet sub-agent; orchestrator QA:** full diff reviewed
+line by line (capture-group structure preserved — suffix stays m[2]); only
+allowed files touched; `npx tsc --noEmit` clean; 334/334 tests pass across 10
+router/prompt files; sub-agent's full-suite run 1307 passed / 0 failed (known
+vitest OOM worker flake, unrelated).
+
+**Remaining (documented):** the prompt half is LLM-dependent — a live smoke
+test with the real provider ("המשימות שלי למחר" by voice) is recommended
+after deploy; the deterministic regex path is the primary guarantee.
+
+---
+
 ## 4.17 — QA-FIX-5: no-quote keyword+active-pointer fast path (2026-07-07)
 
 **Status:** DONE (local, uncommitted — awaiting user approval to commit/push).

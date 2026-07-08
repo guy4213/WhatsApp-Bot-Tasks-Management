@@ -262,10 +262,10 @@ const CONFIRM_YES_MULTI = 'CONFIRM_YES_MULTI_ACTION';
 const CONFIRM_NO_MULTI  = 'CONFIRM_NO_MULTI_ACTION';
 
 /**
- * "הבדיקות שלי …" free-text intent — any lead-in phrase asking for the user's
- * own inspections (optionally followed by a Hebrew date/range expression).
- * Anchored to the trimmed start so real free text that merely mentions
- * "בדיקות" (e.g. "מה קורה עם בדיקות") does NOT match.
+ * "הבדיקות שלי …" / "המשימות שלי …" free-text intent — any lead-in phrase
+ * asking for the user's own inspections (optionally followed by a Hebrew
+ * date/range expression). Anchored to the trimmed start so real free text
+ * that merely mentions "בדיקות" (e.g. "מה קורה עם בדיקות") does NOT match.
  *
  * The generic phrase "מה יש לי" is ambiguous (can mean tasks, messages, etc.),
  * so we only match it when a date-cue follows. All other alternatives are
@@ -276,21 +276,28 @@ const CONFIRM_NO_MULTI  = 'CONFIRM_NO_MULTI_ACTION';
  * "מה מחכה לי", "רשימת הבדיקות שלי") so a worker's natural Hebrew never falls
  * through to the AI parser as `unknown`.
  *
+ * QA-FIX-6 — a MANAGER asking "המשימות שלי" / "המשימות שלי למחר" (using
+ * "משימות" instead of "בדיקות") must hit this same fast path. "משימות" is
+ * accepted as a synonym of "בדיקות" everywhere the latter appears (direct
+ * form, list form, display-verb forms, "איזה ... יש לי"), EXCEPT there is no
+ * "משימות השטח" variant — the "השטח" suffix only ever follows "בדיקות".
+ *
  * Captures group 1 = leading phrase, group 2 = suffix (may be empty).
  */
 const MY_INSPECTIONS_DATE_CUE_RE = String.raw`(?:היום|מחר|השבוע|החודש|שבוע\s+הבא|חודש\s+הבא|לשבוע\s+הבא|לחודש\s+הבא|לעוד\s+(?:שבוע|חודש)|(?:ב?)?יום\s+(?:ראשון|שני|שלישי|רביעי|חמישי|שישי)|(?:ב)?שבת|בין\s+\d|ב[־\-]?\s*\d)`;
 export const MY_INSPECTIONS_RE = new RegExp(
   String.raw`^(` +
-  // Direct forms: "הבדיקות שלי", "בדיקות שלי", "בדיקות השטח שלי"
-  String.raw`(?:ה?בדיקות(?:\s+השטח)?\s+שלי|` +
-  // "רשימת הבדיקות שלי" / "רשימה של הבדיקות שלי"
-  String.raw`רשימ[הת]?\s+(?:של\s+)?ה?בדיקות(?:\s+השטח)?\s+שלי|` +
+  // Direct forms: "הבדיקות שלי", "בדיקות שלי", "בדיקות השטח שלי",
+  // "המשימות שלי", "משימות שלי" (no "משימות השטח" variant).
+  String.raw`(?:ה?(?:בדיקות(?:\s+השטח)?|משימות)\s+שלי|` +
+  // "רשימת הבדיקות שלי" / "רשימה של הבדיקות שלי" / "רשימת המשימות שלי"
+  String.raw`רשימ[הת]?\s+(?:של\s+)?ה?(?:בדיקות(?:\s+השטח)?|משימות)\s+שלי|` +
   // Display verbs: "תראה לי (את) הבדיקות שלי", "הצג (לי) את הבדיקות שלי",
   // "תציג לי את הבדיקות שלי", "תן לי (את) הבדיקות שלי",
-  // "אני רוצה לראות את הבדיקות שלי"
-  String.raw`(?:תראה\s+לי\s+את\s+|הצג\s+(?:לי\s+)?(?:את\s+)?|תציג\s+לי\s+(?:את\s+)?|תן\s+לי\s+(?:את\s+)?|אני\s+רוצה\s+לראות\s+(?:את\s+)?)(?:ה)?בדיקות(?:\s+השטח)?\s+שלי|` +
-  // "איזה בדיקות יש לי"
-  String.raw`איזה\s+בדיקות\s+יש\s+לי|` +
+  // "אני רוצה לראות את הבדיקות שלי" — and the "משימות" synonym forms.
+  String.raw`(?:תראה\s+לי\s+את\s+|הצג\s+(?:לי\s+)?(?:את\s+)?|תציג\s+לי\s+(?:את\s+)?|תן\s+לי\s+(?:את\s+)?|אני\s+רוצה\s+לראות\s+(?:את\s+)?)(?:ה)?(?:בדיקות(?:\s+השטח)?|משימות)\s+שלי|` +
+  // "איזה בדיקות יש לי" / "איזה משימות יש לי"
+  String.raw`איזה\s+(?:בדיקות|משימות)\s+יש\s+לי|` +
   // "היום שלי" / "מה היום שלי"
   String.raw`(?:מה\s+)?היום\s+שלי|` +
   // "מה על הפרק" / "מה מחכה לי"

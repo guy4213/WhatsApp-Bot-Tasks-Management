@@ -99,3 +99,62 @@ describe('MY_INSPECTIONS_RE — negative cases (do not misroute unrelated free t
     expect(match('שלי').matched).toBe(false);
   });
 });
+
+// QA-FIX-6: a MANAGER asking "המשימות שלי" (using "משימות" instead of
+// "בדיקות") must hit the same fast path so it stops falling through to the
+// AI parser as an org-wide "today only" list or `unknown`.
+describe('MY_INSPECTIONS_RE — "משימות" synonym (QA-FIX-6)', () => {
+  it('matches "המשימות שלי" with empty suffix', () => {
+    const r = match('המשימות שלי');
+    expect(r.matched).toBe(true);
+    expect(r.suffix).toBe('');
+  });
+
+  it('matches "המשימות שלי למחר" with "למחר" as suffix', () => {
+    const r = match('המשימות שלי למחר');
+    expect(r.matched).toBe(true);
+    expect(r.suffix).toBe('למחר');
+  });
+
+  it('matches "תציג לי את המשימות שלי למחר" (display-verb prefix) with "למחר" as suffix', () => {
+    const r = match('תציג לי את המשימות שלי למחר');
+    expect(r.matched).toBe(true);
+    expect(r.suffix).toBe('למחר');
+  });
+
+  it('matches "משימות שלי השבוע" (no leading ה) with "השבוע" as suffix', () => {
+    const r = match('משימות שלי השבוע');
+    expect(r.matched).toBe(true);
+    expect(r.suffix).toBe('השבוע');
+  });
+
+  it('matches "רשימת המשימות שלי" with empty suffix', () => {
+    const r = match('רשימת המשימות שלי');
+    expect(r.matched).toBe(true);
+    expect(r.suffix).toBe('');
+  });
+
+  it('matches "איזה משימות יש לי" with empty suffix', () => {
+    const r = match('איזה משימות יש לי');
+    expect(r.matched).toBe(true);
+    expect(r.suffix).toBe('');
+  });
+
+  it('still matches the old "הבדיקות שלי למחר" form (no regression)', () => {
+    const r = match('הבדיקות שלי למחר');
+    expect(r.matched).toBe(true);
+    expect(r.suffix).toBe('למחר');
+  });
+
+  it('does NOT match "משימות עם בעיה" (exceptions phrase, not "my inspections")', () => {
+    expect(match('משימות עם בעיה').matched).toBe(false);
+  });
+
+  it('does NOT match "משימות" alone (no "שלי" suffix)', () => {
+    expect(match('משימות').matched).toBe(false);
+  });
+
+  it('does NOT match "משימות השטח שלי" (no such variant — "השטח" only follows "בדיקות")', () => {
+    expect(match('משימות השטח שלי').matched).toBe(false);
+  });
+});
