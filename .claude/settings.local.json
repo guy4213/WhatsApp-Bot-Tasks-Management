@@ -63,7 +63,8 @@
       "Bash(node *)",
       "Bash(Select-String -Pattern \"src/\\(ai/router|services/conversationContext\\)\")",
       "Bash(NODE_OPTIONS=\"--max-old-space-size=8192\" npx vitest run)",
-      "Bash(NODE_OPTIONS=\"--max-old-space-size=8192\" npx vitest run --pool=forks)"
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=8192\" npx vitest run --pool=forks)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=8192\" npx vitest run src/__tests__/routerManagerMenu.test.ts)"
     ],
     "additionalDirectories": [
       "C:\\Users\\guy42\\Documents\\WhatsApp-Bot-Tasks-Management"

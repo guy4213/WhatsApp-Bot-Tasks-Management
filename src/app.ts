@@ -6,6 +6,7 @@ import { taskRoutes }    from './routes/tasks';
 import { webhookRoutes } from './routes/webhook';
 import { owntracksPocRoutes } from './routes/owntracksPoc';
 import { trackingRoutes } from './routes/tracking';
+import { trackingPageRoutes } from './routes/trackingPage';
 import { startScheduler } from './scheduler';
 
 declare module 'fastify' {
@@ -45,6 +46,7 @@ export async function buildApp() {
   await app.register(webhookRoutes);
   await app.register(owntracksPocRoutes);
   await app.register(trackingRoutes);
+  await app.register(trackingPageRoutes);
 
   // ── Liveness probe ────────────────────────────────────────────────────────
   app.get('/health/live', async () => ({ status: 'ok' }));
