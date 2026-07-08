@@ -33,6 +33,36 @@ Do not delete or rewrite the original `What to do` / `Definition of Done` lines.
 
 If repo reality and `TASKS.md` disagree, update `TASKS.md` immediately.
 
+### 1.1 Capabilities map (BOT_CAPABILITIES.md)
+
+`BOT_CAPABILITIES.md` is the CEO-facing map of what the bot can do — written in
+plain Hebrew, business-friendly, no code.
+
+**Update rule:** after every task that adds a NEW user-facing feature or
+capability, append/update the relevant section in `BOT_CAPABILITIES.md` in the
+same turn. Update:
+
+- **NEW features only** — new intents, new menu items, new automated flows, new
+  data the bot can read/write, new user-facing behaviors, new AI understandings.
+- Do NOT log: bug fixes, refactors, test-only changes, internal wording tweaks,
+  TypeScript-only changes, or infra-level changes that the CEO would not care
+  about.
+
+Format of the update:
+
+- Add one short bullet in plain Hebrew under the relevant section (e.g. "יכולות
+  של בודק שטח", "יכולות של מנהל", "תהליכים אוטומטיים").
+- If the feature is a new category, add a new bullet or sub-section.
+- Update the "מעודכן לתאריך" line at the top to today's date.
+- Keep the language simple, product-level. No filenames, no task IDs, no code.
+
+Example of a good update line: "העובד יכול לבקש תזמון בדיקה חדשה בטקסט חופשי — 'לתזמן ביקור מחר ב-10'."
+
+Example of a bad update line: "D2-T11 added `schedule_task_field` intent to `intentParser.ts`."
+
+If a change removes or narrows a documented capability, also update
+`BOT_CAPABILITIES.md` to reflect the new truth.
+
 ---
 
 ## 2. Parallel work safety
