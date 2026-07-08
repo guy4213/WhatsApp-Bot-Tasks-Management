@@ -1594,6 +1594,34 @@ async function executeIntent(
         }
 
         if (searchResults.length === 0) {
+          // Distinguish "person exists but has no field inspections" from "no
+          // such person" — otherwise a valid manager/office user like יורם gets
+          // a misleading "not found" when what actually happened is that they
+          // have zero TaskField rows (e.g. the CEO who never does field work).
+          if (searchBy === 'worker') {
+            const matchingUsers = await findUsersByName(query);
+            if (matchingUsers.length === 1) {
+              await sendTextMessage({ to: user.phone, text: `${matchingUsers[0].name} קיים במערכת, אך אין לו בדיקות שטח משובצות.` });
+            } else if (matchingUsers.length > 1) {
+              const list = matchingUsers.map((u) => `"${u.name}"`).join(', ');
+              await sendTextMessage({ to: user.phone, text: `נמצאו ${matchingUsers.length} עובדים תואמים (${list}), אך לאף אחד מהם אין בדיקות שטח משובצות.` });
+            } else {
+              await sendTextMessage({ to: user.phone, text: `לא נמצא עובד בשם "${query}". נסה שם אחר או "תפריט".` });
+            }
+            return;
+          }
+          if (searchBy === 'customer') {
+            const matchingCustomers = await findCustomersByName(query, 10);
+            if (matchingCustomers.length === 1) {
+              await sendTextMessage({ to: user.phone, text: `${matchingCustomers[0].name} קיים במערכת, אך אין לו בדיקות שטח משובצות.` });
+            } else if (matchingCustomers.length > 1) {
+              const list = matchingCustomers.map((c) => `"${c.name}"`).join(', ');
+              await sendTextMessage({ to: user.phone, text: `נמצאו ${matchingCustomers.length} לקוחות תואמים (${list}), אך לאף אחד מהם אין בדיקות שטח משובצות.` });
+            } else {
+              await sendTextMessage({ to: user.phone, text: `לא נמצא לקוח בשם "${query}". נסה שם אחר או "תפריט".` });
+            }
+            return;
+          }
           await sendTextMessage({ to: user.phone, text: `לא נמצאו תוצאות עבור "${query}". נסה שוב.` });
           return;
         }
@@ -5638,6 +5666,36 @@ async function handleMgrSearchAwaitQueryReply(
 
   if (results.length === 0) {
     await setContext(user.phone, { awaiting: 'mgr_search_await_query', mgrSearchKind: kind });
+    // Same distinction as the free-text search path: person exists but has no
+    // field inspections vs. no such person. See the `search_task` handler.
+    if (kind === 'worker') {
+      const matchingUsers = await findUsersByName(searchQuery);
+      if (matchingUsers.length === 1) {
+        await sendTextMessage({ to: user.phone, text: `${matchingUsers[0].name} קיים במערכת, אך אין לו בדיקות שטח משובצות. נסה שם אחר או "חזרה".` });
+        return;
+      }
+      if (matchingUsers.length > 1) {
+        const list = matchingUsers.map((u) => `"${u.name}"`).join(', ');
+        await sendTextMessage({ to: user.phone, text: `נמצאו ${matchingUsers.length} עובדים תואמים (${list}), אך לאף אחד מהם אין בדיקות שטח משובצות. נסה שם אחר או "חזרה".` });
+        return;
+      }
+      await sendTextMessage({ to: user.phone, text: `לא נמצא עובד בשם "${searchQuery}". נסה שם אחר או "חזרה".` });
+      return;
+    }
+    if (kind === 'customer') {
+      const matchingCustomers = await findCustomersByName(searchQuery, 10);
+      if (matchingCustomers.length === 1) {
+        await sendTextMessage({ to: user.phone, text: `${matchingCustomers[0].name} קיים במערכת, אך אין לו בדיקות שטח משובצות. נסה שם אחר או "חזרה".` });
+        return;
+      }
+      if (matchingCustomers.length > 1) {
+        const list = matchingCustomers.map((c) => `"${c.name}"`).join(', ');
+        await sendTextMessage({ to: user.phone, text: `נמצאו ${matchingCustomers.length} לקוחות תואמים (${list}), אך לאף אחד מהם אין בדיקות שטח משובצות. נסה שם אחר או "חזרה".` });
+        return;
+      }
+      await sendTextMessage({ to: user.phone, text: `לא נמצא לקוח בשם "${searchQuery}". נסה שם אחר או "חזרה".` });
+      return;
+    }
     await sendTextMessage({ to: user.phone, text: `לא נמצאו תוצאות עבור "${searchQuery}". נסה שוב או "חזרה".` });
     return;
   }

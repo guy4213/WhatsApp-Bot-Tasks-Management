@@ -631,11 +631,40 @@ describe('intent: search_task', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'mgr_search_await_query', mgrSearchKind: 'worker' });
   });
 
-  it('sends "no results" when search returns empty', async () => {
+  it('when worker search returns empty AND no user matches → "לא נמצא עובד בשם"', async () => {
     searchTasksByWorkerName.mockResolvedValue([]);
+    // findUsersByName defaults to []
     mockParseIntent(makeIntent('search_task', { params: { searchBy: 'worker', query: 'xyz' } }));
     await handleAIMessage(admin, 'בדיקות של xyz');
-    expect(lastMsg()).toContain('לא נמצאו תוצאות');
+    expect(lastMsg()).toContain('לא נמצא עובד בשם');
+    expect(lastMsg()).toContain('xyz');
+  });
+
+  it('when worker search returns empty AND exactly one user matches → "X קיים במערכת, אך אין לו בדיקות שטח משובצות"', async () => {
+    searchTasksByWorkerName.mockResolvedValue([]);
+    const { findUsersByName } = await import('../services/tasks');
+    (findUsersByName as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { id: 'u-yoram', name: 'יורם' },
+    ]);
+    mockParseIntent(makeIntent('search_task', { params: { searchBy: 'worker', query: 'יורם' } }));
+    await handleAIMessage(admin, 'המשימות של יורם');
+    expect(lastMsg()).toContain('יורם קיים במערכת');
+    expect(lastMsg()).toContain('אין לו בדיקות שטח משובצות');
+  });
+
+  it('when worker search returns empty AND multiple users match → aggregate message', async () => {
+    searchTasksByWorkerName.mockResolvedValue([]);
+    const { findUsersByName } = await import('../services/tasks');
+    (findUsersByName as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { id: 'u-uri1', name: 'אורי' },
+      { id: 'u-uri2', name: 'אורי רונן' },
+    ]);
+    mockParseIntent(makeIntent('search_task', { params: { searchBy: 'worker', query: 'אורי' } }));
+    await handleAIMessage(admin, 'בדיקות עבור אורי');
+    expect(lastMsg()).toContain('נמצאו 2 עובדים תואמים');
+    expect(lastMsg()).toContain('"אורי"');
+    expect(lastMsg()).toContain('"אורי רונן"');
+    expect(lastMsg()).toContain('לאף אחד מהם אין בדיקות שטח משובצות');
   });
 
   it('rejects non-manager with "אין הרשאה"', async () => {
