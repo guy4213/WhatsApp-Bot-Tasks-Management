@@ -54,28 +54,93 @@ describe('geocodeAddress — hit', () => {
     expect(init.headers['Accept-Language']).toContain('he');
   });
 
-  it('URL-encodes the query into the request URL', async () => {
+  it('URL-encodes the query into the request URL — with country + addressdetails filters', async () => {
     fetchMock.mockResolvedValueOnce(ok([{ lat: '32', lon: '34' }]));
     await geocodeAddress('אלופי צה"ל 48, חולון');
     const [url] = fetchMock.mock.calls[0];
     expect(url).toMatch(/^https:\/\/nominatim\.openstreetmap\.org\/search/);
     expect(url).toContain('format=json');
     expect(url).toContain('limit=1');
+    // countrycodes=il — Israel-only search, biggest Hebrew hit-rate boost.
+    expect(url).toContain('countrycodes=il');
+    // We only need lat/lon — skip Nominatim's extra address breakdown.
+    expect(url).toContain('addressdetails=0');
     expect(url).toContain(encodeURIComponent('אלופי צה"ל 48, חולון'));
   });
 });
 
 describe('geocodeAddress — empty (sticky, caller CAN cache)', () => {
-  it('returns kind=empty on []', async () => {
+  it('returns kind=empty on [] when the query has no quote to retry', async () => {
     fetchMock.mockResolvedValueOnce(ok([]));
     const res = await geocodeAddress('nowhere');
     expect(res).toEqual({ kind: 'empty' });
+    // No alt-quote variant possible → only ONE fetch call.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('returns kind=empty on a whitespace-only input WITHOUT calling the network', async () => {
     const res = await geocodeAddress('   \t\n  ');
     expect(res).toEqual({ kind: 'empty' });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── Gershayim variant fallback (the אלופי צה"ל / אלופי צה״ל mismatch) ──────
+
+describe('geocodeAddress — alt-quote fallback', () => {
+  it('empty on ASCII " query → retries with Hebrew gershayim ״ and returns the variant hit', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok([]))  // primary: "אלופי צה\"ל 48, חולון"
+      .mockResolvedValueOnce(ok([{ lat: '32.01', lon: '34.77' }])); // variant: "אלופי צה״ל 48, חולון"
+
+    const res = await geocodeAddress('אלופי צה"ל 48, חולון');
+    expect(res).toEqual({ kind: 'hit', lat: 32.01, lng: 34.77 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [urlPrimary] = fetchMock.mock.calls[0];
+    const [urlVariant] = fetchMock.mock.calls[1];
+    expect(urlPrimary).toContain(encodeURIComponent('אלופי צה"ל 48, חולון'));
+    expect(urlVariant).toContain(encodeURIComponent('אלופי צה״ל 48, חולון'));
+  });
+
+  it('empty on Hebrew ״ query → retries with ASCII " and returns the variant hit', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok([]))                                   // primary: gershayim
+      .mockResolvedValueOnce(ok([{ lat: '32.01', lon: '34.77' }]));    // variant: ASCII quote
+
+    const res = await geocodeAddress('אלופי צה״ל 48, חולון');
+    expect(res).toEqual({ kind: 'hit', lat: 32.01, lng: 34.77 });
+    const [urlVariant] = fetchMock.mock.calls[1];
+    expect(urlVariant).toContain(encodeURIComponent('אלופי צה"ל 48, חולון'));
+  });
+
+  it('both variants empty → returns empty (caller CAN sticky-cache)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok([]));
+    const res = await geocodeAddress('אלופי צה"ל 48, חולון');
+    expect(res).toEqual({ kind: 'empty' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('variant is transient → returns transient (caller MUST NOT sticky-cache)', async () => {
+    // Primary is empty, so we try the variant; variant hits a 5xx. If we
+    // returned `empty` here we would sticky-cache no_hit despite not
+    // knowing whether the variant would have hit had Nominatim been up.
+    fetchMock
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(status(500));
+    const res = await geocodeAddress('אלופי צה"ל 48, חולון');
+    expect(res).toMatchObject({ kind: 'transient' });
+  });
+
+  it('primary transient → does NOT trigger a variant retry', async () => {
+    // Network hiccup on primary — retrying with the variant would just waste
+    // another Nominatim call. Return transient immediately; the caller will
+    // retry on the next getPublicView tick.
+    fetchMock.mockResolvedValueOnce(status(500));
+    const res = await geocodeAddress('אלופי צה"ל 48, חולון');
+    expect(res).toMatchObject({ kind: 'transient' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

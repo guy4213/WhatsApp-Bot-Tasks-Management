@@ -58,18 +58,34 @@ async function throttle(): Promise<void> {
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Forward-geocode a free-text query (e.g., "אלופי צה\"ל 48, חולון") into
- * lat/lng via Nominatim. Never throws. See file header for the result shape
- * semantics — the caller must distinguish `empty` (sticky) from `transient`
- * (do NOT cache).
+ * Hebrew orthography quirk: OSM sometimes tags street names with the Hebrew
+ * gershayim character (U+05F4, `״`) and sometimes with an ASCII double quote
+ * (U+0022, `"`). Nominatim is inconsistent about matching between the two.
+ * `altQuoteVariant` produces the opposite variant so we can try both — see
+ * `geocodeAddress` for the fallback logic. Returns null if the query has
+ * neither character to normalize.
  */
-export async function geocodeAddress(query: string): Promise<GeocodeResult> {
-  const q = query.trim();
-  if (!q) return { kind: 'empty' };
+const GERSHAYIM = '״';
+function altQuoteVariant(q: string): string | null {
+  if (q.includes('"')) return q.replace(/"/g, GERSHAYIM);
+  if (q.includes(GERSHAYIM)) return q.replace(new RegExp(GERSHAYIM, 'g'), '"');
+  return null;
+}
 
+/**
+ * One HTTP round-trip to Nominatim for the exact given query string. Never
+ * throws. Returns the same discriminated union as `geocodeAddress`, without
+ * the alt-quote fallback (that's the wrapper's job).
+ */
+async function tryOnce(q: string): Promise<GeocodeResult> {
   await throttle();
 
-  const url = `${NOMINATIM_URL}?format=json&limit=1&q=${encodeURIComponent(q)}`;
+  const url =
+    `${NOMINATIM_URL}?format=json&limit=1` +
+    `&countrycodes=il` +        // Israel-only — huge hit-rate boost for Hebrew queries.
+    `&addressdetails=0` +       // We only need lat/lon; skip the extra payload.
+    `&q=${encodeURIComponent(q)}`;
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
 
@@ -125,6 +141,37 @@ export async function geocodeAddress(query: string): Promise<GeocodeResult> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Forward-geocode a free-text query (e.g., "אלופי צה\"ל 48, חולון") into
+ * lat/lng via Nominatim. Never throws. See file header for the result-shape
+ * semantics — the caller must distinguish `empty` (sticky) from `transient`
+ * (do NOT cache).
+ *
+ * Fallback discipline: on empty from the primary attempt, if the query
+ * contains an ASCII quote OR a Hebrew gershayim (U+05F4), we try the opposite
+ * variant once. This closes the "אלופי צה\"ל" vs "אלופי צה״ל" mismatch that
+ * causes Nominatim to miss real Israeli streets.
+ *
+ * If the variant attempt itself is transient, we return transient — we don't
+ * want to sticky-cache `no_hit` on evidence that isn't fully confirmed.
+ */
+export async function geocodeAddress(query: string): Promise<GeocodeResult> {
+  const q = query.trim();
+  if (!q) return { kind: 'empty' };
+
+  const primary = await tryOnce(q);
+  if (primary.kind !== 'empty') return primary;
+
+  const alt = altQuoteVariant(q);
+  if (!alt) return primary;
+
+  log.info({ primary: q, alt }, 'Nominatim empty on primary — retrying with alt quote variant');
+  const secondary = await tryOnce(alt);
+  // Transient on the variant MUST NOT be swallowed into an `empty` — the
+  // caller sticky-caches `empty`, and a transient hint means "try again".
+  return secondary;
 }
 
 // Test-only: reset the internal throttle state so tests do not have to wait.
