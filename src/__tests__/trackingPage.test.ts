@@ -144,6 +144,66 @@ describe('GET /t/:token — CANCELED session', () => {
   });
 });
 
+// ── Destination (migration 017) ────────────────────────────────────────────
+
+describe('GET /t/:token — ACTIVE with destination', () => {
+  it('embeds destination lat/lng + address in the initial state', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      lastLocation: { lat: 32.0853, lng: 34.7818, at: '2026-07-08T09:00:00Z', accuracy: 15 },
+      etaMinutes: 25,
+      expectedArrivalAt: '2026-07-08T09:25:00Z',
+      destination: { lat: 32.0110, lng: 34.7712, address: 'אלופי צה"ל 48, חולון' },
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.statusCode).toBe(200);
+    // Both lat/lng values reachable to the boot script.
+    expect(res.body).toContain('"lat":32.011');
+    expect(res.body).toContain('"lng":34.7712');
+    // The address string is not rendered as HTML body text server-side — only
+    // the client applyState() writes it into #subheader — but it MUST be
+    // reachable via the embedded initial state so the client can render it.
+    // Match on the JSON key rather than the raw Hebrew, which the safeJson()
+    // encoder replaces `<` with `<` on.
+    expect(res.body).toContain('"destination":');
+    expect(res.body).toContain('"address"');
+  });
+});
+
+describe('GET /t/:token — ACTIVE without destination', () => {
+  it('never embeds the destination key when the resolver returned nothing', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      lastLocation: { lat: 32.0853, lng: 34.7818, at: '2026-07-08T09:00:00Z', accuracy: 15 },
+      etaMinutes: 25,
+      expectedArrivalAt: '2026-07-08T09:25:00Z',
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('"destination"');
+  });
+});
+
+describe('GET /t/:token — never embeds site-cache diagnostics', () => {
+  it('cache diagnostics stay server-side even with a destination present', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      lastLocation: { lat: 32, lng: 34, at: '2026-07-08T09:00:00Z', accuracy: 15 },
+      destination: { lat: 32, lng: 34, address: 'X' },
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.body).not.toContain('siteGeocodeSource');
+    expect(res.body).not.toContain('siteGeocodeQuery');
+    expect(res.body).not.toContain('siteGeocodedAt');
+  });
+});
+
 // ── Explicit "no internal id leak" defense-in-depth ────────────────────────
 
 describe('GET /t/:token — never embeds internal ids', () => {

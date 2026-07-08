@@ -26,6 +26,7 @@
 import crypto from 'crypto';
 import { pool } from '../db/connection';
 import { moduleLogger } from '../utils/logger';
+import { resolveTaskFieldDestination } from './siteGeocodeCache';
 
 const log = moduleLogger('tracking');
 
@@ -195,9 +196,17 @@ export interface PublicTrackingView {
   lastLocation?: { lat: number; lng: number; at: string; accuracy?: number | null };
   etaMinutes?: number;
   expectedArrivalAt?: string;
+  /**
+   * Destination site coords + address label. Only present when the session
+   * is ACTIVE|ARRIVED AND we successfully resolved `siteAddress` +
+   * `siteCity` via the geocoder (migration 017 cache). Terminal statuses
+   * never carry this — same discipline as `lastLocation`.
+   */
+  destination?: { lat: number; lng: number; address?: string };
 }
 
 interface JoinedRow {
+  taskFieldId: string;
   status: TrackingSessionStatus;
   fieldStatus: string;
   updatedAt: string;
@@ -224,7 +233,8 @@ interface JoinedRow {
  */
 export async function getPublicView(token: string): Promise<PublicTrackingView | null> {
   const { rows } = await pool.query<JoinedRow>(
-    `SELECT s.status,
+    `SELECT s."taskFieldId"         AS "taskFieldId",
+            s.status,
             tf."fieldStatus"        AS "fieldStatus",
             s."updatedAt",
             s."arrivedAt",
@@ -274,6 +284,17 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
   }
   if (effectiveStatus === 'ACTIVE' && row.expectedArrivalAt) {
     view.expectedArrivalAt = row.expectedArrivalAt;
+  }
+
+  // Destination site (migration 017 + siteGeocodeCache). Only non-terminal
+  // sessions get it; terminal statuses match the `lastLocation` discipline
+  // and remain destination-less. Resolver is best-effort — a transient
+  // geocoder failure returns null and the page falls back to worker-only.
+  if (showLocation) {
+    const dest = await resolveTaskFieldDestination(row.taskFieldId);
+    if (dest) {
+      view.destination = { lat: dest.lat, lng: dest.lng, address: dest.address };
+    }
   }
   return view;
 }

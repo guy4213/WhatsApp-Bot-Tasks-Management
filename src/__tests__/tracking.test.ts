@@ -30,11 +30,21 @@ vi.mock('../db/connection', () => ({
   },
 }));
 
+// Destination resolver is a separate service — mock so getPublicView tests
+// don't accidentally reach the pool from siteGeocodeCache.
+const resolveDestMock = vi.fn();
+vi.mock('../services/siteGeocodeCache', () => ({
+  resolveTaskFieldDestination: (...a: unknown[]) => resolveDestMock(...a),
+}));
+
 beforeEach(() => {
   poolQuery.mockReset();
   clientQuery.mockReset();
   clientRelease.mockReset();
   poolConnect.mockClear();
+  resolveDestMock.mockReset();
+  // Default: no destination unless a specific test opts in.
+  resolveDestMock.mockResolvedValue(null);
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -178,6 +188,7 @@ describe('getPublicView', () => {
   it('returns location + eta for an ACTIVE session', async () => {
     poolQuery.mockResolvedValueOnce({
       rows: [{
+        taskFieldId: 'tf-1',
         status: 'ACTIVE',
         fieldStatus: 'EN_ROUTE',
         updatedAt: '2026-07-08T09:00:00Z',
@@ -212,6 +223,7 @@ describe('getPublicView', () => {
   it('lazy-expires an ACTIVE row whose expiresAt has passed, dropping the location', async () => {
     poolQuery.mockResolvedValueOnce({
       rows: [{
+        taskFieldId: 'tf-1',
         status: 'ACTIVE',
         fieldStatus: 'EN_ROUTE',
         updatedAt: '2026-07-08T08:00:00Z',
@@ -237,6 +249,7 @@ describe('getPublicView', () => {
   it('drops the location for terminal statuses (FINISHED)', async () => {
     poolQuery.mockResolvedValueOnce({
       rows: [{
+        taskFieldId: 'tf-1',
         status: 'FINISHED',
         fieldStatus: 'FINISHED_FIELD',
         updatedAt: '2026-07-08T09:30:00Z',
@@ -253,6 +266,69 @@ describe('getPublicView', () => {
     const view = await getPublicView('token-x');
     expect(view?.status).toBe('FINISHED');
     expect(view?.lastLocation).toBeUndefined();
+  });
+});
+
+// ── getPublicView + destination (migration 017) ────────────────────────────
+
+describe('getPublicView — destination', () => {
+  function activeRow() {
+    return {
+      taskFieldId: 'tf-42',
+      status: 'ACTIVE',
+      fieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      arrivedAt: null,
+      endedAt: null,
+      expiresAt: '2099-01-01T00:00:00Z',
+      lastLocationAt: '2026-07-08T09:00:00Z',
+      lat: 32.0853, lng: 34.7818, accuracy: 15,
+      liveAt: '2026-07-08T09:00:00Z',
+      travelEtaMinutes: 25,
+      expectedArrivalAt: '2026-07-08T09:25:00Z',
+    };
+  }
+
+  it('attaches destination when the resolver returns one for an ACTIVE session', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [activeRow()] });
+    resolveDestMock.mockResolvedValueOnce({
+      lat: 32.0110, lng: 34.7712, address: 'אלופי צה"ל 48, חולון',
+    });
+    const view = await getPublicView('token-x');
+    expect(view?.destination).toEqual({
+      lat: 32.0110, lng: 34.7712, address: 'אלופי צה"ל 48, חולון',
+    });
+    // Resolver was called with the taskFieldId from the JOIN.
+    expect(resolveDestMock).toHaveBeenCalledWith('tf-42');
+  });
+
+  it('omits destination when the resolver returns null (transient / missing address)', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [activeRow()] });
+    resolveDestMock.mockResolvedValueOnce(null);
+    const view = await getPublicView('token-x');
+    expect(view?.destination).toBeUndefined();
+  });
+
+  it('does NOT call the resolver — nor include destination — for terminal statuses', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [{ ...activeRow(), status: 'FINISHED', arrivedAt: '2026-07-08T09:20:00Z', endedAt: '2026-07-08T09:30:00Z' }],
+    });
+    const view = await getPublicView('token-x');
+    expect(view?.status).toBe('FINISHED');
+    expect(view?.destination).toBeUndefined();
+    expect(resolveDestMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT include destination when the session lazy-expires on read', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [{ ...activeRow(), expiresAt: '2000-01-01T00:00:00Z' }],
+    });
+    // Resolver would be called with an expired effective status because
+    // showLocation is gated on the effective status; verify it isn't.
+    const view = await getPublicView('token-x');
+    expect(view?.status).toBe('EXPIRED');
+    expect(view?.destination).toBeUndefined();
+    expect(resolveDestMock).not.toHaveBeenCalled();
   });
 });
 

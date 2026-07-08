@@ -107,6 +107,21 @@ const CSS = `
     font-size: 13px;
     margin: 6px 4px 0;
   }
+  #subheader {
+    color: var(--muted);
+    font-size: 15px;
+    margin: 2px 4px 8px;
+  }
+  #subheader b { color: var(--ink); }
+  /* Destination marker — small green pin drawn as a divIcon. Sits above the
+     default Leaflet marker in stacking context (below the tile layer's
+     panes but above raster tiles). */
+  .dest-pin {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--brand);
+    border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+  }
   #map {
     height: 320px;
     margin-top: 14px;
@@ -157,9 +172,33 @@ const JS = `
   let pollTimer = null;
   let backoff = 0;
   let map = null, marker = null, accuracyCircle = null;
+  let destMarker = null, routeLine = null;
+  // fitBounds discipline (MVP+1): don't re-fit on every poll. Only when:
+  //   - fresh page load / first geometry
+  //   - status transitions across ACTIVE↔ARRIVED
+  //   - the worker moved more than REFIT_METERS from the last fitted position
+  let lastFittedWorkerLL = null, lastFittedStatus = null;
+  const REFIT_METERS = 500;
   let lastState = null;
 
   const $ = (id) => document.getElementById(id);
+
+  // Small HTML escape for the "בדרך אל <address>" subheader — the only place
+  // any string from the payload lands in body innerHTML.
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Rough equirectangular distance in metres. Fine for the < 1 km scale
+  // we care about for re-fit gating.
+  function metersBetween(a, b) {
+    const dLat = (a.lat - b.lat) * 111000;
+    const midLatRad = (a.lat + b.lat) * Math.PI / 360;
+    const dLng = (a.lng - b.lng) * 111000 * Math.cos(midLatRad);
+    return Math.hypot(dLat, dLng);
+  }
 
   function formatIlTime(iso) {
     try {
@@ -183,6 +222,8 @@ const JS = `
   function ensureMap(lat, lng) {
     if (!window.L) return; // Leaflet script hasn't loaded (offline / SRI mismatch)
     if (!map) {
+      // Initial view only. Subsequent positioning is via fitIfNeeded() so we
+      // don't yank the map on every 12 s poll.
       map = L.map('map', { attributionControl: true }).setView([lat, lng], 14);
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
@@ -191,8 +232,58 @@ const JS = `
       marker = L.marker([lat, lng]).addTo(map);
     } else {
       marker.setLatLng([lat, lng]);
-      map.setView([lat, lng]);
     }
+  }
+
+  function ensureDestination(destLL) {
+    if (!map || !destLL) return;
+    if (!destMarker) {
+      const icon = L.divIcon({
+        className: '',
+        html: '<div class="dest-pin" aria-label="יעד"></div>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+      });
+      destMarker = L.marker([destLL.lat, destLL.lng], { icon }).addTo(map);
+    } else {
+      destMarker.setLatLng([destLL.lat, destLL.lng]);
+    }
+  }
+
+  function ensureRoute(workerLL, destLL) {
+    if (!map || !workerLL || !destLL) return;
+    const pts = [[workerLL.lat, workerLL.lng], [destLL.lat, destLL.lng]];
+    if (!routeLine) {
+      routeLine = L.polyline(pts, {
+        color: '#1f7a3b', weight: 4, opacity: 0.7, dashArray: '6 8',
+      }).addTo(map);
+    } else {
+      routeLine.setLatLngs(pts);
+    }
+  }
+
+  function removeDestinationLayers() {
+    if (routeLine) { routeLine.remove(); routeLine = null; }
+    if (destMarker) { destMarker.remove(); destMarker = null; }
+  }
+
+  function fitIfNeeded(status, workerLL, destLL) {
+    if (!map || !workerLL) return;
+    const statusChanged = lastFittedStatus !== status;
+    const movedFar =
+      lastFittedWorkerLL == null ||
+      metersBetween(lastFittedWorkerLL, workerLL) > REFIT_METERS;
+    if (!statusChanged && !movedFar) return;
+    if (destLL) {
+      map.fitBounds(
+        [[workerLL.lat, workerLL.lng], [destLL.lat, destLL.lng]],
+        { padding: [40, 40], maxZoom: 15, animate: true },
+      );
+    } else {
+      map.setView([workerLL.lat, workerLL.lng], 14, { animate: true });
+    }
+    lastFittedWorkerLL = { lat: workerLL.lat, lng: workerLL.lng };
+    lastFittedStatus = status;
   }
 
   function updateAccuracy(lat, lng, accuracy) {
@@ -212,6 +303,8 @@ const JS = `
   function destroyMap() {
     if (map) { map.remove(); }
     map = null; marker = null; accuracyCircle = null;
+    destMarker = null; routeLine = null;
+    lastFittedWorkerLL = null; lastFittedStatus = null;
   }
 
   function applyState(state) {
@@ -219,6 +312,16 @@ const JS = `
     document.body.className = 'state-' + state.status;
 
     $('hero').textContent = HERO[state.status] || HERO.CANCELED;
+
+    // Subheader — "בדרך אל <address>" only while ACTIVE and address known.
+    const subEl = $('subheader');
+    if (state.status === 'ACTIVE' && state.destination && state.destination.address) {
+      subEl.innerHTML = 'בדרך אל <b>' + escapeHtml(state.destination.address) + '</b>';
+      subEl.classList.remove('hidden');
+    } else {
+      subEl.textContent = '';
+      subEl.classList.add('hidden');
+    }
 
     // ETA card — only ACTIVE, only when we actually have data.
     const showEta = state.status === 'ACTIVE'
@@ -235,15 +338,37 @@ const JS = `
       $('eta-card').classList.add('hidden');
     }
 
-    // Map — only when ACTIVE|ARRIVED and location present.
-    const showLoc = (state.status === 'ACTIVE' || state.status === 'ARRIVED')
+    // Map — only when ACTIVE|ARRIVED and worker location present.
+    const workerLL = ((state.status === 'ACTIVE' || state.status === 'ARRIVED')
       && state.lastLocation
       && Number.isFinite(state.lastLocation.lat)
-      && Number.isFinite(state.lastLocation.lng);
-    if (showLoc) {
+      && Number.isFinite(state.lastLocation.lng))
+        ? { lat: state.lastLocation.lat, lng: state.lastLocation.lng }
+        : null;
+
+    // Destination — same visibility guard as workerLL, but tolerate missing
+    // destination gracefully (fallback to worker-only single-marker view).
+    const destLL = (workerLL && state.destination
+      && Number.isFinite(state.destination.lat)
+      && Number.isFinite(state.destination.lng))
+        ? { lat: state.destination.lat, lng: state.destination.lng }
+        : null;
+
+    if (workerLL) {
       $('map').classList.remove('hidden');
-      ensureMap(state.lastLocation.lat, state.lastLocation.lng);
-      updateAccuracy(state.lastLocation.lat, state.lastLocation.lng, state.lastLocation.accuracy);
+      ensureMap(workerLL.lat, workerLL.lng);
+      updateAccuracy(workerLL.lat, workerLL.lng, state.lastLocation.accuracy);
+      if (destLL && state.status === 'ACTIVE') {
+        ensureDestination(destLL);
+        ensureRoute(workerLL, destLL);
+      } else if (destLL && state.status === 'ARRIVED') {
+        // Show the destination pin but drop the route line — worker is there.
+        ensureDestination(destLL);
+        if (routeLine) { routeLine.remove(); routeLine = null; }
+      } else {
+        removeDestinationLayers();
+      }
+      fitIfNeeded(state.status, workerLL, destLL);
     } else {
       $('map').classList.add('hidden');
       $('accuracy-notice').classList.add('hidden');
@@ -328,6 +453,7 @@ export function renderTrackingPage(token: string, initial: PublicTrackingView): 
 <main>
   <div id="banner" class="hidden" role="status">מנסים לרענן…</div>
   <h1 id="hero" role="status" aria-live="polite"></h1>
+  <div id="subheader" class="hidden"></div>
   <div id="eta-card" class="card hidden">
     <div id="eta-time" class="eta-time"></div>
     <div id="eta-relative" class="eta-relative"></div>
