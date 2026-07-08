@@ -11,6 +11,10 @@ import { parseHebrewInspectionRange } from '../ai/dateRangeParser';
 // Thursday 2026-07-02 12:00 Asia/Jerusalem.
 const NOW = new Date('2026-07-02T09:00:00Z');
 
+// Sunday 2026-06-28 12:00 Asia/Jerusalem — edge case for "שבוע שעבר" when
+// "today" itself is the first day of the work-week.
+const NOW_SUNDAY = new Date('2026-06-28T09:00:00Z');
+
 describe('parseHebrewInspectionRange', () => {
   it('"היום" → today [2026-07-02, 2026-07-03)', () => {
     const r = parseHebrewInspectionRange('היום', NOW);
@@ -117,5 +121,120 @@ describe('parseHebrewInspectionRange', () => {
     expect(r).not.toBeNull();
     expect(r!.fromLocalDate).toBe('2027-01-01');
     expect(r!.toLocalDate).toBe('2027-01-06');
+  });
+
+  // ── QA-FIX-7: past vocabulary ──────────────────────────────────────────
+
+  describe('אתמול (QA-FIX-7)', () => {
+    it('"אתמול" → yesterday [2026-07-01, 2026-07-02)', () => {
+      const r = parseHebrewInspectionRange('אתמול', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-07-01');
+      expect(r!.toLocalDate).toBe('2026-07-02');
+      expect(r!.label).toContain('אתמול');
+      expect(r!.label).toContain('01/07');
+    });
+
+    it('"מאתמול" → same as "אתמול"', () => {
+      const r = parseHebrewInspectionRange('מאתמול', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-07-01');
+      expect(r!.toLocalDate).toBe('2026-07-02');
+    });
+
+    it('"של אתמול" → same as "אתמול"', () => {
+      const r = parseHebrewInspectionRange('של אתמול', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-07-01');
+      expect(r!.toLocalDate).toBe('2026-07-02');
+    });
+
+    it('tolerates the "הבדיקות שלי" prefix', () => {
+      const r = parseHebrewInspectionRange('הבדיקות שלי אתמול', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-07-01');
+    });
+  });
+
+  it('"שלשום" → [2026-06-30, 2026-07-01)', () => {
+    const r = parseHebrewInspectionRange('שלשום', NOW);
+    expect(r).not.toBeNull();
+    expect(r!.fromLocalDate).toBe('2026-06-30');
+    expect(r!.toLocalDate).toBe('2026-07-01');
+    expect(r!.label).toContain('שלשום');
+    expect(r!.label).toContain('30/06');
+  });
+
+  describe('שבוע שעבר (QA-FIX-7)', () => {
+    it('"שבוע שעבר" → previous work-week [2026-06-21, 2026-06-28) (from Thursday)', () => {
+      const r = parseHebrewInspectionRange('שבוע שעבר', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-06-21');
+      expect(r!.toLocalDate).toBe('2026-06-28');
+      expect(r!.label).toContain('שבוע שעבר');
+    });
+
+    it('"בשבוע שעבר" variant', () => {
+      const r = parseHebrewInspectionRange('בשבוע שעבר', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-06-21');
+      expect(r!.toLocalDate).toBe('2026-06-28');
+    });
+
+    it('"השבוע שעבר" variant', () => {
+      const r = parseHebrewInspectionRange('השבוע שעבר', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-06-21');
+      expect(r!.toLocalDate).toBe('2026-06-28');
+    });
+
+    it('"משבוע שעבר" variant', () => {
+      const r = parseHebrewInspectionRange('משבוע שעבר', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-06-21');
+      expect(r!.toLocalDate).toBe('2026-06-28');
+    });
+
+    it('Sunday edge case: "today" is itself the first day of the work-week', () => {
+      // NOW_SUNDAY = 2026-06-28 (Sunday). This week's Sunday == today, so
+      // "שבוע שעבר" must resolve to the PRIOR week, not overlap today.
+      const r = parseHebrewInspectionRange('שבוע שעבר', NOW_SUNDAY);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-06-21');
+      expect(r!.toLocalDate).toBe('2026-06-28');
+    });
+  });
+
+  describe('חודש שעבר (QA-FIX-7)', () => {
+    it('"חודש שעבר" → previous calendar month [2026-06-01, 2026-07-01)', () => {
+      const r = parseHebrewInspectionRange('חודש שעבר', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-06-01');
+      expect(r!.toLocalDate).toBe('2026-07-01');
+      expect(r!.label).toContain('חודש שעבר');
+    });
+
+    it('"בחודש שעבר" variant', () => {
+      const r = parseHebrewInspectionRange('בחודש שעבר', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-06-01');
+      expect(r!.toLocalDate).toBe('2026-07-01');
+    });
+
+    it('"מהחודש שעבר" variant', () => {
+      const r = parseHebrewInspectionRange('מהחודש שעבר', NOW);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-06-01');
+      expect(r!.toLocalDate).toBe('2026-07-01');
+    });
+
+    it('year rollover: January → previous month is December of the prior year', () => {
+      // 15 Jan 2027, 12:00 Asia/Jerusalem → 09:00 UTC.
+      const januaryNow = new Date('2027-01-15T09:00:00Z');
+      const r = parseHebrewInspectionRange('חודש שעבר', januaryNow);
+      expect(r).not.toBeNull();
+      expect(r!.fromLocalDate).toBe('2026-12-01');
+      expect(r!.toLocalDate).toBe('2027-01-01');
+    });
   });
 });

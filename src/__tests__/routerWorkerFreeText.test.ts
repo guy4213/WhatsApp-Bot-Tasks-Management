@@ -683,6 +683,116 @@ describe('QA-FIX-6 — manager "המשימות שלי למחר" hits the determi
   });
 });
 
+// ── QA-FIX-7: PAST time-range support for "הבדיקות שלי" / "המשימות שלי" ─────
+
+describe('QA-FIX-7 — past time ranges for list_my_inspections', () => {
+  function makeManager(): ResolvedUser {
+    return {
+      id: 'u-mgr', name: 'מנהל', phone: '97250000010', role: 'ADMIN',
+      isElevated: true, canViewAllRecords: true, canManageUsers: true, canManagePermissions: true,
+    };
+  }
+
+  // Same TZ-safe helper the production code uses, duplicated here so the test
+  // computes its OWN expectation independent of the implementation.
+  function expectedYesterdayTodayWindow(): { from: string; to: string } {
+    const now = new Date();
+    const todayIso = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now);
+    const addDaysISO = (iso: string, days: number): string => {
+      const [y, m, d] = iso.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d, 12));
+      dt.setUTCDate(dt.getUTCDate() + days);
+      return dt.toISOString().slice(0, 10);
+    };
+    return { from: addDaysISO(todayIso, -1), to: todayIso };
+  }
+
+  it('(a) worker "הבדיקות שלי אתמול" → deterministic fast path, yesterday window, no AI parser call', async () => {
+    getContext.mockResolvedValue(null);
+    await handleAIMessage(makeWorker(), 'הבדיקות שלי אתמול');
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    expect(getMyInspectionsInRange).toHaveBeenCalledTimes(1);
+    const { from: expectedFrom, to: expectedTo } = expectedYesterdayTodayWindow();
+    const [userId, from, to] = getMyInspectionsInRange.mock.calls[0] as [string, string, string];
+    expect(userId).toBe('u-worker');
+    expect(from).toBe(expectedFrom);
+    expect(to).toBe(expectedTo);
+  });
+
+  it('(d) manager "המשימות שלי אתמול" → deterministic fast path, yesterday window, no AI parser call', async () => {
+    getContext.mockResolvedValue(null);
+    await handleAIMessage(makeManager(), 'המשימות שלי אתמול');
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    expect(getMyInspectionsInRange).toHaveBeenCalledTimes(1);
+    const { from: expectedFrom, to: expectedTo } = expectedYesterdayTodayWindow();
+    const [userId, from, to] = getMyInspectionsInRange.mock.calls[0] as [string, string, string];
+    expect(userId).toBe('u-mgr');
+    expect(from).toBe(expectedFrom);
+    expect(to).toBe(expectedTo);
+  });
+
+  it('(b) LLM channel: parseIntent returns list_my_inspections with params.dateRange → getMyInspectionsInRange called with exactly those dates', async () => {
+    getContext.mockResolvedValue(null);
+    parseIntentMock.mockResolvedValue({
+      intent: 'list_my_inspections',
+      confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: { dateRange: { from: '2026-05-01', to: '2026-05-08' } },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    // Phrasing MY_INSPECTIONS_RE does not catch, forcing the AI path.
+    await handleAIMessage(makeWorker(), 'תגיד לי מה היה לי לפני חודשיים בערך');
+    expect(parseIntentMock).toHaveBeenCalled();
+    expect(getMyInspectionsInRange).toHaveBeenCalledTimes(1);
+    const [userId, from, to] = getMyInspectionsInRange.mock.calls[0] as [string, string, string];
+    expect(userId).toBe('u-worker');
+    expect(from).toBe('2026-05-01');
+    expect(to).toBe('2026-05-08');
+  });
+
+  it('(c) LLM channel: invalid dateRange (from > to) falls back to existing dateScope/today behavior without crashing', async () => {
+    getContext.mockResolvedValue(null);
+    parseIntentMock.mockResolvedValue({
+      intent: 'list_my_inspections',
+      confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: { dateRange: { from: '2026-05-10', to: '2026-05-01' } }, // inverted → invalid
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    await handleAIMessage(makeWorker(), 'תגיד לי מה היה לי לפני חודשיים בערך');
+    expect(parseIntentMock).toHaveBeenCalled();
+    // Falls through to the unchanged synthesis path (dateScope absent, rangeExpr
+    // absent → default "today" suffix) — must not throw, and must still call
+    // getMyInspectionsInRange exactly once with a valid (non-inverted) window.
+    expect(getMyInspectionsInRange).toHaveBeenCalledTimes(1);
+    const [, from, to] = getMyInspectionsInRange.mock.calls[0] as [string, string, string];
+    expect(from <= to).toBe(true);
+  });
+
+  it('(c) LLM channel: malformed dateRange (missing "to") falls back without crashing', async () => {
+    getContext.mockResolvedValue(null);
+    parseIntentMock.mockResolvedValue({
+      intent: 'list_my_inspections',
+      confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: { dateRange: { from: '2026-05-10' } }, // malformed — no "to"
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    await handleAIMessage(makeWorker(), 'תגיד לי מה היה לי לפני חודשיים בערך');
+    expect(getMyInspectionsInRange).toHaveBeenCalledTimes(1);
+    const [, from, to] = getMyInspectionsInRange.mock.calls[0] as [string, string, string];
+    expect(from <= to).toBe(true);
+  });
+});
+
 // ── AI-first fallback when regex matches but range fails ─────────────────────
 
 describe('Fast-path failure falls through to AI parser (post-Phase-6)', () => {

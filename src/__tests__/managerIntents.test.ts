@@ -224,6 +224,46 @@ describe('buildSystemPrompt — date-range few-shot tracks the real "today" (D5-
   });
 });
 
+// QA-FIX-7: list_my_inspections must accept a free params.dateRange for PAST
+// (and any other dateScope-uncovered) time expressions, in BOTH the worker
+// and manager prompts — unlike the manager-only buildDateRangeFewShot block.
+describe('buildSystemPrompt — QA-FIX-7 list_my_inspections dateRange guidance', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('worker prompt list_my_inspections instructions mention params.dateRange for past expressions', () => {
+    const prompt = buildSystemPrompt(makeCtx(makeWorker()));
+    // The WORKER_INTENT_LIST entry for list_my_inspections must teach dateRange.
+    expect(prompt).toMatch(/list_my_inspections:[\s\S]*params\.dateRange/);
+    expect(prompt).toContain('אתמול');
+    expect(prompt).toContain('שלשום');
+  });
+
+  it('manager prompt list_my_inspections instructions mention params.dateRange for past expressions', () => {
+    const prompt = buildSystemPrompt(makeCtx(makeManager()));
+    expect(prompt).toMatch(/list_my_inspections:[\s\S]*params\.dateRange/);
+    expect(prompt).toContain('אתמול');
+    expect(prompt).toContain('שלשום');
+  });
+
+  it('the shared dynamic few-shot contains the "הבדיקות שלי אתמול" example with the real yesterday/today dates, for BOTH roles', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-17T09:00:00Z')); // Monday
+    const workerPrompt = buildSystemPrompt(makeCtx(makeWorker()));
+    const managerPrompt = buildSystemPrompt(makeCtx(makeManager()));
+    for (const prompt of [workerPrompt, managerPrompt]) {
+      expect(prompt).toContain('"הבדיקות שלי אתמול"');
+      expect(prompt).toContain('"המשימות שלי אתמול"');
+      expect(prompt).toContain('dateRange={from:"2026-08-16", to:"2026-08-17"}');
+    }
+  });
+
+  it('worker prompt does NOT gain manager-only org-wide intents via the shared few-shot', () => {
+    const prompt = buildSystemPrompt(makeCtx(makeWorker()));
+    expect(prompt).not.toContain('list_today_field_inspections');
+    expect(prompt).not.toContain('workers_day_overview');
+  });
+});
+
 // ── parseIntent — simulated LLM outputs for manager phrases ──────────────────
 // Each test provides a deterministic model response (as if the real LLM had
 // chosen that output) and asserts the schema layer round-trips it correctly.

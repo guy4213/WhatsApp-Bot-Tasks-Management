@@ -1095,6 +1095,26 @@ async function executeIntent(
         return;
       }
 
+      // QA-FIX-7: free `params.dateRange` channel — lets the LLM resolve ANY
+      // time expression (especially PAST ones: "אתמול", "שלשום", "שבוע שעבר",
+      // explicit past dates) that the deterministic parser/dateScope enum
+      // can't express, the same way the org-wide list intents already do.
+      // Wins over rangeExpr/dateScope when present and valid; invalid/absent
+      // falls through to the existing synthesis below unchanged.
+      const myDateRange = extractDateRange(intent.params?.dateRange);
+      if (myDateRange) {
+        const spanDays = daysBetween(myDateRange.from, myDateRange.to);
+        const label = spanDays <= 1
+          ? fmtDDMM(myDateRange.from)
+          : `${fmtDDMM(myDateRange.from)}–${fmtDDMM(addLocalDay(myDateRange.to, -1))}`;
+        await renderMyInspectionsRange(user, {
+          fromLocalDate: myDateRange.from,
+          toLocalDate: myDateRange.to,
+          label,
+        });
+        return;
+      }
+
       // Bounded scopes — synthesize a text form that MY_INSPECTIONS_RE +
       // parseHebrewInspectionRange will resolve deterministically.
       let synthesized = 'הבדיקות שלי';
@@ -4904,6 +4924,21 @@ async function handleMyInspectionsFreeText(user: ResolvedUser, text: string): Pr
     range = parsed;
   }
 
+  await renderMyInspectionsRange(user, range);
+}
+
+/**
+ * QA-FIX-7: shared render/context/send block for a resolved
+ * `{ fromLocalDate, toLocalDate, label }` window — used by both the
+ * deterministic fast path (`handleMyInspectionsFreeText`) and the LLM
+ * free-`dateRange` channel (`case 'list_my_inspections'` → `params.dateRange`).
+ * `toLocalDate` is EXCLUSIVE (half-open window), matching every other
+ * dateRange consumer in this file.
+ */
+async function renderMyInspectionsRange(
+  user: ResolvedUser,
+  range: { fromLocalDate: string; toLocalDate: string; label: string },
+): Promise<void> {
   const items = await getMyInspectionsInRange(user.id, range.fromLocalDate, range.toLocalDate);
 
   if (items.length === 0) {

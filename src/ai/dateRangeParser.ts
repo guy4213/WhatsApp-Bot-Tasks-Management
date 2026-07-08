@@ -7,8 +7,12 @@
  *
  * Supported inputs (with or without the leading "הבדיקות שלי" phrase):
  *   • היום / מחר
+ *   • אתמול / מאתמול / של אתמול
+ *   • שלשום
  *   • השבוע / שבוע הבא  (Israeli work-week: Sunday → Saturday)
+ *   • שבוע שעבר / בשבוע שעבר / השבוע שעבר / משבוע שעבר (previous work-week)
  *   • החודש / חודש הבא
+ *   • חודש שעבר / בחודש שעבר / מהחודש שעבר (previous calendar month)
  *   • Named weekday: "יום ראשון" … "יום שישי", "שבת" — next occurrence incl. today
  *   • "בין DD/M ל-DD/M" / "בין DD/MM ל-DD/MM"
  *   • Single date "ב-DD/M" / "ב-DD/MM"
@@ -151,6 +155,27 @@ export function parseHebrewInspectionRange(
     };
   }
 
+  // ── אתמול / מאתמול / של אתמול (QA-FIX-7) ────────────────────────────────
+  if (/^(?:מ|של\s+)?אתמול$/.test(s)) {
+    const yesterday = addDaysISO(todayIso, -1);
+    return {
+      fromLocalDate: yesterday,
+      toLocalDate: todayIso,
+      label: `אתמול ${ddmm(yesterday)}`,
+    };
+  }
+
+  // ── שלשום (QA-FIX-7) ─────────────────────────────────────────────────────
+  if (/^שלשום$/.test(s)) {
+    const dayBeforeYesterday = addDaysISO(todayIso, -2);
+    const yesterday = addDaysISO(todayIso, -1);
+    return {
+      fromLocalDate: dayBeforeYesterday,
+      toLocalDate: yesterday,
+      label: `שלשום ${ddmm(dayBeforeYesterday)}`,
+    };
+  }
+
   // ── השבוע / שבוע הבא ────────────────────────────────────────────────────
   //
   // Israeli work-week: Sunday (dow=0) → Saturday (dow=6) inclusive.
@@ -175,6 +200,21 @@ export function parseHebrewInspectionRange(
       fromLocalDate: nextSunday,
       toLocalDate: weekAfter,
       label: `שבוע הבא (${ddmm(nextSunday)}–${ddmm(nextSat)})`,
+    };
+  }
+
+  // ── שבוע שעבר (QA-FIX-7) ─────────────────────────────────────────────────
+  //
+  // Previous Israeli work-week: Sunday−7 → this Sunday (half-open).
+  if (/^(?:ב|ה|מ)?שבוע\s+שעבר$/.test(s)) {
+    const dow = isoDayOfWeek(todayIso);            // 0=Sun..6=Sat
+    const thisSunday = addDaysISO(todayIso, -dow); // Sunday of the current week
+    const prevSunday = addDaysISO(thisSunday, -7);
+    const prevSat = addDaysISO(thisSunday, -1);
+    return {
+      fromLocalDate: prevSunday,
+      toLocalDate: thisSunday,
+      label: `שבוע שעבר (${ddmm(prevSunday)}–${ddmm(prevSat)})`,
     };
   }
 
@@ -226,6 +266,23 @@ export function parseHebrewInspectionRange(
       toLocalDate: nextFirst,
       label:
         `חודש הבא (${String(nextMonth1).padStart(2, '0')}/${nextMonthYear}, 01–${String(last).padStart(2, '0')})`,
+    };
+  }
+
+  // ── חודש שעבר (QA-FIX-7) ─────────────────────────────────────────────────
+  //
+  // Previous calendar month: first of previous month → first of current month.
+  if (/^(?:ב|מה)?חודש\s+שעבר$/.test(s)) {
+    const { y, m } = localJerusalemParts(nowJerusalem);
+    const prevMonth1 = m === 1 ? 12 : m - 1;
+    const prevMonthYear = m === 1 ? y - 1 : y;
+    const first = `${prevMonthYear}-${String(prevMonth1).padStart(2, '0')}-01`;
+    const thisMonthFirst = `${y}-${String(m).padStart(2, '0')}-01`;
+    const last = lastDayOfMonth(prevMonthYear, prevMonth1);
+    return {
+      fromLocalDate: first,
+      toLocalDate: thisMonthFirst,
+      label: `חודש שעבר (${String(prevMonth1).padStart(2, '0')}/${prevMonthYear}, 01–${String(last).padStart(2, '0')})`,
     };
   }
 

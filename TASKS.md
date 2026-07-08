@@ -2813,6 +2813,55 @@ threading can be applied if a real case surfaces.
 
 ---
 
+## 4.19 — QA-FIX-7: past time ranges ("אתמול"/"שבוע שעבר") for the personal list + free AI dateRange channel (2026-07-08)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+
+**What to do:** "הבדיקות שלי אתמול" / "המשימות שלי אתמול" / any PAST range
+returned today's list or "not understood". Product direction from the user:
+the AI should get MORE freedom, not more regexes — any time expression it
+understands must be expressible to the backend.
+
+**Root cause:** the personal-list pipeline was forward-only on all 3 layers:
+`parseHebrewInspectionRange` had zero past vocabulary; the
+`list_my_inspections` prompt contract offered only a closed
+today/tomorrow/week/next_week/all enum + rangeExpr (which feeds back into the
+same past-blind parser); and `executeIntent` never read `params.dateRange` for
+this intent — unlike every org-wide list intent, which already accepts a free
+LLM-resolved {from,to}.
+
+**Fix (three layers):**
+- `src/ai/router.ts` — `case 'list_my_inspections'` now accepts a free
+  `params.dateRange` (validated by the existing `extractDateRange`), rendered
+  via a new shared `renderMyInspectionsRange` helper (extracted from
+  `handleMyInspectionsFreeText` — no duplicated render/context/send logic).
+  Precedence: dateScope='all' → dateRange → legacy synthesis.
+- `src/ai/dateRangeParser.ts` — deterministic past vocabulary: אתמול/מאתמול/
+  של אתמול, שלשום, שבוע שעבר (4 variants, previous Sun→Sun), חודש שעבר
+  (3 variants, with January year-rollover).
+- `src/ai/intentParser.ts` — worker AND manager `list_my_inspections` lines now
+  instruct the model to resolve ANY uncovered time expression (especially past)
+  to `params.dateRange` itself; new shared `buildMyInspectionsPastFewShot`
+  (dynamic dates, both roles — deliberately separate from the manager-only
+  `buildDateRangeFewShot` which references org-wide intents).
+
+**Files changed:** the 3 above + tests: `dateRangeParser.test.ts` (+23, pinned
+dates incl. Sunday edge + January rollover), `routerWorkerFreeText.test.ts`
+(+6: deterministic worker/manager paths, LLM dateRange channel exact-dates,
+invalid-range fallback), `managerIntents.test.ts` (+4 prompt assertions).
+
+**Implemented by a Sonnet sub-agent; orchestrator QA:** full diff reviewed
+line by line (half-open windows correct; label shows the INCLUSIVE last day;
+precedence order verified; no forbidden files touched); `npx tsc --noEmit`
+clean; **442/442 tests** across 12 files on the orchestrator's own run;
+sub-agent full suite 1330 passed / 0 failed (known vitest OOM teardown flake).
+
+**Remaining (documented):** "לפני שבועיים"-style arbitrary past expressions ride
+the LLM dateRange channel only (no deterministic shortcut) — by design; live
+smoke test with the real provider recommended after deploy.
+
+---
+
 ## 4.18 — QA-FIX-6: manager "המשימות שלי למחר" showed today-only / not understood (2026-07-07)
 
 **Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
