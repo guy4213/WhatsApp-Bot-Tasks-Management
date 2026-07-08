@@ -58,18 +58,25 @@ async function throttle(): Promise<void> {
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Hebrew orthography quirk: OSM sometimes tags street names with the Hebrew
- * gershayim character (U+05F4, `״`) and sometimes with an ASCII double quote
- * (U+0022, `"`). Nominatim is inconsistent about matching between the two.
- * `altQuoteVariant` produces the opposite variant so we can try both — see
- * `geocodeAddress` for the fallback logic. Returns null if the query has
- * neither character to normalize.
+ * Hebrew orthography quirk: OSM tags street names inconsistently — sometimes
+ * with an ASCII double quote (U+0022, `"`), sometimes with the Hebrew
+ * gershayim (U+05F4, `״`), and sometimes with NO quote at all. Nominatim
+ * doesn't paper over the difference, so we retry with two normalized
+ * variants before we give up. Real-world example: "אלופי צה\"ל" fails,
+ * "אלופי צה״ל" fails, but "אלופי צהל" hits — because that's how OSM's
+ * Israel index actually tags the street.
  */
 const GERSHAYIM = '״';
 function altQuoteVariant(q: string): string | null {
   if (q.includes('"')) return q.replace(/"/g, GERSHAYIM);
   if (q.includes(GERSHAYIM)) return q.replace(new RegExp(GERSHAYIM, 'g'), '"');
   return null;
+}
+
+/** Strip BOTH quote flavours entirely. Complements `altQuoteVariant` for the
+ *  case where OSM tags the street without any quote character. */
+function strippedQuoteVariant(q: string): string {
+  return q.replace(new RegExp(`["${GERSHAYIM}]`, 'g'), '');
 }
 
 /**
@@ -149,29 +156,38 @@ async function tryOnce(q: string): Promise<GeocodeResult> {
  * semantics — the caller must distinguish `empty` (sticky) from `transient`
  * (do NOT cache).
  *
- * Fallback discipline: on empty from the primary attempt, if the query
- * contains an ASCII quote OR a Hebrew gershayim (U+05F4), we try the opposite
- * variant once. This closes the "אלופי צה\"ל" vs "אלופי צה״ל" mismatch that
- * causes Nominatim to miss real Israeli streets.
- *
- * If the variant attempt itself is transient, we return transient — we don't
- * want to sticky-cache `no_hit` on evidence that isn't fully confirmed.
+ * Fallback discipline: we try up to THREE variants of the query in order,
+ * de-duplicated:
+ *   1. the query as-supplied.
+ *   2. `altQuoteVariant`  — swap ASCII `"` ↔ Hebrew gershayim `״`.
+ *   3. `strippedQuoteVariant` — remove both quote flavours entirely.
+ * The moment any variant returns `hit` or `transient`, we return it. Only if
+ * every unique variant returns `empty` do we return `empty` (so the caller
+ * may sticky-cache `no_hit`). A single `transient` at any point in the chain
+ * short-circuits — we don't want to sticky-cache on evidence that isn't
+ * fully confirmed.
  */
 export async function geocodeAddress(query: string): Promise<GeocodeResult> {
   const q = query.trim();
   if (!q) return { kind: 'empty' };
 
-  const primary = await tryOnce(q);
-  if (primary.kind !== 'empty') return primary;
-
+  const variants: string[] = [q];
   const alt = altQuoteVariant(q);
-  if (!alt) return primary;
+  if (alt && !variants.includes(alt)) variants.push(alt);
+  const stripped = strippedQuoteVariant(q);
+  if (stripped && !variants.includes(stripped)) variants.push(stripped);
 
-  log.info({ primary: q, alt }, 'Nominatim empty on primary — retrying with alt quote variant');
-  const secondary = await tryOnce(alt);
-  // Transient on the variant MUST NOT be swallowed into an `empty` — the
-  // caller sticky-caches `empty`, and a transient hint means "try again".
-  return secondary;
+  let lastEmpty: GeocodeResult = { kind: 'empty' };
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    if (i > 0) {
+      log.info({ from: q, variant: v, attempt: i + 1 }, 'Nominatim empty — retrying with variant');
+    }
+    const result = await tryOnce(v);
+    if (result.kind === 'hit' || result.kind === 'transient') return result;
+    lastEmpty = result; // kind === 'empty' — keep looking.
+  }
+  return lastEmpty;
 }
 
 // Test-only: reset the internal throttle state so tests do not have to wait.

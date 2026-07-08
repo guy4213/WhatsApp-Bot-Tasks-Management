@@ -113,13 +113,18 @@ describe('geocodeAddress — alt-quote fallback', () => {
     expect(urlVariant).toContain(encodeURIComponent('אלופי צה"ל 48, חולון'));
   });
 
-  it('both variants empty → returns empty (caller CAN sticky-cache)', async () => {
+  it('ALL three variants empty → returns empty (caller CAN sticky-cache)', async () => {
+    // For a query with a quote, we generate 3 unique variants:
+    //   1. אלופי צה"ל 48, חולון       (primary — ASCII quote)
+    //   2. אלופי צה״ל 48, חולון       (gershayim swap)
+    //   3. אלופי צהל 48, חולון        (both quotes stripped)
     fetchMock
+      .mockResolvedValueOnce(ok([]))
       .mockResolvedValueOnce(ok([]))
       .mockResolvedValueOnce(ok([]));
     const res = await geocodeAddress('אלופי צה"ל 48, חולון');
     expect(res).toEqual({ kind: 'empty' });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('variant is transient → returns transient (caller MUST NOT sticky-cache)', async () => {
@@ -131,15 +136,53 @@ describe('geocodeAddress — alt-quote fallback', () => {
       .mockResolvedValueOnce(status(500));
     const res = await geocodeAddress('אלופי צה"ל 48, חולון');
     expect(res).toMatchObject({ kind: 'transient' });
+    // Short-circuit: we DON'T continue to the stripped variant after a
+    // transient, because a transient hint means "conditions are bad, come
+    // back later". Wasting another network call is counterproductive.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('primary transient → does NOT trigger a variant retry', async () => {
-    // Network hiccup on primary — retrying with the variant would just waste
-    // another Nominatim call. Return transient immediately; the caller will
-    // retry on the next getPublicView tick.
+  it('primary transient → does NOT trigger any variant retry', async () => {
+    // Network hiccup on primary — retrying with the variants would just
+    // waste more Nominatim calls. Return transient immediately.
     fetchMock.mockResolvedValueOnce(status(500));
     const res = await geocodeAddress('אלופי צה"ל 48, חולון');
     expect(res).toMatchObject({ kind: 'transient' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Third variant: strip ALL quote characters ─────────────────────────────
+
+describe('geocodeAddress — strip-all-quotes fallback (variant 3)', () => {
+  it('primary + gershayim swap both empty → tries stripped variant and returns its hit', async () => {
+    // This is the real-world case that motivated variant 3: OSM tags the
+    // Israel street as "אלופי צהל" (no quote at all), so both quote-typed
+    // variants miss, but the stripped variant hits.
+    fetchMock
+      .mockResolvedValueOnce(ok([]))                                    // אלופי צה"ל 48, חולון
+      .mockResolvedValueOnce(ok([]))                                    // אלופי צה״ל 48, חולון
+      .mockResolvedValueOnce(ok([{ lat: '32.0103', lon: '34.7886' }])); // אלופי צהל 48, חולון
+
+    const res = await geocodeAddress('אלופי צה"ל 48, חולון');
+    expect(res).toEqual({ kind: 'hit', lat: 32.0103, lng: 34.7886 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const [urlPrimary]  = fetchMock.mock.calls[0];
+    const [urlAlt]      = fetchMock.mock.calls[1];
+    const [urlStripped] = fetchMock.mock.calls[2];
+    expect(urlPrimary ).toContain(encodeURIComponent('אלופי צה"ל 48, חולון'));
+    expect(urlAlt     ).toContain(encodeURIComponent('אלופי צה״ל 48, חולון'));
+    expect(urlStripped).toContain(encodeURIComponent('אלופי צהל 48, חולון'));
+  });
+
+  it('deduplicates variants — a no-quote query only fires ONE fetch', async () => {
+    // "nowhere" has no quote flavour to swap and nothing to strip → the
+    // three variant candidates all collapse to the same string, so we
+    // ONLY hit Nominatim once.
+    fetchMock.mockResolvedValueOnce(ok([]));
+    const res = await geocodeAddress('nowhere');
+    expect(res).toEqual({ kind: 'empty' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
