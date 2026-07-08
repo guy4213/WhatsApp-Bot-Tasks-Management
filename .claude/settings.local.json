@@ -64,7 +64,9 @@
       "Bash(Select-String -Pattern \"src/\\(ai/router|services/conversationContext\\)\")",
       "Bash(NODE_OPTIONS=\"--max-old-space-size=8192\" npx vitest run)",
       "Bash(NODE_OPTIONS=\"--max-old-space-size=8192\" npx vitest run --pool=forks)",
-      "Bash(NODE_OPTIONS=\"--max-old-space-size=8192\" npx vitest run src/__tests__/routerManagerMenu.test.ts)"
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=8192\" npx vitest run src/__tests__/routerManagerMenu.test.ts)",
+      "WebFetch(domain:developers.google.com)",
+      "WebFetch(domain:mapsplatform.google.com)"
     ],
     "additionalDirectories": [
       "C:\\Users\\guy42\\Documents\\WhatsApp-Bot-Tasks-Management"
