@@ -22,6 +22,9 @@ import {
 } from '../services/conversationContext';
 import { parseTravelMinutes } from './travelEta';
 import { resolveQuotedContext, recordTaskFieldRef, type QuotedContext } from '../services/messageRefs';
+import {
+  openTrackingSession, markArrived as markTrackingArrived, closeSession as closeTrackingSession,
+} from '../services/tracking';
 import { setViewOwners, getViewOwners, clearViewOwners } from '../services/viewContext';
 import { setActiveTask, getActiveTask } from '../services/taskContext';
 import { getHistory, appendTurn } from '../services/chatHistory';
@@ -2348,6 +2351,11 @@ async function performTransition(
   if (transition === 'FINISHED') {
     // finished_followup carries no activeInspection → the pointer is dropped.
     await setContext(user.phone, { awaiting: 'finished_followup', taskFieldId });
+    // Live-tracking (migration 016): close the customer-facing session.
+    // Best-effort — a tracking failure MUST NOT block the finished-followup menu.
+    void closeTrackingSession(taskFieldId, 'FINISHED').catch((err) => {
+      log.error({ err, taskFieldId }, 'closeTrackingSession(FINISHED) failed');
+    });
     await sendFinishedFollowUpMenu(user.phone);
     return;
   }
@@ -2356,6 +2364,13 @@ async function performTransition(
     // is the source of truth for the next "הגעתי"/"סיימתי", independent of the ETA.
     await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
       awaiting: 'status_eta_prompt',
+    });
+    // Live-tracking (migration 016): open a customer-facing session. Fires and
+    // forgets — a tracking failure MUST NOT block the worker's ETA prompt.
+    // openTrackingSession transactionally supersedes any prior ACTIVE|ARRIVED
+    // session this worker still owns.
+    void openTrackingSession({ taskFieldId, workerUserId: user.id }).catch((err) => {
+      log.error({ err, taskFieldId, workerUserId: user.id }, 'openTrackingSession failed');
     });
     const wamid = await sendTextMessage({ to: user.phone, text: departedEtaPrompt() });
     // Phase 2: quoted-reply context ref (best-effort). A reply to the ETA prompt
@@ -2368,6 +2383,10 @@ async function performTransition(
     // the same TaskField; go idle (neutral holder, not a live await).
     await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
       awaiting: 'idle_active_inspection',
+    });
+    // Live-tracking (migration 016): mark the session ARRIVED. Fire-and-forget.
+    void markTrackingArrived(taskFieldId).catch((err) => {
+      log.error({ err, taskFieldId }, 'markTrackingArrived failed');
     });
     const wamid = await sendTextMessage({ to: user.phone, text: `עדכנתי — סטטוס: ${STATUS_HE_LABEL[transition]}.` });
     await recordTaskFieldRef(wamid, taskFieldId, user.id, 'status_confirm');
@@ -2889,6 +2908,11 @@ async function handleInspectionDeclineReasonReply(
   const extracted = await extractNote(rawTrimmed, 'decline_reason');
   const reason = extracted ?? rawTrimmed;
   await declineInspection({ taskFieldId: ctx.taskFieldId, reason, updatedBy: user.id });
+  // Live-tracking (migration 016): close any ACTIVE|ARRIVED session on this
+  // TaskField as CANCELED — worker won't be arriving. Fire-and-forget.
+  void closeTrackingSession(ctx.taskFieldId, 'CANCELED').catch((err) => {
+    log.error({ err, taskFieldId: ctx.taskFieldId }, 'closeTrackingSession(CANCELED) failed');
+  });
   const sent = await notifyOfficeDeclined(ctx.taskFieldId, reason);
   await clearContext(user.phone);
   await sendTextMessage({ to: user.phone, text: officeNotifiedText(sent, 'office') });

@@ -9,6 +9,101 @@ Conventions:
 
 ---
 
+## 0.6 Live tracking foundation — Wolt-lite backend (2026-07-08)
+
+**Status:** DONE (local, uncommitted). Plan approved in-session — see
+`docs/LIVE_TRACKING_PLAN.md` for the full inspection report, migration sketch,
+questions locked in, and edge cases. Migration `016` NOT yet applied to Supabase.
+
+Converts the OwnTracks POC (0.3) into a backend tracking foundation. The POC
+proved OwnTracks can push GPS to the server; this step connects those pings to
+a specific TaskField so a future customer page can show "the inspector is on
+the way". Explicitly deferred: Google ETA, WebSocket, geofence, customer UI,
+customer WhatsApp template, cron expiry — all still in the "later, only if
+this passes" bucket, matching the POC discipline.
+
+**Behavior:** on "יצאתי" the router opens a `TrackingSession` for that exact
+TaskField with a fresh `publicToken`. Every subsequent OwnTracks ping upserts
+`WorkerLiveLocation` (single row per worker — history stays append-only in
+`PocLocationPing`) and bumps `TrackingSession.lastLocationAt` when the worker
+has an active session. "הגעתי" flips the session to `ARRIVED`; "סיימתי"
+closes it as `FINISHED`; DECLINE closes it as `CANCELED`. A public JSON view
+at `GET /tracking/:token` returns only the customer-safe whitelist
+(`status, taskFieldStatus, lastLocation, updatedAt, etaMinutes?`) with
+`Cache-Control: no-store`; unknown / malformed tokens are 404 without
+distinguishing "revoked" from "never existed" (no existence leak).
+
+**Invariant (approved refinement):** at most ONE active session per WORKER at
+any time. New "יצאתי" on a new TaskField transactionally supersedes the prior
+session as `SUPERSEDED` (`endedAt = now()`) before inserting the new row.
+Enforced by a partial unique index `uniq_trackingsession_active_per_worker`
+AND by explicit code in `openTrackingSession` — belt and suspenders. A second
+partial unique index enforces the per-TaskField invariant.
+
+**Files:**
+- `src/db/migrations/016_live_tracking.sql` — new `WorkerDeviceIdentity`
+  (workerKey UNIQUE → `User.id`, isActive), `WorkerLiveLocation` (PK on
+  `workerUserId`), `TrackingSession` (`taskFieldId uuid REFERENCES TaskField(id)`
+  matching migration 009, `workerUserId text REFERENCES User(id)`, status CHECK
+  including `SUPERSEDED`). RLS deny-all on all three. Idempotent.
+- `src/services/workerLocation.ts` — new. `resolveWorkerFromKey` (active only),
+  `upsertLiveLocation` (INSERT ... ON CONFLICT ("workerUserId") DO UPDATE, PK on
+  the user id; latest fix overwrites the previous one).
+- `src/services/tracking.ts` — new. Transactional `openTrackingSession`
+  (SUPERSEDE prior worker session + INSERT new in one BEGIN/COMMIT with
+  ROLLBACK-on-throw); `markArrived`; `closeSession` (idempotent, WHERE guards
+  on ACTIVE|ARRIVED); `bumpSessionLocation`; `getPublicView` (lazy expiry on
+  read, terminal-safe field whitelist); `listActiveSessions` (debug).
+- `src/routes/owntracksPoc.ts` — after the POC insert, best-effort fan-out to
+  `upsertLiveLocation` + `bumpSessionLocation`. Never fails the ack.
+- `src/routes/tracking.ts` — new. `GET /tracking/:token` (public, token
+  whitelist regex, 404-no-leak, no-store cache), `GET /tracking/debug/sessions`
+  (internal, x-internal-secret guard mirrors `routes/tasks.ts`).
+- `src/app.ts` — registers `trackingRoutes`.
+- `src/ai/router.ts` `performTransition` — fire-and-forget hooks:
+  DEPARTED → `openTrackingSession`, ARRIVED → `markArrived`, FINISHED →
+  `closeSession('FINISHED')`. Tracking failures are logged and swallowed —
+  they must NOT block the status write or the worker's ETA prompt.
+- `src/ai/router.ts` decline reply handler — `closeSession('CANCELED')` on
+  worker DECLINE (single call site, verified by grep — no other DECLINED /
+  CANCELED write path exists in the bot).
+
+**Env:** none new.
+
+**QA:**
+- `npx tsc --noEmit` — clean.
+- Full `vitest run` — 1382 passing / 7 skipped / 74 files. Pre-existing
+  intermittent "Worker exited unexpectedly" pool flake unchanged.
+- New tests (20 cases, colocated under `src/__tests__/`):
+  - `tracking.test.ts` — `openTrackingSession` transaction ordering (BEGIN →
+    SUPERSEDE UPDATE → INSERT → COMMIT); `supersededCount` reported; ROLLBACK
+    on INSERT throw + client released; `markArrived` only touches ACTIVE;
+    `closeSession` idempotent + reason parameterized; `bumpSessionLocation`
+    scoped by worker + status; `getPublicView` null-on-unknown, ACTIVE →
+    full payload, expired ACTIVE → EXPIRED + location dropped, FINISHED →
+    location dropped; internal ids never appear in the public payload;
+    `listActiveSessions` filters + orders correctly.
+  - `trackingRoute.test.ts` — token regex rejects malformed BEFORE DB call;
+    404 semantics on unknown; `Cache-Control: no-store`; debug body shape.
+  - `workerLocation.test.ts` — `resolveWorkerFromKey` requires `isActive=true`;
+    `upsertLiveLocation` uses ON CONFLICT DO UPDATE, server-side `lastSeenAt`,
+    optional fields null-safe, raw JSON-serialized.
+- Existing router tests (`routerActiveInspection`, `routerInspections`)
+  updated with a no-op `services/tracking` mock so their fire-and-forget log
+  noise stays silent. All 76 assertions in those two files pass unchanged.
+
+**Deviations / notes:**
+- Migration `016` NOT yet applied to Supabase. Do NOT run without approval.
+- Nothing deployed to Render — new `/tracking` route lands on next deploy only.
+- `PocLocationPing` (migration 013) kept — the POC diagnostic surface is
+  unchanged, `GET /owntracks/poc/debug` still works.
+- The `expiresAt` cron sweep is intentionally out of scope. Sessions are
+  lazily marked `EXPIRED` on read; a scheduler job can be added later.
+- No `BOT_CAPABILITIES.md` update — this is backend foundation only, no new
+  user-facing capability yet.
+
+---
+
 ## 0.5 Quoted-message context infrastructure — Phase 2 (2026-07-07)
 
 **Status:** DONE (local, uncommitted)

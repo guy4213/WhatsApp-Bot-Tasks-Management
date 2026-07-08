@@ -62,6 +62,17 @@ vi.mock('../whatsapp/sender', () => ({
   sendListMessage:   (...a: unknown[]) => sendListMessage(...a),
 }));
 
+// ── tracking (migration 016) — router calls fire-and-forget; stub as no-ops so
+//    they don't try to reach the real pool from these logic-only tests.
+vi.mock('../services/tracking', () => ({
+  openTrackingSession:  vi.fn().mockResolvedValue({ sessionId: 's', publicToken: 't', supersededCount: 0 }),
+  markArrived:          vi.fn().mockResolvedValue(undefined),
+  closeSession:         vi.fn().mockResolvedValue(undefined),
+  bumpSessionLocation:  vi.fn().mockResolvedValue(undefined),
+  getPublicView:        vi.fn().mockResolvedValue(null),
+  listActiveSessions:   vi.fn().mockResolvedValue([]),
+}));
+
 // Conversation context: simple in-memory state so we can drive multi-turn.
 let ctxStore: Record<string, unknown> | null = null;
 const setContext = vi.fn(async (_phone: string, state: unknown) => {

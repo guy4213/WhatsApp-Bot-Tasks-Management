@@ -22,6 +22,17 @@ const parseIntentMock = vi.fn();
 vi.mock('../ai/intentParser', () => ({ parseIntent: (...a: unknown[]) => parseIntentMock(...a) }));
 vi.mock('../ai/provider', () => ({ getProvider: () => ({ name: 'test' }) }));
 
+// ── tracking (migration 016) — router calls fire-and-forget; stub as no-ops so
+//    they don't try to reach the real pool from these logic-only tests.
+vi.mock('../services/tracking', () => ({
+  openTrackingSession:  vi.fn().mockResolvedValue({ sessionId: 's', publicToken: 't', supersededCount: 0 }),
+  markArrived:          vi.fn().mockResolvedValue(undefined),
+  closeSession:         vi.fn().mockResolvedValue(undefined),
+  bumpSessionLocation:  vi.fn().mockResolvedValue(undefined),
+  getPublicView:        vi.fn().mockResolvedValue(null),
+  listActiveSessions:   vi.fn().mockResolvedValue([]),
+}));
+
 // ── conversation context — stateful, incl. the active-task pointer ─────────────
 let ctxStore: Record<string, unknown> | null = null;
 const setContext = vi.fn(async (_p: string, state: unknown) => { ctxStore = state as Record<string, unknown>; });

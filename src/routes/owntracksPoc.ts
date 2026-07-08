@@ -25,6 +25,8 @@ import crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import { pool } from '../db/connection';
 import { moduleLogger } from '../utils/logger';
+import { resolveWorkerFromKey, upsertLiveLocation } from '../services/workerLocation';
+import { bumpSessionLocation } from '../services/tracking';
 
 const log = moduleLogger('owntracks-poc');
 
@@ -157,6 +159,39 @@ export async function owntracksPocRoutes(app: FastifyInstance) {
       log.error({ err, workerKey }, 'Failed to store OwnTracks location');
       // Still ack — OwnTracks queues on non-2xx and would retransmit; for the POC
       // we don't want a transient DB blip to back up the phone's queue endlessly.
+    }
+
+    // Migration 016: live-tracking fan-out. Best-effort, MUST NOT fail the ack.
+    // - resolveWorkerFromKey maps the OwnTracks basic-auth username → User.id.
+    //   Null = unmapped device → POC diagnostics only, no live tracking.
+    // - upsertLiveLocation overwrites the worker's single latest-fix row.
+    // - bumpSessionLocation touches the worker's ACTIVE|ARRIVED TrackingSession
+    //   (no-op when the worker isn't currently en route).
+    // Any failure here is logged and swallowed — same rationale as the POC insert
+    // above: don't turn a transient bot-side blip into an OwnTracks retransmit
+    // storm from the phone.
+    if (lat != null && lng != null) {
+      try {
+        const workerUserId = await resolveWorkerFromKey(workerKey);
+        if (workerUserId) {
+          await upsertLiveLocation({
+            workerUserId,
+            workerKey,
+            deviceId,
+            lat,
+            lng,
+            accuracy: acc,
+            speed: vel,
+            battery: batt,
+            trigger,
+            recordedAt: tst != null ? new Date(tst * 1000) : null,
+            raw: body,
+          });
+          await bumpSessionLocation(workerUserId);
+        }
+      } catch (err) {
+        log.error({ err, workerKey }, 'Live-tracking fan-out failed (ack still sent)');
+      }
     }
 
     return reply.send([]);
