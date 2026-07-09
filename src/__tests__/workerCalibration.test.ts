@@ -61,11 +61,11 @@ describe('resolveCalibration — happy path', () => {
 });
 
 describe('resolveCalibration — refuses outside the departure window', () => {
-  it('returns null when the poll arrives > 10 min after departedAt AND no cache', () => {
+  it('returns null when the poll arrives > 20 min after departedAt AND no cache', () => {
     const ratio = resolveCalibration({
       taskFieldId: TF,
       travelEtaMinutes: 55,
-      departedAt: new Date(T0.getTime() - 11 * 60 * 1000), // 11 min ago
+      departedAt: new Date(T0.getTime() - 21 * 60 * 1000), // 21 min ago
       currentBaseSeconds: 12 * 60,
       now: T0,
     });
@@ -73,25 +73,26 @@ describe('resolveCalibration — refuses outside the departure window', () => {
     expect(_peekCalibration(TF)).toBeUndefined();
   });
 
-  it('accepts capture inside the 10-min window (edge: exactly 10 min)', () => {
+  it('accepts capture at the 20-min boundary (edge)', () => {
     const ratio = resolveCalibration({
       taskFieldId: TF,
       travelEtaMinutes: 55,
-      departedAt: new Date(T0.getTime() - 10 * 60 * 1000),
+      departedAt: new Date(T0.getTime() - 20 * 60 * 1000),
       currentBaseSeconds: 24 * 60,
       now: T0,
     });
     expect(ratio).not.toBeNull();
   });
 
-  it('accepts capture at 8 min post-departure (widened window covers typical customer open-times)', () => {
-    // The 5-min window before the 2026-07-09 widening was routinely missed —
-    // customers opened the tracking link a few minutes after receiving the
-    // WhatsApp message. This case documents the fix.
+  it('accepts capture at 15 min post-departure (widened window covers typical customer open-times)', () => {
+    // The 5-min window before the 2026-07-09 widening was routinely missed
+    // because the customer opened the tracking link a few minutes after
+    // receiving the WhatsApp message. Two widenings (5→10→20) later, this
+    // case documents the current tolerance.
     const ratio = resolveCalibration({
       taskFieldId: TF,
       travelEtaMinutes: 55,
-      departedAt: new Date(T0.getTime() - 8 * 60 * 1000),
+      departedAt: new Date(T0.getTime() - 15 * 60 * 1000),
       currentBaseSeconds: 24 * 60,
       now: T0,
     });

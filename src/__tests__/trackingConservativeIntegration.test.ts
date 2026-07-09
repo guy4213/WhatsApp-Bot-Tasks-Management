@@ -148,21 +148,23 @@ describe('getPublicView — worker calibration path', () => {
   });
 });
 
-// ── Priority 2: countdown fallback ──────────────────────────────────────
+// ── expectedArrivalAt is NEVER an ETA source (countdown removed) ────────
 
-describe('getPublicView — countdown fallback', () => {
-  it('uses expectedArrivalAt when no calibration is available (outside dep window)', async () => {
-    // No calibration cache; departure is 20 min ago (outside 5-min window).
+describe('getPublicView — expectedArrivalAt is ignored as an ETA source', () => {
+  it('falls to hourly when no calibration (past window) — NOT to expectedArrivalAt countdown', async () => {
+    // No calibration cache; departure is 25 min ago (outside 20-min window).
+    // Even with `expectedArrivalAt` set, the ETA must NOT decay over time —
+    // it must be `currentBase × hourly` (location-driven).
     const expectedArrivalAt = new Date(NOW.getTime() + 30 * 60 * 1000).toISOString();
-    const departedAt = new Date(NOW.getTime() - 20 * 60 * 1000).toISOString();
+    const departedAt = new Date(NOW.getTime() - 25 * 60 * 1000).toISOString();
     poolQuery.mockResolvedValueOnce({
       rows: [joinedRow({ travelEtaMinutes: 55, departedAt, expectedArrivalAt })],
     });
     mockRoute(15_000, 15 * 60);
     const view = await getPublicView(TOKEN);
-    // Countdown = 30 min + 3 buffer = 33 → round up 35.
-    expect(view?.etaMinutes).toBe(35);
-    expect(view?.etaText).toBe('זמן הגעה משוער: 35 דקות');
+    // Hourly at Wed 14:00 IL = 1.25. 15 min × 1.25 + 3 buffer = 21.75 → round up 25.
+    expect(view?.etaMinutes).toBe(25);
+    expect(view?.etaText).toBe('זמן הגעה משוער: 25 דקות');
   });
 });
 
@@ -186,10 +188,12 @@ describe('getPublicView — hourly multiplier fallback', () => {
 describe('getPublicView — stale GPS', () => {
   it('appends "(הערכה בלבד)" when the location is not fresh', async () => {
     // Set the last-seen to 5 min ago so it exceeds the default TRACKING_STALE_SECONDS (120s).
+    // With countdown removed, we need `travelEtaMinutes` so the composer has
+    // a worker_only source once the route is skipped for staleness.
     const staleAt = new Date(NOW.getTime() - 5 * 60 * 1000).toISOString();
     const expectedArrivalAt = new Date(NOW.getTime() + 20 * 60 * 1000).toISOString();
     poolQuery.mockResolvedValueOnce({
-      rows: [joinedRow({ lastSeenAt: staleAt, expectedArrivalAt })],
+      rows: [joinedRow({ lastSeenAt: staleAt, expectedArrivalAt, travelEtaMinutes: 20 })],
     });
     // Stale gate in tracking.ts short-circuits route calls — mock is unused
     // but harmless.

@@ -8,11 +8,15 @@
  * "יצאתי"), a straightforward countdown, or a hand-tuned conservative
  * fallback. Callers, comments, logs — none of them may say "traffic".
  *
- * Priority stack (first available wins):
- *   1. Worker calibration ratio × currentBase   ← reflects live Waze at "יצאתי"
- *   2. Countdown from `expectedArrivalAt`       ← countdown from worker's declaration
- *   3. Hourly load multiplier × currentBase     ← rush-hour aware fallback
- *   4. Worker's raw `travelEtaMinutes`          ← if no GPS/base at all
+ * Priority stack (first available wins) — ALL sources except `worker_only`
+ * are location-driven. The displayed value must NOT decrement between GPS
+ * polls; time-based countdown was removed on 2026-07-09 after the customer
+ * complained that the ETA changed without the worker actually driving.
+ *
+ *   1. Worker calibration ratio × currentBase   ← reflects Waze at "יצאתי"
+ *   2. Hourly load multiplier × currentBase     ← no-calibration fallback
+ *   3. Worker's raw `travelEtaMinutes`          ← if no GPS/base at all
+ *                                                (constant — no decrement)
  *
  * After picking the raw seconds, the following layers ALWAYS run in order:
  *   A. `progressState` modifier:
@@ -41,7 +45,7 @@ const MAX_REDUCTION_PCT         = 25;    // never drop the shown ETA more than 2
 const SLOW_PROGRESS_FACTOR      = 1.25;  // "slow" progress bump
 
 /** Which layer supplied the raw seconds — internal, useful for logs/tests. */
-export type EtaSource = 'calibration' | 'countdown' | 'hourly' | 'worker_only';
+export type EtaSource = 'calibration' | 'hourly' | 'worker_only';
 
 export interface ConservativeEtaInput {
   /** Fresh route duration from ORS/OSRM. `null` when there is no GPS or no route. */
@@ -133,7 +137,7 @@ export function computeConservativeEta(input: ConservativeEtaInput): Conservativ
 
 function pickRawSeconds(input: ConservativeEtaInput): { seconds: number; source: EtaSource } | null {
   // 1. Calibration × current base — worker's Waze reading applied dynamically
-  //    to the current GPS-driven route length.
+  //    to the current GPS-driven route length. Location-driven ✓.
   if (
     input.calibrationRatio != null &&
     Number.isFinite(input.calibrationRatio) &&
@@ -144,21 +148,10 @@ function pickRawSeconds(input: ConservativeEtaInput): { seconds: number; source:
     return { seconds: input.baseRouteSeconds * input.calibrationRatio, source: 'calibration' };
   }
 
-  // 2. Countdown from expectedArrivalAt — worker declared "I'll arrive at X",
-  //    we count down the remaining time. Handles server restart / multi-instance
-  //    gracefully because the timestamp is in the DB.
-  if (input.expectedArrivalAt) {
-    const remainingMs = input.expectedArrivalAt.getTime() - input.now.getTime();
-    if (remainingMs > 0) {
-      return { seconds: remainingMs / 1000, source: 'countdown' };
-    }
-    // Past the arrival deadline — fall through to hourly/worker so we don't
-    // show a negative countdown.
-  }
-
-  // 3. Hourly load multiplier applied to the current base route. This is the
-  //    "no worker calibration" fallback for a customer who opens the page
-  //    without the driver having entered a Waze reading (or after cache reset).
+  // 2. Hourly load multiplier × current base. Also location-driven ✓ — the
+  //    value shrinks only when a new GPS poll gives a shorter base route.
+  //    Deliberately does NOT depend on `expectedArrivalAt`, so the customer
+  //    doesn't see the ETA drop while the worker is standing still.
   if (
     input.baseRouteSeconds != null &&
     Number.isFinite(input.baseRouteSeconds) &&
@@ -168,8 +161,9 @@ function pickRawSeconds(input: ConservativeEtaInput): { seconds: number; source:
     return { seconds: input.baseRouteSeconds * factor, source: 'hourly' };
   }
 
-  // 4. Worker's raw `travelEtaMinutes` — only when there is no base at all
-  //    (typically means "no GPS yet"). Better than nothing.
+  // 3. Worker's raw `travelEtaMinutes` — only when there is no base at all
+  //    (typically means "no GPS yet"). CONSTANT until a poll returns GPS —
+  //    never a time-based decrement.
   if (input.travelEtaMinutes != null && input.travelEtaMinutes > 0) {
     return { seconds: input.travelEtaMinutes * 60, source: 'worker_only' };
   }

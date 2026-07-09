@@ -27,7 +27,10 @@ describe('computeConservativeEta — source selection', () => {
     expect(r.source).toBe('calibration');
   });
 
-  it("falls back to 'countdown' from expectedArrivalAt when no calibration/base", () => {
+  it("does NOT use expectedArrivalAt as a source (countdown was removed 2026-07-09)", () => {
+    // Even with a valid `expectedArrivalAt` and a `travelEtaMinutes`, the
+    // composer must NOT decay ETA over time. Without a base it falls to
+    // 'worker_only' (constant).
     const r = computeConservativeEta({
       baseRouteSeconds: null,
       calibrationRatio: null,
@@ -38,7 +41,7 @@ describe('computeConservativeEta — source selection', () => {
       previousDisplayedEtaMinutes: null,
       now: NOW,
     });
-    expect(r.source).toBe('countdown');
+    expect(r.source).toBe('worker_only');
   });
 
   it("falls back to 'hourly' when calibration is missing but base is available", () => {
@@ -87,18 +90,19 @@ describe('computeConservativeEta — source selection', () => {
     expect(r.etaText).toBeNull();
   });
 
-  it('past expectedArrivalAt does not become negative countdown — falls through', () => {
+  it('expectedArrivalAt is ignored entirely — hourly wins over any future arrival time', () => {
+    // Verify the countdown removal by giving both a FUTURE expectedArrivalAt
+    // and a base — hourly must win, not countdown.
     const r = computeConservativeEta({
       baseRouteSeconds: 20 * 60,
       calibrationRatio: null,
-      expectedArrivalAt: new Date(NOW.getTime() - 5 * 60 * 1000), // already past
+      expectedArrivalAt: new Date(NOW.getTime() + 30 * 60 * 1000), // future
       travelEtaMinutes: null,
       progressState: 'progressing',
       isLocationFresh: true,
       previousDisplayedEtaMinutes: null,
       now: NOW,
     });
-    // Falls through to hourly.
     expect(r.source).toBe('hourly');
   });
 });
@@ -252,11 +256,14 @@ describe('computeConservativeEta — text', () => {
   });
 
   it('appends "(הערכה בלבד)" when the location is stale', () => {
+    // With countdown removed, we need a location-driven source. Use
+    // `travelEtaMinutes` (worker_only path) which is constant and doesn't
+    // require GPS — a valid stale-location scenario.
     const r = computeConservativeEta({
       baseRouteSeconds: null,
       calibrationRatio: null,
-      expectedArrivalAt: new Date(NOW.getTime() + 20 * 60 * 1000),
-      travelEtaMinutes: null,
+      expectedArrivalAt: null,
+      travelEtaMinutes: 20,
       progressState: 'unknown',
       isLocationFresh: false,
       previousDisplayedEtaMinutes: null,
