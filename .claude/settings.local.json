@@ -68,7 +68,8 @@
       "WebFetch(domain:developers.google.com)",
       "WebFetch(domain:mapsplatform.google.com)",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(python -m json.tool)"
+      "Bash(python -m json.tool)",
+      "Bash(TF=2640132b-f324-4226-9c90-c43a19d3c940 npx tsx scripts/qa-inspect-tf.ts)"
     ],
     "additionalDirectories": [
       "C:\\Users\\guy42\\Documents\\WhatsApp-Bot-Tasks-Management"
