@@ -27,7 +27,14 @@ import crypto from 'crypto';
 import { pool } from '../db/connection';
 import { moduleLogger } from '../utils/logger';
 import { resolveTaskFieldDestination } from './siteGeocodeCache';
-import { getRoadRoute, type LatLng } from './osrmRoute';
+import { getRouteEstimate, type LatLng } from './routeProvider';
+import { resolveCalibration } from './workerCalibration';
+import {
+  sampleProgress,
+  readPreviousDisplayedEta,
+  commitDisplayedEta,
+} from './progressDetector';
+import { computeConservativeEta } from './conservativeEta';
 
 const log = moduleLogger('tracking');
 
@@ -310,16 +317,6 @@ function straightLineGeometry(a: LatLng, b: LatLng): unknown {
   };
 }
 
-/** `HH:MM` in Asia/Jerusalem, for the "הגעה משוערת: HH:MM" ETA sentence. */
-function formatJerusalemTime(iso: string): string {
-  return new Intl.DateTimeFormat('he-IL', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Asia/Jerusalem',
-  }).format(new Date(iso));
-}
-
 interface JoinedRow {
   taskFieldId: string;
   status: TrackingSessionStatus;
@@ -335,6 +332,8 @@ interface JoinedRow {
   liveAt: string | null;
   travelEtaMinutes: number | null;
   expectedArrivalAt: string | null;
+  /** `TaskField.departedAt` — anchor for `workerCalibration` freshness window. */
+  departedAt: string | null;
 }
 
 /**
@@ -361,7 +360,8 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
             wll.accuracy,
             wll."lastSeenAt"        AS "liveAt",
             tf."travelEtaMinutes",
-            tf."expectedArrivalAt"
+            tf."expectedArrivalAt",
+            tf."departedAt"
        FROM "TrackingSession"   s
        JOIN "TaskField"         tf  ON tf.id            = s."taskFieldId"
   LEFT JOIN "WorkerLiveLocation" wll ON wll."workerUserId" = s."workerUserId"
@@ -410,12 +410,9 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
     view.isLocationFresh = freshnessSeconds <= staleThresholdSeconds();
   }
 
-  // Legacy fields kept exactly as before (ACTIVE-only, unconditional expose
-  // of expectedArrivalAt regardless of "future" — that gate only affects
-  // whether it's chosen as an ETA *source*, see computeEta below).
-  if (effectiveStatus === 'ACTIVE' && row.travelEtaMinutes != null) {
-    view.etaMinutes = row.travelEtaMinutes;
-  }
+  // Expose the worker's planned arrival stamp for the template — display
+  // separate from `etaMinutes`, which is derived by `computeConservativeEta`
+  // below.
   if (effectiveStatus === 'ACTIVE' && row.expectedArrivalAt) {
     view.expectedArrivalAt = row.expectedArrivalAt;
   }
@@ -456,21 +453,28 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
       fallbackReason = 'STALE_LOCATION';
     } else {
       const distance = haversineMeters(worker, dest);
-      const osrm = await getRoadRoute(worker, dest);
-      if (osrm) {
+      // routeProvider picks ORS or OSRM per TRACKING_ROUTE_PROVIDER + handles
+      // ORS→OSRM fallback transparently. `route.type = 'OSRM'` stays for the
+      // template's road-vs-straight-line branch — the underlying provider is
+      // an internal detail.
+      const routeEstimate = await getRouteEstimate(worker, dest);
+      if (routeEstimate) {
         view.route = {
           type: 'OSRM',
-          geometry: osrm.geometry,
-          distanceMeters: osrm.distanceMeters,
-          durationSeconds: osrm.durationSeconds,
+          geometry: routeEstimate.geometry,
+          distanceMeters: routeEstimate.distanceMeters,
+          durationSeconds: routeEstimate.durationSeconds,
         };
-        view.distanceMeters = osrm.distanceMeters;
-        view.durationSeconds = osrm.durationSeconds;
+        view.distanceMeters = routeEstimate.distanceMeters;
+        view.durationSeconds = routeEstimate.durationSeconds;
         view.isRouteAvailable = true;
       } else {
         view.route = { type: 'STRAIGHT_LINE', geometry: straightLineGeometry(worker, dest), distanceMeters: distance };
         view.distanceMeters = distance;
-        fallbackReason = process.env.TRACKING_OSRM_ENABLED === 'true' ? 'OSRM_FAILED' : 'OSRM_DISABLED';
+        const routingConfigured =
+          process.env.TRACKING_ROUTE_PROVIDER === 'openrouteservice' ||
+          process.env.TRACKING_OSRM_ENABLED === 'true';
+        fallbackReason = routingConfigured ? 'OSRM_FAILED' : 'OSRM_DISABLED';
       }
     }
   }
@@ -498,25 +502,50 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
   }
   view.headline = HEADLINES[view.presentationStatus];
 
-  // ETA priority chain (ACTIVE only — ARRIVED/terminal need no ETA).
+  // Conservative ETA — replaces the old priority chain.
+  //
+  // Precedence:
+  //  1. Worker calibration (Waze reading × current base route) — best signal.
+  //  2. Countdown from `expectedArrivalAt` — survives restart / cache reset.
+  //  3. Hourly load multiplier × current base — no-calibration fallback.
+  //  4. Raw `travelEtaMinutes` — last resort when there is no base at all.
+  //
+  // Never presents an ORS/OSRM raw duration without a fallback layer around
+  // it. `computeConservativeEta` also handles: last-mile buffer, floor,
+  // anti-jump / freeze-on-not-progressing, round-up to 5 min, and the
+  // "(הערכה בלבד)" suffix on stale locations.
   if (effectiveStatus === 'ACTIVE') {
-    if (view.isLocationFresh && view.route?.type === 'OSRM' && view.durationSeconds != null) {
-      view.etaMinutes = Math.ceil(view.durationSeconds / 60);
-      view.etaText = `זמן הגעה משוער: ${view.etaMinutes} דקות`;
-    } else if (row.expectedArrivalAt && new Date(row.expectedArrivalAt).getTime() > now) {
-      const minutes = Math.max(0, Math.ceil((new Date(row.expectedArrivalAt).getTime() - now) / 60000));
-      view.etaMinutes = minutes;
-      view.etaText = `הגעה משוערת: ${formatJerusalemTime(row.expectedArrivalAt)}`;
-    } else if (row.travelEtaMinutes != null) {
-      view.etaMinutes = row.travelEtaMinutes;
-      view.etaText = `זמן הגעה משוער: ${row.travelEtaMinutes} דקות (לפי דיווח הבודק)`;
+    const nowDate = new Date(now);
+    const progressState = sampleProgress(token, view.distanceMeters ?? null, nowDate);
+    const previousDisplayedEtaMinutes = readPreviousDisplayedEta(token);
+
+    const departedAtDate = row.departedAt ? new Date(row.departedAt) : null;
+    const baseRouteSeconds = view.durationSeconds ?? null;
+    const calibrationRatio = resolveCalibration({
+      taskFieldId: row.taskFieldId,
+      travelEtaMinutes: row.travelEtaMinutes,
+      departedAt: departedAtDate,
+      currentBaseSeconds: baseRouteSeconds,
+      now: nowDate,
+    });
+
+    const eta = computeConservativeEta({
+      baseRouteSeconds,
+      calibrationRatio,
+      expectedArrivalAt: row.expectedArrivalAt ? new Date(row.expectedArrivalAt) : null,
+      travelEtaMinutes: row.travelEtaMinutes,
+      progressState,
+      isLocationFresh: view.isLocationFresh,
+      previousDisplayedEtaMinutes,
+      now: nowDate,
+    });
+
+    if (eta.etaMinutes != null && eta.etaText != null) {
+      view.etaMinutes = eta.etaMinutes;
+      view.etaText = eta.etaText;
+      commitDisplayedEta(token, eta.etaMinutes, nowDate);
     } else if (!fallbackReason) {
       fallbackReason = 'NO_ETA_SOURCE';
-    }
-
-    // Stale location: still show the best available ETA, but mark it as an estimate.
-    if (hasLocation && !view.isLocationFresh && view.etaText) {
-      view.etaText += ' (הערכה בלבד)';
     }
   }
 

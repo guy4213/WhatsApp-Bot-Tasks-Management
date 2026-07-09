@@ -37,13 +37,35 @@ vi.mock('../services/siteGeocodeCache', () => ({
   resolveTaskFieldDestination: (...a: unknown[]) => resolveDestMock(...a),
 }));
 
-// OSRM road-routing is a separate service (TRACK-A) — mock so getPublicView
-// tests never touch the network; unit tests for `osrmRoute.ts` itself live
-// in `osrmRoute.test.ts`.
+// Route provider is a separate service — mock so getPublicView tests never
+// touch the network. Unit tests for `orsRoute.ts` / `osrmRoute.ts` /
+// `routeProvider.ts` themselves live in their own files. We keep the shorthand
+// name `getRoadRouteMock` for minimal-diff churn — every existing test that
+// stubs it continues to work, the mock just returns the same shape wrapped in
+// `provider: 'osrm'` for whatever `routeProvider.getRouteEstimate` sees.
 const getRoadRouteMock = vi.fn();
-vi.mock('../services/osrmRoute', () => ({
-  getRoadRoute: (...a: unknown[]) => getRoadRouteMock(...a),
+vi.mock('../services/routeProvider', () => ({
+  getRouteEstimate: async (...a: unknown[]) => {
+    const r = await getRoadRouteMock(...a);
+    return r ? { ...r, provider: 'osrm' as const } : null;
+  },
 }));
+// Legacy OSRM mock — kept as a no-op so any test that still uses the old
+// import path doesn't try to hit the real OSRM server. Not otherwise wired.
+vi.mock('../services/osrmRoute', () => ({
+  getRoadRoute: vi.fn().mockResolvedValue(null),
+}));
+// Conservative ETA layers keep in-memory state per session token. Clear
+// between tests so a previously-cached calibration / progress sample doesn't
+// leak into an assertion in the next test.
+import { _clearCalibrationCache } from '../services/workerCalibration';
+import { _clearSessionState } from '../services/progressDetector';
+
+// Pin "now" so hourly-load-multiplier and freshness math don't drift. Wed
+// 2026-07-08 11:00Z = 14:00 IL → hourlyLoadMultiplier = 1.25. Every test that
+// uses `Date.now()` for building relative timestamps still works because
+// `Date.now()` also observes this pinned time.
+const PINNED_NOW = new Date('2026-07-08T11:00:00.000Z');
 
 beforeEach(() => {
   poolQuery.mockReset();
@@ -54,13 +76,18 @@ beforeEach(() => {
   // Default: no destination unless a specific test opts in.
   resolveDestMock.mockResolvedValue(null);
   getRoadRouteMock.mockReset();
-  // Default: OSRM unreachable/disabled unless a specific test opts in.
+  // Default: no route unless a specific test opts in.
   getRoadRouteMock.mockResolvedValue(null);
+  _clearCalibrationCache();
+  _clearSessionState();
   delete process.env.TRACKING_OSRM_ENABLED;
+  delete process.env.TRACKING_ROUTE_PROVIDER;
   delete process.env.TRACKING_STALE_SECONDS;
   delete process.env.TRACKING_NEARBY_METERS;
+  vi.useFakeTimers({ now: PINNED_NOW });
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -229,13 +256,13 @@ describe('getPublicView', () => {
       lastLocation: { lat: 32.0853, lng: 34.7818, at: '2026-07-08T09:00:00Z', accuracy: 15 },
       expectedArrivalAt: '2026-07-08T09:25:00Z',
     });
-    // etaMinutes is now the *prioritized* ETA value (TRACK-A) rather than a
-    // raw passthrough of travelEtaMinutes — an intended improvement. This
-    // fixture's location is far too stale (fixed 2026-07-08 timestamp) to
-    // win priority (1), but `expectedArrivalAt` (2026-07-08T09:25:00Z) is
-    // also in the past relative to "now", so priority (2) doesn't win
-    // either — it falls through to travelEtaMinutes (priority 3).
-    expect(view?.etaMinutes).toBe(25);
+    // etaMinutes is now derived by Conservative ETA. Fixed 2026-07-08
+    // timestamps mean the location is stale relative to real "now", so no
+    // route call runs → no base seconds → expectedArrivalAt is in the past →
+    // falls through to the worker_only branch (travelEtaMinutes=25). The
+    // composer adds the 3-min last-mile buffer and rounds up to the next 5,
+    // yielding 30 rather than the raw 25 the old passthrough exposed.
+    expect(view?.etaMinutes).toBe(30);
     // New additive fields are present and well-typed.
     expect(typeof view?.headline).toBe('string');
     expect(typeof view?.isLocationFresh).toBe('boolean');
@@ -413,8 +440,11 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
     expect(view?.distanceMeters).toBe(6000);
     expect(view?.durationSeconds).toBe(600);
     expect(view?.isRouteAvailable).toBe(true);
-    expect(view?.etaMinutes).toBe(10); // ceil(600/60)
-    expect(view?.etaText).toBe('זמן הגעה משוער: 10 דקות');
+    // Conservative ETA at PINNED_NOW (Wed 14:00 IL, hourly=1.25): no
+    // calibration nor countdown source in this fixture → hourly wins.
+    // 600s × 1.25 + 180s buffer = 930s = 15.5 min → round up 20.
+    expect(view?.etaMinutes).toBe(20);
+    expect(view?.etaText).toBe('זמן הגעה משוער: 20 דקות');
     expect(view?.fallbackReason).toBeUndefined();
     expect(view?.isLocationFresh).toBe(true);
   });
@@ -434,9 +464,12 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
     expect(view?.distanceMeters).toBeGreaterThan(0);
     expect(view?.isRouteAvailable).toBe(false);
     expect(view?.fallbackReason).toBe('OSRM_FAILED');
-    // Falls through to priority (2): expectedArrivalAt.
-    expect(view?.etaText).toMatch(/^הגעה משוערת: \d{2}:\d{2}$/);
-    expect(view?.etaMinutes).toBeGreaterThan(0);
+    // Falls through to countdown from expectedArrivalAt (15 min ahead of
+    // PINNED_NOW). 15 + 3 buffer = 18 → round up 20. Text is the unified
+    // Hebrew phrasing — the old "הגעה משוערת: HH:MM" wall-clock text was
+    // dropped when Conservative ETA landed.
+    expect(view?.etaMinutes).toBe(20);
+    expect(view?.etaText).toBe('זמן הגעה משוער: 20 דקות');
   });
 
   it('OSRM disabled (default) + fresh + no expectedArrivalAt → STRAIGHT_LINE, fallbackReason OSRM_DISABLED, eta from travelEtaMinutes', async () => {
@@ -448,8 +481,12 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
 
     expect(view?.route?.type).toBe('STRAIGHT_LINE');
     expect(view?.fallbackReason).toBe('OSRM_DISABLED');
-    expect(view?.etaMinutes).toBe(18);
-    expect(view?.etaText).toBe('זמן הגעה משוער: 18 דקות (לפי דיווח הבודק)');
+    // No base route (straight-line only), no expectedArrivalAt → worker_only
+    // priority: 18 min × 60 + 180s buffer = 1260s = 21 → round up 25.
+    // The "(לפי דיווח הבודק)" annotation no longer appears — Conservative
+    // ETA uses the unified "זמן הגעה משוער" phrasing everywhere.
+    expect(view?.etaMinutes).toBe(25);
+    expect(view?.etaText).toBe('זמן הגעה משוער: 25 דקות');
   });
 
   it('stale location → STALE_LOCATION, OSRM is never called, etaText is marked as an estimate', async () => {
@@ -467,8 +504,11 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
     expect(getRoadRouteMock).not.toHaveBeenCalled();
     expect(view?.route?.type).toBe('STRAIGHT_LINE');
     expect(view?.fallbackReason).toBe('STALE_LOCATION');
-    expect(view?.etaMinutes).toBe(12);
-    expect(view?.etaText).toBe('זמן הגעה משוער: 12 דקות (לפי דיווח הבודק) (הערכה בלבד)');
+    // No base (stale → route skipped), no expectedArrivalAt → worker_only
+    // priority: 12 min × 60 + 180s buffer = 900s = 15 → round up 15.
+    // Stale location appends "(הערכה בלבד)".
+    expect(view?.etaMinutes).toBe(15);
+    expect(view?.etaText).toBe('זמן הגעה משוער: 15 דקות (הערכה בלבד)');
   });
 
   it('no worker location yet → WAITING, no route, fallbackReason NO_LOCATION', async () => {
@@ -575,23 +615,30 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
   });
 
   describe('ETA priority order', () => {
-    it('priority 1: fresh location + OSRM duration wins even when expectedArrivalAt/travelEtaMinutes also exist', async () => {
+    it('priority 1: worker calibration ratio × current base wins over countdown and worker_only', async () => {
+      // Calibration: worker says 10 min via Waze; base at departure = 5 min → ratio = 2.0.
+      // At current poll base is still 5 min → calibrated = 10 min + 3 buffer = 13 → round up 15.
       const future = new Date(Date.now() + 20 * 60_000).toISOString();
+      const departedAt = new Date(Date.now() - 60_000).toISOString();
       poolQuery.mockResolvedValueOnce({
-        rows: [buildActiveRow({ expectedArrivalAt: future, travelEtaMinutes: 99 })],
+        rows: [buildActiveRow({
+          expectedArrivalAt: future,
+          travelEtaMinutes: 10,
+          departedAt,
+        })],
       });
       resolveDestMock.mockResolvedValueOnce(FAR_DEST);
       getRoadRouteMock.mockResolvedValueOnce({
         geometry: { type: 'LineString', coordinates: [] },
         distanceMeters: 6000,
-        durationSeconds: 300,
+        durationSeconds: 300, // 5 min base
       });
       const view = await getPublicView('token-x');
-      expect(view?.etaMinutes).toBe(5); // ceil(300/60), NOT 99 or the expectedArrivalAt-derived value
-      expect(view?.etaText).toBe('זמן הגעה משוער: 5 דקות');
+      expect(view?.etaMinutes).toBe(15);
+      expect(view?.etaText).toBe('זמן הגעה משוער: 15 דקות');
     });
 
-    it('priority 2: no OSRM route, but expectedArrivalAt in the future wins over travelEtaMinutes', async () => {
+    it('priority 2: no calibration + no OSRM route → countdown from expectedArrivalAt wins over travelEtaMinutes', async () => {
       const future = new Date(Date.now() + 20 * 60_000).toISOString();
       poolQuery.mockResolvedValueOnce({
         rows: [buildActiveRow({ expectedArrivalAt: future, travelEtaMinutes: 99 })],
@@ -599,20 +646,26 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
       resolveDestMock.mockResolvedValueOnce(FAR_DEST);
       getRoadRouteMock.mockResolvedValueOnce(null);
       const view = await getPublicView('token-x');
+      // Countdown = 20 min + 3 buffer = 23 → round up 25. Text is the
+      // unified Hebrew phrasing.
+      expect(view?.etaMinutes).toBe(25);
+      expect(view?.etaText).toBe('זמן הגעה משוער: 25 דקות');
       expect(view?.etaMinutes).not.toBe(99);
-      expect(view?.etaText).toMatch(/^הגעה משוערת: \d{2}:\d{2}$/);
     });
 
-    it('priority 3: no OSRM route, no future expectedArrivalAt → travelEtaMinutes wins', async () => {
-      const past = new Date(Date.now() - 60_000).toISOString(); // already in the past — not a valid ETA source
+    it('priority 4: no calibration, no OSRM route, past expectedArrivalAt → worker_only wins on travelEtaMinutes', async () => {
+      const past = new Date(Date.now() - 60_000).toISOString(); // already in the past — not a valid countdown source
       poolQuery.mockResolvedValueOnce({
         rows: [buildActiveRow({ expectedArrivalAt: past, travelEtaMinutes: 7 })],
       });
       resolveDestMock.mockResolvedValueOnce(FAR_DEST);
       getRoadRouteMock.mockResolvedValueOnce(null);
       const view = await getPublicView('token-x');
-      expect(view?.etaMinutes).toBe(7);
-      expect(view?.etaText).toBe('זמן הגעה משוער: 7 דקות (לפי דיווח הבודק)');
+      // 7 min × 60 + 180s buffer = 600s = 10 → round up 10 (already at a
+      // 5-min boundary). Text is the unified phrasing — "לפי דיווח הבודק"
+      // annotation was retired with the old priority chain.
+      expect(view?.etaMinutes).toBe(10);
+      expect(view?.etaText).toBe('זמן הגעה משוער: 10 דקות');
     });
 
     it('priority 4: none of the three sources available → no etaMinutes/etaText, fallbackReason NO_ETA_SOURCE', async () => {
