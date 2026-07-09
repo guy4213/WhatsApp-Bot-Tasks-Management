@@ -9,6 +9,40 @@ Conventions:
 
 ---
 
+## 0.8 Fix: fractional OSRM seconds broke the live countdown display (2026-07-09)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+
+**Bug:** the customer tracking page showed "זמן הגעה משוער: 22:49.40000000000009"
+instead of "22:49". Root cause: OSRM's `duration` field is a float (e.g.
+`2969.400000000001` seconds). `trackingPage.template.ts` stored it verbatim in
+`countdownBaseline.sec`, and `formatCountdown`'s `remainingSec % 60` kept the
+fractional remainder, string-concatenated straight into the DOM.
+
+**Fix (`src/routes/trackingPage.template.ts`):** round to whole seconds in two
+places — where the countdown baseline is set (root cause) and defensively
+inside `formatCountdown` itself (so any future caller is safe regardless).
+
+**Tests:** `src/__tests__/trackingPage.test.ts` +2 — one asserts the served
+page ships both `Math.round` guards and never regresses to the unrounded
+`remainingSec % 60` pattern; the other extracts the ACTUAL shipped
+`formatCountdown` function out of the rendered HTML via regex and executes it
+directly on the exact reported value (`2969.400000000001` → `'49:29'`, no
+decimal point) — a real behavioral check, not just a source-text match.
+28/28 pass in the file; `npx tsc --noEmit` clean.
+
+**Product clarification (same conversation):** the live countdown itself is
+intentional (explicit product requirement from 0.7 — "run a visual countdown
+between polls"), not a bug. Separately, the user is considering replacing the
+OSRM ETA source with Google Maps Distance Matrix/Routes API for
+traffic-aware ETA — this requires a Google Cloud project + billing, which
+directly contradicts the "NO Google Cloud, NO billing" constraint from the
+0.7 brief. Explained the tradeoff (cost, quota-driven fallback design, still
+NOT Navigation Connect) and awaiting the user's decision before any such
+work starts. Nothing built yet on that front.
+
+---
+
 ## 0.7 Wolt-lite tracking upgrade — OSRM routing, live ETA, customer link (2026-07-09)
 
 **Status:** DONE (local, uncommitted — awaiting user approval to commit/push).

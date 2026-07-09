@@ -332,10 +332,16 @@ const JS = `
   }
 
   // mm:ss countdown text, floored at 'פחות מדקה' under one minute.
+  // Defensive Math.round: durationSeconds arrives from OSRM as a float
+  // (e.g. 2969.400000000001) — without rounding, "remainingSec % 60" keeps
+  // the fractional remainder and gets string-concatenated verbatim
+  // ("22:49.40000000000009"). Round once here so any caller is safe,
+  // regardless of whether the baseline itself was rounded.
   function formatCountdown(remainingSec) {
-    if (remainingSec < 60) return 'פחות מדקה';
-    const m = Math.floor(remainingSec / 60);
-    const s = remainingSec % 60;
+    const total = Math.round(remainingSec);
+    if (total < 60) return 'פחות מדקה';
+    const m = Math.floor(total / 60);
+    const s = total % 60;
     return m + ':' + (s < 10 ? '0' : '') + s;
   }
 
@@ -557,7 +563,9 @@ const JS = `
       && Number.isFinite(state.durationSeconds);
 
     if (canCountdown) {
-      countdownBaseline = { sec: state.durationSeconds, at: Date.now() };
+      // Root-cause fix: round OSRM's fractional duration to whole seconds
+      // before it enters the countdown baseline (see formatCountdown above).
+      countdownBaseline = { sec: Math.round(state.durationSeconds), at: Date.now() };
       tickCountdown(); // paint immediately, don't wait for the 1s tick
       relEl.textContent = state.expectedArrivalAt
         ? ('הגעה משוערת: ' + formatIlTime(state.expectedArrivalAt))

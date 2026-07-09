@@ -411,6 +411,45 @@ describe('GET /t/:token — OSRM route GeoJSON coordinate flip', () => {
   });
 });
 
+describe('GET /t/:token — countdown formatting rounds fractional OSRM seconds', () => {
+  it('ships Math.round guards so a fractional durationSeconds (e.g. 2969.400000000001) never renders as "22:49.40000000000009"', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'EN_ROUTE',
+      isLocationFresh: true,
+      isRouteAvailable: true,
+      durationSeconds: 2969.400000000001,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    // Root-cause fix: the fractional OSRM duration is rounded before it ever
+    // enters the countdown baseline.
+    expect(res.body).toContain('countdownBaseline = { sec: Math.round(state.durationSeconds), at: Date.now() }');
+    // Defensive fix: formatCountdown also rounds its input, so any caller is safe.
+    expect(res.body).toContain('const total = Math.round(remainingSec);');
+    // The buggy unrounded pattern must never reappear.
+    expect(res.body).not.toContain('const s = remainingSec % 60;');
+  });
+
+  it('formatCountdown itself produces clean integer mm:ss for a fractional input (extracted from the actual served page and executed)', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE', taskFieldStatus: 'EN_ROUTE', updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'EN_ROUTE', isLocationFresh: true, isRouteAvailable: true,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    // Pull the real shipped function body out of the rendered page — this is a
+    // behavioral check of the ACTUAL code sent to the browser, not a hand copy.
+    const match = res.body.match(/function formatCountdown\(remainingSec\) \{[\s\S]*?\n\s*\}/);
+    expect(match).not.toBeNull();
+    // eslint-disable-next-line no-eval
+    const formatCountdown = eval(`${match![0]}\nformatCountdown;`) as (n: number) => string;
+    expect(formatCountdown(2969.400000000001)).toBe('49:29');
+    expect(formatCountdown(2969.400000000001)).not.toContain('.');
+    expect(formatCountdown(45.999999999999)).toBe('פחות מדקה'); // rounds up to 46s, still under 60
+  });
+});
+
 describe('GET /t/:token — live ETA countdown gating', () => {
   it('ships countdown code gated on isLocationFresh === true and EN_ROUTE/NEARBY', async () => {
     getPublicView.mockResolvedValueOnce({
