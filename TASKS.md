@@ -2959,8 +2959,54 @@ no-trailing-variable check; well-formed payload).
    `list-whatsapp-templates.ts` to confirm PENDING) where the creds exist.
 2. After Meta APPROVES `due_reminder_v2`, set
    `WHATSAPP_TEMPLATE_DUE_REMINDER=due_reminder_v2` in Render.
-3. Phase 2 (documented, not done): CRM URL button; provide `CRM_TASK_URL_TEMPLATE`
-   (user is configuring this themselves — no bot-side action needed).
+3. ~~Phase 2 (documented, not done): CRM URL button; provide `CRM_TASK_URL_TEMPLATE`.~~
+   **DONE (local, uncommitted `.env` + Meta edit PENDING)** — see 4.12.1 below.
+
+---
+
+### 4.12.1 — CRM URL button on `due_reminder_v2` (Phase 2)
+
+**Status:** DONE (code committed in `659ab87 "UDPATES"`; Meta template edit
+submitted, currently PENDING; `.env` update local — `.env` is gitignored).
+
+**What changed vs the original 4.12 shape:**
+- Template body vars 10 → **9** (the `{{10}}` CRM-link line moved out of the body).
+- Approved template gains a URL button (`"פתח משימה ב-CRM"`) with dynamic URL
+  `https://crm.galit.co.il/dashboard?taskid={{1}}`; the existing QUICK_REPLY
+  button (`"פרטים נוספים"`) stays. URL is at button index 0 (Meta requires
+  URL/PHONE before QUICK_REPLY), QUICK_REPLY moves to index 1.
+- Freeform path (in-24h-window) can't render URL buttons, so
+  `formatTaskReminderBody` still injects the CRM URL as text before the trailing
+  salutation — behaviour identical to the previous body-inline shape from the
+  recipient's POV. Uses `CRM_TASK_URL_TEMPLATE` env (unchanged contract:
+  `{taskId}` placeholder → `encodeURIComponent`d).
+- `.env` gets `CRM_TASK_URL_TEMPLATE=https://crm.galit.co.il/dashboard?taskid={taskId}`.
+- `dueDateReminder.ts` sends the taskId URL-encoded for the URL button suffix
+  (defensive against `&`/`?`/`#` in future ids).
+
+**Files changed (committed in 659ab87 "UDPATES"):**
+- `src/services/taskDetailFormatter.ts` — body ↓ to 9 vars; `formatTaskReminderBody`
+  now composes (substitute body) + inject CRM URL section + trailing salutation.
+- `src/scheduler/jobs/dueDateReminder.ts` — v2 path sends 9-var bodyParams + two
+  `templateButtonParams` (URL@0, QUICK_REPLY@1).
+- `scripts/create-due-reminder-v2-template.ts` — payload now emits URL button.
+- `src/__tests__/taskDetailFormatter.test.ts`, `src/__tests__/dueDateReminder.test.ts` —
+  updated to the new shape.
+
+**Tests run:** `npx tsc --noEmit` clean; `taskDetailFormatter.test.ts`,
+`dueDateReminder.test.ts`, `senderTemplateButtons.test.ts` → 41/41 pass.
+
+**Meta submission:** template id `2826181947780628`, `POST /{id}` with the new
+components — Meta returned `{success:true}`; current `status=PENDING`. Prior
+approved version continues to serve during review; new components apply once
+approved.
+
+**Follow-up:**
+1. Wait for Meta to APPROVE the edited `due_reminder_v2` (usually minutes).
+2. Verify a live out-of-window reminder in production: the URL button opens the
+   CRM task; the QUICK_REPLY "פרטים נוספים" still fires the details flow.
+3. If the CRM URL prefix ever changes (e.g. domain move), edit the Meta template
+   again (`POST /{id}` — 10 edits/30d allowed) and update `.env` to match.
 
 **Post-push production-safety fix (same day):** the user confirmed
 `WHATSAPP_TEMPLATES_ENABLED=true` in prod. The still-approved `due_reminder`
