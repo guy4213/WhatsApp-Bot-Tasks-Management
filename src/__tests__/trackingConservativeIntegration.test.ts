@@ -116,13 +116,14 @@ describe('getPublicView — worker calibration path', () => {
     expect(view?.etaMinutes).toBe(55);
     expect(view?.etaText).toBe('זמן הגעה משוער: 55 דקות');
     expect(view?.etaText).not.toMatch(/traffic|תנועה|עומס/i);
-    // Client-side countdown ticker reads `view.durationSeconds`. It MUST
-    // reflect Conservative ETA, not the raw provider duration — otherwise
-    // the worker's Waze update looks like it had no effect on the customer
-    // page (the primary bug reported after the 2026-07-09 field test).
-    expect(view?.durationSeconds).toBe(55 * 60);
+    // Client-side mm:ss countdown ticker MUST be disabled — the ETA must
+    // update ONLY on poll (via `etaMinutes`), not tick down independently.
+    // Product decision (2026-07-09 field test): a running timer was
+    // misleading; the customer should see a static minutes value that
+    // refreshes on each GPS poll.
+    expect(view?.durationSeconds).toBeUndefined();
     // Route metadata under `view.route.durationSeconds` still carries the
-    // raw provider value (used for map/route info, not ETA).
+    // raw provider value (used for map / route info, not ETA).
     expect(view?.route?.durationSeconds).toBe(24 * 60);
   });
 

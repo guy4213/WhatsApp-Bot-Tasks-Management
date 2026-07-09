@@ -543,16 +543,19 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
     if (eta.etaMinutes != null && eta.etaText != null) {
       view.etaMinutes = eta.etaMinutes;
       view.etaText = eta.etaText;
-      // Critical: the tracking page template maintains a CLIENT-SIDE mm:ss
-      // countdown driven by `state.durationSeconds` (see trackingPage.template.ts).
-      // If we leave this at the raw ORS/OSRM free-flow duration, the visible
-      // countdown ticks from that raw value and the Conservative ETA above is
-      // never actually shown as a live number — worker Waze updates would look
-      // like they had no effect. Override the top-level `durationSeconds` to
-      // Conservative ETA seconds so the ticker matches everything else.
-      // Route metadata under `view.route.durationSeconds` still carries the raw
-      // provider value — that field feeds map/route info, not the ETA ticker.
-      view.durationSeconds = eta.etaMinutes * 60;
+      // KILL the client-side mm:ss countdown ticker. The tracking page's
+      // countdown branch fires when `state.durationSeconds != null`; leaving
+      // it set (even to the Conservative value) would produce a ticker that
+      // rolls independently of GPS. Product decision (2026-07-09 field test):
+      // the ETA must update ONLY on poll — that is, only when a new GPS
+      // reading yields a new base route length that gets multiplied by the
+      // captured Waze/base calibration ratio. So we deliberately clear the
+      // top-level `durationSeconds`, forcing the template into its non-
+      // countdown branch which just shows `etaMinutes` as a static
+      // "בעוד כ־N דקות" line + the wall-clock `expectedArrivalAt`.
+      // Route metadata under `view.route.durationSeconds` still carries the
+      // raw provider value for map / route info — untouched.
+      view.durationSeconds = undefined;
       commitDisplayedEta(token, eta.etaMinutes, nowDate);
     } else if (!fallbackReason) {
       fallbackReason = 'NO_ETA_SOURCE';

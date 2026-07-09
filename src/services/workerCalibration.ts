@@ -40,7 +40,13 @@ const log = moduleLogger('workerCalibration');
 
 // ── Constants (code defaults, not env) ────────────────────────────────────
 const TTL_MS                    = 4 * 60 * 60 * 1000;   // 4h — session window
-const MAX_DEPARTURE_LAG_MS      = 5 * 60 * 1000;        // 5 min post-DEPARTED
+// Widened 2026-07-09 (field test): 5 min was too tight — the customer often
+// opens the tracking link only after WhatsApp propagation delay + reading the
+// message, so the first poll routinely arrived past the window and the
+// calibration was never captured. 10 min still bounds how badly the current
+// base can under-represent the base at declaration, while covering realistic
+// customer-page open-times.
+const MAX_DEPARTURE_LAG_MS      = 10 * 60 * 1000;       // 10 min post-DEPARTED
 const RATIO_MIN                 = 0.5;
 const RATIO_MAX                 = 5.0;
 

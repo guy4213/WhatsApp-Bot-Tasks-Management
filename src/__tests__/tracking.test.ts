@@ -446,9 +446,11 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
     // 600s × 1.25 + 180s buffer = 930s = 15.5 min → round up 20.
     expect(view?.etaMinutes).toBe(20);
     expect(view?.etaText).toBe('זמן הגעה משוער: 20 דקות');
-    // Top-level durationSeconds now mirrors the Conservative ETA so the
-    // client-side countdown ticker matches — NOT the raw 600.
-    expect(view?.durationSeconds).toBe(20 * 60);
+    // Top-level `durationSeconds` is deliberately cleared so the tracking
+    // page's client-side mm:ss countdown ticker doesn't render. See
+    // tracking.ts — the ETA must update ONLY on poll (via etaMinutes),
+    // not tick down independently of GPS. Route metadata is preserved.
+    expect(view?.durationSeconds).toBeUndefined();
     expect(view?.fallbackReason).toBeUndefined();
     expect(view?.isLocationFresh).toBe(true);
   });
