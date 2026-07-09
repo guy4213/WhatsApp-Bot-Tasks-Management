@@ -543,19 +543,23 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
     if (eta.etaMinutes != null && eta.etaText != null) {
       view.etaMinutes = eta.etaMinutes;
       view.etaText = eta.etaText;
-      // KILL the client-side mm:ss countdown ticker. The tracking page's
-      // countdown branch fires when `state.durationSeconds != null`; leaving
-      // it set (even to the Conservative value) would produce a ticker that
-      // rolls independently of GPS. Product decision (2026-07-09 field test):
-      // the ETA must update ONLY on poll — that is, only when a new GPS
-      // reading yields a new base route length that gets multiplied by the
-      // captured Waze/base calibration ratio. So we deliberately clear the
-      // top-level `durationSeconds`, forcing the template into its non-
-      // countdown branch which just shows `etaMinutes` as a static
-      // "בעוד כ־N דקות" line + the wall-clock `expectedArrivalAt`.
-      // Route metadata under `view.route.durationSeconds` still carries the
-      // raw provider value for map / route info — untouched.
+      // KILL the client-side mm:ss countdown ticker. Product decision
+      // (2026-07-09 field test): the ETA must update ONLY on poll.
       view.durationSeconds = undefined;
+      // Roll `expectedArrivalAt` forward on every poll — the stale DB value
+      // (set once at "יצאתי" from the worker's original declaration) becomes
+      // misleading the moment the drive runs long. Customer complaint on
+      // 2026-07-09: "expected arrival 13:09, but it's already 13:23".
+      // Compute the live target from `now + Conservative ETA`:
+      //   - If the worker isn't moving, `etaMinutes` doesn't shrink and this
+      //     rolls forward with `now` — the customer sees the arrival time
+      //     stepping later, matching reality.
+      //   - If the worker IS moving, `etaMinutes` shrinks in step with GPS
+      //     and the computed arrival stays near the real target.
+      // Note: this replaces the DB timestamp only in the returned view,
+      // never writes back — the "יצאתי" declaration remains authoritative
+      // for the manager / office channels.
+      view.expectedArrivalAt = new Date(nowDate.getTime() + eta.etaMinutes * 60_000).toISOString();
       commitDisplayedEta(token, eta.etaMinutes, nowDate);
     } else if (!fallbackReason) {
       fallbackReason = 'NO_ETA_SOURCE';

@@ -249,12 +249,17 @@ describe('getPublicView', () => {
     // Regression: every pre-TRACK-A key is unchanged — use toMatchObject
     // (not toEqual) because the view is now additively extended with the
     // TRACK-A presentation fields (headline, presentationStatus, etc.).
+    //
+    // NOTE: `expectedArrivalAt` is now rolled forward on every poll (2026-07-09
+    // change — see tracking.ts). The static DB value 09:25:00Z is no longer
+    // exposed; instead, the view carries `PINNED_NOW + Conservative etaMinutes`.
+    // PINNED_NOW = 2026-07-08T11:00:00Z, etaMinutes = 30 → 11:30:00.
     expect(view).toMatchObject({
       status: 'ACTIVE',
       taskFieldStatus: 'EN_ROUTE',
       updatedAt: '2026-07-08T09:00:00Z',
       lastLocation: { lat: 32.0853, lng: 34.7818, at: '2026-07-08T09:00:00Z', accuracy: 15 },
-      expectedArrivalAt: '2026-07-08T09:25:00Z',
+      expectedArrivalAt: '2026-07-08T11:30:00.000Z',
     });
     // etaMinutes is now derived by Conservative ETA. Fixed 2026-07-08
     // timestamps mean the location is stale relative to real "now", so no
