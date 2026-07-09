@@ -176,6 +176,7 @@ vi.mock('../services/myInspectionsRange', () => ({
 }));
 
 import { handleAIMessage } from '../ai/router';
+import * as trackingSvc from '../services/tracking';
 import type { ResolvedUser } from '../types';
 
 function worker(): ResolvedUser {
@@ -282,6 +283,28 @@ describe('active-task context — chained flow with 3 open inspections', () => {
     await handleAIMessage(u, 'הגעתי'); // status_eta_prompt handler catches the keyword
     expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-B', transition: 'ARRIVED', updatedBy: u.id });
     expect(writeTravelEta).not.toHaveBeenCalled();
+  });
+
+  // TRACK-C: session-before-notification order fix. openTrackingSession fires
+  // the customer EN_ROUTE notification's token dependency — it must resolve
+  // BEFORE advanceFieldStatus (which fires sendWorkerEnRouteNotification
+  // internally), or the customer notification races the session insert.
+  it('on DEPARTED, openTrackingSession is called BEFORE advanceFieldStatus', async () => {
+    const u = worker();
+    const openTrackingSessionMock = vi.mocked(trackingSvc.openTrackingSession);
+    openTrackingSessionMock.mockClear();
+    advanceFieldStatus.mockClear();
+
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-B', customerName: 'כהן', taskTitle: null });
+    statusIntent('DEPARTED', 'כהן');
+    await handleAIMessage(u, 'יצאתי לכהן');
+
+    expect(openTrackingSessionMock).toHaveBeenCalledWith({ taskFieldId: 'tf-B', workerUserId: u.id });
+    expect(advanceFieldStatus).toHaveBeenCalledWith({ taskFieldId: 'tf-B', transition: 'DEPARTED', updatedBy: u.id });
+
+    const trackingOrder = openTrackingSessionMock.mock.invocationCallOrder[0];
+    const advanceOrder = advanceFieldStatus.mock.invocationCallOrder[0];
+    expect(trackingOrder).toBeLessThan(advanceOrder);
   });
 });
 

@@ -22,6 +22,53 @@
  */
 import type { PublicTrackingView } from '../services/tracking';
 
+/**
+ * Forward contract (additive, documentation-only) for the enriched
+ * `/tracking/:token` payload. A parallel workstream (TRACK-A) is adding
+ * these fields to `PublicTrackingView` in `services/tracking.ts`; at the
+ * time this file was written that type was mid-migration there (some
+ * fields required, some optional, still settling), so this type is
+ * deliberately declared standalone — NOT `extends PublicTrackingView` —
+ * to avoid a structural-compatibility fight with a moving target. Nothing
+ * in this file actually needs this type at compile time: `renderTrackingPage`
+ * keeps accepting `PublicTrackingView` as before, and the client logic below
+ * lives inside a template-string `JS` blob that ships to `tsc` as an opaque
+ * string (nothing in it is type-checked). All new fields are read
+ * defensively in that JS with a fallback to the legacy fields (`status`,
+ * `lastLocation`, `destination`, `etaMinutes`, `expectedArrivalAt`) when
+ * absent, so the page renders correctly against both the old and the new
+ * backend shape. Keep this comment/type in sync with `services/tracking.ts`
+ * whenever either side changes.
+ */
+interface EnrichedPublicTrackingView {
+  headline?: string;
+  presentationStatus?:
+    | 'WAITING'
+    | 'EN_ROUTE'
+    | 'NEARBY'
+    | 'ARRIVED'
+    | 'COMPLETED'
+    | 'STALE_LOCATION'
+    | 'UNAVAILABLE'
+    | 'EXPIRED';
+  workerLocation?: { lat: number; lng: number; updatedAt: string };
+  destinationLocation?: { lat: number; lng: number; address?: string };
+  route?: {
+    type: 'OSRM' | 'STRAIGHT_LINE';
+    geometry: { type: 'LineString'; coordinates: Array<[number, number]> };
+    distanceMeters?: number;
+    durationSeconds?: number;
+  };
+  distanceMeters?: number;
+  durationSeconds?: number;
+  etaText?: string;
+  lastUpdatedAt?: string;
+  locationFreshnessSeconds?: number;
+  isLocationFresh?: boolean;
+  isRouteAvailable?: boolean;
+  fallbackReason?: string;
+}
+
 // Official Leaflet 1.9.4 SRI hashes (from leafletjs.com/download.html).
 const LEAFLET_CSS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
 const LEAFLET_JS_URL  = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
@@ -140,6 +187,24 @@ const CSS = `
     font-size: 14px;
     text-align: center;
   }
+  /* STALE_LOCATION warning strip — same visual language as #banner (both
+     communicate "the data you're seeing may be out of date"). */
+  #stale-warning {
+    background: #fff8db;
+    border: 1px solid #f0d97a;
+    color: #6b4a0a;
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    margin: 6px 0 12px;
+    font-size: 14px;
+    text-align: center;
+    line-height: 1.5;
+  }
+  #distance-line {
+    color: var(--muted);
+    margin-top: 4px;
+    font-size: 15px;
+  }
   .muted { color: var(--muted); }
   .hidden { display: none !important; }
   footer {
@@ -158,9 +223,21 @@ const CSS = `
 const JS = `
   const POLL_ACTIVE_MS = 12000;
   const POLL_ARRIVED_MS = 60000;
+  // Legacy terminal set — keyed on the OLD \`status\` field. Kept for backend
+  // payloads that don't send \`presentationStatus\` yet.
   const TERMINAL = new Set(['FINISHED','CANCELED','EXPIRED','SUPERSEDED']);
+  // New terminal set — keyed on \`presentationStatus\`. UNAVAILABLE is
+  // intentionally included here per product decision: when the bot has no
+  // usable location fix, the page stops polling rather than hammering the
+  // endpoint hoping for a recovery (a fresh page load will pick it back up).
+  const PRESENTATION_TERMINAL = new Set(['COMPLETED', 'EXPIRED', 'UNAVAILABLE']);
   const IL_TZ = 'Asia/Jerusalem';
-  const HERO = {
+
+  // Legacy hero text, keyed on the OLD \`status\` field. Used only as a
+  // fallback when the backend sends neither \`headline\` nor
+  // \`presentationStatus\` (old contract) — preserved byte-for-byte so old
+  // payloads keep rendering exactly as before.
+  const STATUS_HERO = {
     ACTIVE:     'הבודק בדרך אליך',
     ARRIVED:    'הבודק הגיע לאתר',
     FINISHED:   'הבדיקה הסתיימה. תודה!',
@@ -169,17 +246,45 @@ const JS = `
     SUPERSEDED: 'המעקב אינו פעיל'
   };
 
+  // New hero text, keyed on \`presentationStatus\` (enriched contract).
+  // Only consulted when the backend actually sends \`presentationStatus\`.
+  const PRESENTATION_HERO = {
+    WAITING:        'הבודק יצא לדרך. מיקום חי יופיע בעוד רגע.',
+    EN_ROUTE:       'הבודק בדרך אליך',
+    NEARBY:         'הבודק קרוב אליך',
+    STALE_LOCATION: 'הבודק בדרך אליך',
+    ARRIVED:        'הבודק הגיע לאתר.',
+    COMPLETED:      'הבדיקה הסתיימה. תודה.',
+    UNAVAILABLE:    'המעקב לא זמין כרגע, אך הבודק בדרך.',
+    EXPIRED:        'המעקב אינו פעיל'
+  };
+
+  // Presentations where the map / worker marker may be shown at all.
+  const MAP_VISIBLE_PRESENTATIONS = new Set(['EN_ROUTE', 'NEARBY', 'STALE_LOCATION', 'ARRIVED']);
+  // Presentations where the subheader ("בדרך אל <address>") may be shown.
+  const SUB_VISIBLE_PRESENTATIONS = new Set(['EN_ROUTE', 'NEARBY', 'STALE_LOCATION']);
+  // Presentations where the ETA card may be shown.
+  const ETA_VISIBLE_PRESENTATIONS = new Set(['EN_ROUTE', 'NEARBY', 'STALE_LOCATION']);
+
   let pollTimer = null;
   let backoff = 0;
   let map = null, marker = null, accuracyCircle = null;
   let destMarker = null, routeLine = null;
   // fitBounds discipline (MVP+1): don't re-fit on every poll. Only when:
   //   - fresh page load / first geometry
-  //   - status transitions across ACTIVE↔ARRIVED
+  //   - presentation transitions (e.g. EN_ROUTE -> NEARBY -> ARRIVED)
   //   - the worker moved more than REFIT_METERS from the last fitted position
   let lastFittedWorkerLL = null, lastFittedStatus = null;
   const REFIT_METERS = 500;
   let lastState = null;
+
+  // Marker animation state — smooth interpolation between polls.
+  let markerAnimFrame = null;
+  // Live ETA countdown baseline — reset on every poll, ticked once per
+  // second in between. NOTE (product requirement): this is always an
+  // ESTIMATE — never present it as an exact or traffic-aware arrival time.
+  // The visible label is always "זמן הגעה משוער" (estimated arrival time).
+  let countdownBaseline = null; // { sec: number, at: epoch-ms }
 
   const $ = (id) => document.getElementById(id);
 
@@ -192,7 +297,7 @@ const JS = `
   }
 
   // Rough equirectangular distance in metres. Fine for the < 1 km scale
-  // we care about for re-fit gating.
+  // we care about for re-fit gating and the marker-snap guard.
   function metersBetween(a, b) {
     const dLat = (a.lat - b.lat) * 111000;
     const midLatRad = (a.lat + b.lat) * Math.PI / 360;
@@ -219,6 +324,100 @@ const JS = `
     return 'לפני ' + diffHr + ' שעות';
   }
 
+  // 'מרחק משוער: X ק״מ' (1 decimal) or 'מרחק משוער: X מטרים' under 1000m.
+  function formatDistance(meters) {
+    if (meters == null || !Number.isFinite(meters)) return '';
+    if (meters < 1000) return 'מרחק משוער: ' + Math.round(meters) + ' מטרים';
+    return 'מרחק משוער: ' + (meters / 1000).toFixed(1) + ' ק״מ';
+  }
+
+  // mm:ss countdown text, floored at 'פחות מדקה' under one minute.
+  function formatCountdown(remainingSec) {
+    if (remainingSec < 60) return 'פחות מדקה';
+    const m = Math.floor(remainingSec / 60);
+    const s = remainingSec % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  // Resolve the bucket that drives map/ETA/subheader visibility. Prefers the
+  // enriched \`presentationStatus\`; falls back to a mapping off the legacy
+  // \`status\` field so old backend payloads keep behaving as before.
+  function effectivePresentation(state) {
+    if (state.presentationStatus) return state.presentationStatus;
+    switch (state.status) {
+      case 'ACTIVE':  return 'EN_ROUTE';
+      case 'ARRIVED': return 'ARRIVED';
+      case 'FINISHED': return 'COMPLETED';
+      case 'EXPIRED': return 'EXPIRED';
+      default: return 'EXPIRED'; // CANCELED / SUPERSEDED / unknown — terminal, no map.
+    }
+  }
+
+  // Resolve the hero text. Server-provided \`headline\` wins outright; then
+  // \`presentationStatus\` (new contract); then the legacy \`status\` map —
+  // this last branch is what keeps old payloads pixel/text-identical to
+  // pre-upgrade behavior.
+  function resolveHero(state) {
+    if (state.headline) return state.headline;
+    if (state.presentationStatus && PRESENTATION_HERO[state.presentationStatus] != null) {
+      return PRESENTATION_HERO[state.presentationStatus];
+    }
+    return STATUS_HERO[state.status] || STATUS_HERO.CANCELED;
+  }
+
+  // Worker position — prefers the enriched \`workerLocation\`, falls back to
+  // the legacy \`lastLocation\`.
+  function pickWorkerLL(state) {
+    const wl = state.workerLocation || state.lastLocation;
+    if (wl && Number.isFinite(wl.lat) && Number.isFinite(wl.lng)) {
+      return { lat: wl.lat, lng: wl.lng };
+    }
+    return null;
+  }
+
+  // Destination — prefers the enriched \`destinationLocation\`, falls back to
+  // the legacy \`destination\`.
+  function pickDestLL(state) {
+    const dl = state.destinationLocation || state.destination;
+    if (dl && Number.isFinite(dl.lat) && Number.isFinite(dl.lng)) {
+      return { lat: dl.lat, lng: dl.lng, address: dl.address };
+    }
+    return null;
+  }
+
+  // Smoothly animate the marker from its current position to the new one
+  // over ~1.5s (ease-out). Jumps over ~2km snap instantly instead — a
+  // multi-kilometer "flight" reads as a bug, not a smooth update (typically
+  // a GPS fix resuming after being offline, not real travel).
+  function animateMarkerTo(newLat, newLng) {
+    if (!marker) return;
+    if (markerAnimFrame != null) { cancelAnimationFrame(markerAnimFrame); markerAnimFrame = null; }
+    const from = marker.getLatLng();
+    const to = { lat: newLat, lng: newLng };
+    const jumpMeters = metersBetween({ lat: from.lat, lng: from.lng }, to);
+    if (jumpMeters > 2000) {
+      marker.setLatLng([to.lat, to.lng]);
+      return;
+    }
+    const durationMs = 1500;
+    const startTime = (window.performance && performance.now) ? performance.now() : Date.now();
+    const fromLat = from.lat, fromLng = from.lng;
+    function step(now) {
+      const t = Math.max(0, Math.min(1, (now - startTime) / durationMs));
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      marker.setLatLng([
+        fromLat + (to.lat - fromLat) * eased,
+        fromLng + (to.lng - fromLng) * eased,
+      ]);
+      if (t < 1) {
+        markerAnimFrame = requestAnimationFrame(step);
+      } else {
+        markerAnimFrame = null;
+      }
+    }
+    markerAnimFrame = requestAnimationFrame(step);
+  }
+
   function ensureMap(lat, lng) {
     if (!window.L) return; // Leaflet script hasn't loaded (offline / SRI mismatch)
     if (!map) {
@@ -231,7 +430,7 @@ const JS = `
       }).addTo(map);
       marker = L.marker([lat, lng]).addTo(map);
     } else {
-      marker.setLatLng([lat, lng]);
+      animateMarkerTo(lat, lng);
     }
   }
 
@@ -250,15 +449,27 @@ const JS = `
     }
   }
 
-  function ensureRoute(workerLL, destLL) {
+  // Draws the road route when \`route.type === 'OSRM'\` (solid line, following
+  // the actual road geometry); falls back to the straight dashed line
+  // otherwise (no route / STRAIGHT_LINE). Replaced wholesale on every poll.
+  function ensureRoute(workerLL, destLL, route) {
     if (!map || !workerLL || !destLL) return;
-    const pts = [[workerLL.lat, workerLL.lng], [destLL.lat, destLL.lng]];
+    let pts;
+    let dashed = true;
+    if (route && route.type === 'OSRM' && route.geometry && Array.isArray(route.geometry.coordinates)) {
+      // GeoJSON LineString coordinates are [lng, lat] — Leaflet wants [lat, lng].
+      pts = route.geometry.coordinates.map((c) => [c[1], c[0]]);
+      dashed = false;
+    } else {
+      pts = [[workerLL.lat, workerLL.lng], [destLL.lat, destLL.lng]];
+      dashed = true;
+    }
+    const style = { color: '#1f7a3b', weight: 4, opacity: 0.7, dashArray: dashed ? '6 8' : null };
     if (!routeLine) {
-      routeLine = L.polyline(pts, {
-        color: '#1f7a3b', weight: 4, opacity: 0.7, dashArray: '6 8',
-      }).addTo(map);
+      routeLine = L.polyline(pts, style).addTo(map);
     } else {
       routeLine.setLatLngs(pts);
+      routeLine.setStyle(style);
     }
   }
 
@@ -267,9 +478,9 @@ const JS = `
     if (destMarker) { destMarker.remove(); destMarker = null; }
   }
 
-  function fitIfNeeded(status, workerLL, destLL) {
+  function fitIfNeeded(presentation, workerLL, destLL) {
     if (!map || !workerLL) return;
-    const statusChanged = lastFittedStatus !== status;
+    const statusChanged = lastFittedStatus !== presentation;
     const movedFar =
       lastFittedWorkerLL == null ||
       metersBetween(lastFittedWorkerLL, workerLL) > REFIT_METERS;
@@ -283,7 +494,7 @@ const JS = `
       map.setView([workerLL.lat, workerLL.lng], 14, { animate: true });
     }
     lastFittedWorkerLL = { lat: workerLL.lat, lng: workerLL.lng };
-    lastFittedStatus = status;
+    lastFittedStatus = presentation;
   }
 
   function updateAccuracy(lat, lng, accuracy) {
@@ -305,70 +516,128 @@ const JS = `
     map = null; marker = null; accuracyCircle = null;
     destMarker = null; routeLine = null;
     lastFittedWorkerLL = null; lastFittedStatus = null;
+    if (markerAnimFrame != null) { cancelAnimationFrame(markerAnimFrame); markerAnimFrame = null; }
+  }
+
+  // Paints the current countdown baseline, if any. Called once per second
+  // by the shared interval AND immediately whenever a fresh baseline is set
+  // so the number doesn't sit stale for up to a second after a poll.
+  function tickCountdown() {
+    if (!countdownBaseline) return;
+    const elapsedSec = Math.round((Date.now() - countdownBaseline.at) / 1000);
+    const remainingSec = Math.max(0, countdownBaseline.sec - elapsedSec);
+    // "זמן הגעה משוער" (estimated arrival time) — never phrase this as exact
+    // or traffic-aware; it is always a rough estimate derived server-side.
+    $('eta-time').textContent = 'זמן הגעה משוער: ' + formatCountdown(remainingSec);
+  }
+
+  function renderEtaCard(state, presentation) {
+    const card = $('eta-card');
+    const timeEl = $('eta-time');
+    const relEl = $('eta-relative');
+    const distEl = $('distance-line');
+
+    const hasEtaData = state.etaMinutes != null || state.expectedArrivalAt
+      || state.etaText || state.durationSeconds != null;
+    const showEta = ETA_VISIBLE_PRESENTATIONS.has(presentation) && hasEtaData;
+
+    if (!showEta) {
+      card.classList.add('hidden');
+      countdownBaseline = null;
+      distEl.classList.add('hidden');
+      return;
+    }
+    card.classList.remove('hidden');
+
+    // Live countdown ONLY when the location is fresh and we're actively
+    // en route / nearby — per product requirement, a stale fix must freeze
+    // the estimate rather than keep ticking down against reality.
+    const canCountdown = state.isLocationFresh === true
+      && (presentation === 'EN_ROUTE' || presentation === 'NEARBY')
+      && Number.isFinite(state.durationSeconds);
+
+    if (canCountdown) {
+      countdownBaseline = { sec: state.durationSeconds, at: Date.now() };
+      tickCountdown(); // paint immediately, don't wait for the 1s tick
+      relEl.textContent = state.expectedArrivalAt
+        ? ('הגעה משוערת: ' + formatIlTime(state.expectedArrivalAt))
+        : '';
+    } else {
+      countdownBaseline = null;
+      if (presentation === 'STALE_LOCATION' && state.etaText) {
+        // Server already appends the "(הערכה בלבד)" qualifier to etaText.
+        timeEl.textContent = state.etaText;
+      } else if (state.expectedArrivalAt) {
+        timeEl.textContent = 'הגעה משוערת: ' + formatIlTime(state.expectedArrivalAt);
+      } else if (state.etaText) {
+        timeEl.textContent = state.etaText;
+      } else {
+        timeEl.textContent = '';
+      }
+      relEl.textContent = state.etaMinutes != null
+        ? ('בעוד כ־' + state.etaMinutes + ' דקות')
+        : '';
+    }
+
+    const dm = state.distanceMeters;
+    if (dm != null && Number.isFinite(dm)) {
+      distEl.textContent = formatDistance(dm);
+      distEl.classList.remove('hidden');
+    } else {
+      distEl.textContent = '';
+      distEl.classList.add('hidden');
+    }
   }
 
   function applyState(state) {
     lastState = state;
-    document.body.className = 'state-' + state.status;
+    const presentation = effectivePresentation(state);
+    document.body.className = 'state-' + (state.presentationStatus || state.status);
 
-    $('hero').textContent = HERO[state.status] || HERO.CANCELED;
+    $('hero').textContent = resolveHero(state);
 
-    // Subheader — "בדרך אל <address>" only while ACTIVE and address known.
+    const destLL = pickDestLL(state);
+
+    // Subheader — "בדרך אל <address>" while en route / nearby / stale.
     const subEl = $('subheader');
-    if (state.status === 'ACTIVE' && state.destination && state.destination.address) {
-      subEl.innerHTML = 'בדרך אל <b>' + escapeHtml(state.destination.address) + '</b>';
+    if (SUB_VISIBLE_PRESENTATIONS.has(presentation) && destLL && destLL.address) {
+      subEl.innerHTML = 'בדרך אל <b>' + escapeHtml(destLL.address) + '</b>';
       subEl.classList.remove('hidden');
     } else {
       subEl.textContent = '';
       subEl.classList.add('hidden');
     }
 
-    // ETA card — only ACTIVE, only when we actually have data.
-    const showEta = state.status === 'ACTIVE'
-      && (state.etaMinutes != null || state.expectedArrivalAt);
-    if (showEta) {
-      $('eta-card').classList.remove('hidden');
-      $('eta-time').textContent = state.expectedArrivalAt
-        ? ('הגעה משוערת: ' + formatIlTime(state.expectedArrivalAt))
-        : '';
-      $('eta-relative').textContent = state.etaMinutes != null
-        ? ('בעוד כ־' + state.etaMinutes + ' דקות')
-        : '';
+    // STALE_LOCATION warning strip.
+    const staleEl = $('stale-warning');
+    if (presentation === 'STALE_LOCATION') {
+      staleEl.classList.remove('hidden');
     } else {
-      $('eta-card').classList.add('hidden');
+      staleEl.classList.add('hidden');
     }
 
-    // Map — only when ACTIVE|ARRIVED and worker location present.
-    const workerLL = ((state.status === 'ACTIVE' || state.status === 'ARRIVED')
-      && state.lastLocation
-      && Number.isFinite(state.lastLocation.lat)
-      && Number.isFinite(state.lastLocation.lng))
-        ? { lat: state.lastLocation.lat, lng: state.lastLocation.lng }
-        : null;
+    renderEtaCard(state, presentation);
 
-    // Destination — same visibility guard as workerLL, but tolerate missing
-    // destination gracefully (fallback to worker-only single-marker view).
-    const destLL = (workerLL && state.destination
-      && Number.isFinite(state.destination.lat)
-      && Number.isFinite(state.destination.lng))
-        ? { lat: state.destination.lat, lng: state.destination.lng }
-        : null;
+    // Map — only for presentations where a worker fix is meaningful.
+    const workerLL = MAP_VISIBLE_PRESENTATIONS.has(presentation) ? pickWorkerLL(state) : null;
+    const mapDestLL = workerLL ? destLL : null;
 
     if (workerLL) {
       $('map').classList.remove('hidden');
       ensureMap(workerLL.lat, workerLL.lng);
-      updateAccuracy(workerLL.lat, workerLL.lng, state.lastLocation.accuracy);
-      if (destLL && state.status === 'ACTIVE') {
-        ensureDestination(destLL);
-        ensureRoute(workerLL, destLL);
-      } else if (destLL && state.status === 'ARRIVED') {
+      const accuracy = state.lastLocation ? state.lastLocation.accuracy : null;
+      updateAccuracy(workerLL.lat, workerLL.lng, accuracy);
+      if (mapDestLL && presentation !== 'ARRIVED') {
+        ensureDestination(mapDestLL);
+        ensureRoute(workerLL, mapDestLL, state.route);
+      } else if (mapDestLL && presentation === 'ARRIVED') {
         // Show the destination pin but drop the route line — worker is there.
-        ensureDestination(destLL);
+        ensureDestination(mapDestLL);
         if (routeLine) { routeLine.remove(); routeLine = null; }
       } else {
         removeDestinationLayers();
       }
-      fitIfNeeded(state.status, workerLL, destLL);
+      fitIfNeeded(presentation, workerLL, mapDestLL);
     } else {
       $('map').classList.add('hidden');
       $('accuracy-notice').classList.add('hidden');
@@ -380,15 +649,25 @@ const JS = `
 
   function updateRelative() {
     if (!lastState) return;
+    const presentation = effectivePresentation(lastState);
     const line = $('updated-line');
-    if (TERMINAL.has(lastState.status)) { line.textContent = ''; return; }
-    const ts = (lastState.lastLocation && lastState.lastLocation.at) || lastState.updatedAt;
+    if (TERMINAL.has(lastState.status) || PRESENTATION_TERMINAL.has(presentation)) {
+      line.textContent = '';
+      return;
+    }
+    const ts = lastState.lastUpdatedAt
+      || (lastState.workerLocation && lastState.workerLocation.updatedAt)
+      || (lastState.lastLocation && lastState.lastLocation.at)
+      || lastState.updatedAt;
     line.textContent = ts ? ('עודכן ' + formatRelative(ts)) : '';
   }
 
-  function nextDelay(status) {
-    if (TERMINAL.has(status)) return null;
-    if (status === 'ARRIVED') return POLL_ARRIVED_MS;
+  function nextDelay(state, presentation) {
+    if (TERMINAL.has(state.status)) return null;
+    if (PRESENTATION_TERMINAL.has(presentation)) return null;
+    if (presentation === 'ARRIVED') return POLL_ARRIVED_MS;
+    // STALE_LOCATION keeps polling at the active cadence — location may
+    // resume at any time.
     return POLL_ACTIVE_MS;
   }
 
@@ -406,7 +685,8 @@ const JS = `
       backoff = 0;
       $('banner').classList.add('hidden');
       applyState(state);
-      const d = nextDelay(state.status);
+      const presentation = effectivePresentation(state);
+      const d = nextDelay(state, presentation);
       if (d != null && !document.hidden) pollTimer = setTimeout(poll, d);
     } catch (_) {
       $('banner').classList.remove('hidden');
@@ -426,10 +706,15 @@ const JS = `
 
   // Boot from server-embedded initial state.
   applyState(INITIAL_STATE);
-  setInterval(updateRelative, 1000);
-  if (!TERMINAL.has(INITIAL_STATE.status)) {
-    const d = nextDelay(INITIAL_STATE.status) || POLL_ACTIVE_MS;
-    pollTimer = setTimeout(poll, d);
+  // One shared 1s tick drives both the relative "עודכן לפני..." line and the
+  // live ETA countdown (when active) between polls.
+  setInterval(() => { updateRelative(); tickCountdown(); }, 1000);
+  {
+    const initialPresentation = effectivePresentation(INITIAL_STATE);
+    if (!TERMINAL.has(INITIAL_STATE.status) && !PRESENTATION_TERMINAL.has(initialPresentation)) {
+      const d = nextDelay(INITIAL_STATE, initialPresentation) || POLL_ACTIVE_MS;
+      pollTimer = setTimeout(poll, d);
+    }
   }
 `;
 
@@ -454,9 +739,14 @@ export function renderTrackingPage(token: string, initial: PublicTrackingView): 
   <div id="banner" class="hidden" role="status">מנסים לרענן…</div>
   <h1 id="hero" role="status" aria-live="polite"></h1>
   <div id="subheader" class="hidden"></div>
+  <div id="stale-warning" class="hidden" role="status">
+    <div>לא התקבל עדכון מיקום בדקות האחרונות.</div>
+    <div>זמן ההגעה מוצג כהערכה בלבד.</div>
+  </div>
   <div id="eta-card" class="card hidden">
     <div id="eta-time" class="eta-time"></div>
     <div id="eta-relative" class="eta-relative"></div>
+    <div id="distance-line" class="hidden"></div>
   </div>
   <div id="updated-line"></div>
   <div id="accuracy-notice" class="muted hidden">מיקום משוער</div>

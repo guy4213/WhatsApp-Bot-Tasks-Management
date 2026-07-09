@@ -229,3 +229,241 @@ describe('GET /t/:token — never embeds internal ids', () => {
     });
   }
 });
+
+// ── TRACK-B: enriched presentationStatus contract ──────────────────────────
+//
+// These tests assert against the served HTML's *source*, not a live DOM —
+// the inline <script> block ships as literal text, so Hebrew hero strings,
+// object keys, and code patterns (flip / gating / snap-guard) are all
+// grep-able substrings of `res.body`. This mirrors the existing test style
+// in this file (see the ACTIVE/FINISHED/destination suites above).
+
+describe('GET /t/:token — presentationStatus hero strings', () => {
+  it('renders the WAITING hero copy', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'ASSIGNED',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'WAITING',
+      isLocationFresh: false,
+      isRouteAvailable: false,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.body).toContain('הבודק יצא לדרך. מיקום חי יופיע בעוד רגע.');
+  });
+
+  it('renders the NEARBY hero copy', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'NEARBY',
+      isLocationFresh: true,
+      isRouteAvailable: true,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.body).toContain('הבודק קרוב אליך');
+  });
+
+  it('renders both STALE_LOCATION warning-strip lines', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'STALE_LOCATION',
+      isLocationFresh: false,
+      isRouteAvailable: false,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.body).toContain('לא התקבל עדכון מיקום בדקות האחרונות.');
+    expect(res.body).toContain('זמן ההגעה מוצג כהערכה בלבד.');
+    // Hero text for STALE_LOCATION matches EN_ROUTE per spec.
+    expect(res.body).toContain('STALE_LOCATION:');
+  });
+
+  it('renders the UNAVAILABLE hero copy', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'ASSIGNED',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'UNAVAILABLE',
+      isLocationFresh: false,
+      isRouteAvailable: false,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.body).toContain('המעקב לא זמין כרגע, אך הבודק בדרך.');
+  });
+
+  it('renders the COMPLETED hero copy', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'FINISHED',
+      taskFieldStatus: 'FINISHED_FIELD',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'COMPLETED',
+      isLocationFresh: false,
+      isRouteAvailable: false,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.body).toContain('הבדיקה הסתיימה. תודה.');
+  });
+
+  it('prefers a server-provided headline over the local fallback map', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'EN_ROUTE',
+      headline: 'משפט מותאם אישית מהשרת',
+      isLocationFresh: true,
+      isRouteAvailable: true,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    // The headline itself is only interpolated into the JSON initial-state
+    // blob (never HTML body text) — assert the client code prioritizes it.
+    expect(res.body).toContain('if (state.headline) return state.headline;');
+    expect(res.body).toContain('"headline":"');
+  });
+});
+
+describe('GET /t/:token — legacy payload (no presentationStatus) still renders', () => {
+  it('falls back to the legacy status-keyed hero map for an ACTIVE session', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      lastLocation: { lat: 32.0853, lng: 34.7818, at: '2026-07-08T09:00:00Z', accuracy: 15 },
+      etaMinutes: 25,
+      expectedArrivalAt: '2026-07-08T09:25:00Z',
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.statusCode).toBe(200);
+    // Legacy fallback text is untouched — old payloads read identically.
+    expect(res.body).toContain('הבודק בדרך אליך');
+    expect(res.body).toContain('"lat":32.0853');
+    expect(res.body).toContain('"etaMinutes":25');
+    // No presentationStatus/headline key present in the initial-state blob.
+    expect(res.body).not.toContain('"presentationStatus"');
+  });
+
+  it('falls back correctly for a terminal legacy CANCELED session', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'CANCELED',
+      taskFieldStatus: 'DECLINED',
+      updatedAt: '2026-07-08T09:15:00Z',
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('"status":"CANCELED"');
+  });
+});
+
+describe('GET /t/:token — distance formatting', () => {
+  it('embeds both the kilometer and meter branches of the distance formatter', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'EN_ROUTE',
+      isLocationFresh: true,
+      isRouteAvailable: true,
+      distanceMeters: 1250,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    // Both formatting branches ship as source (client picks the right one at
+    // runtime); assert the Hebrew units and the km/m threshold are present.
+    expect(res.body).toContain("' ק״מ'");
+    expect(res.body).toContain("' מטרים'");
+    expect(res.body).toContain('meters < 1000');
+    expect(res.body).toContain('"distanceMeters":1250');
+  });
+});
+
+describe('GET /t/:token — OSRM route GeoJSON coordinate flip', () => {
+  it('embeds the [lng,lat] -> [lat,lng] flip for OSRM geometry', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'EN_ROUTE',
+      isLocationFresh: true,
+      isRouteAvailable: true,
+      workerLocation: { lat: 32.0853, lng: 34.7818, updatedAt: '2026-07-08T09:00:00Z' },
+      destinationLocation: { lat: 32.011, lng: 34.7712, address: 'X' },
+      route: {
+        type: 'OSRM',
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [34.7818, 32.0853],
+            [34.7712, 32.011],
+          ],
+        },
+        distanceMeters: 1800,
+        durationSeconds: 300,
+      },
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    // GeoJSON is [lng, lat]; Leaflet wants [lat, lng] — assert the flip code.
+    expect(res.body).toContain('route.geometry.coordinates.map((c) => [c[1], c[0]])');
+    // The straight-line dashed fallback branch must still be present too.
+    expect(res.body).toContain("dashed ? '6 8' : null");
+    expect(res.body).toContain('"type":"OSRM"');
+  });
+});
+
+describe('GET /t/:token — live ETA countdown gating', () => {
+  it('ships countdown code gated on isLocationFresh === true and EN_ROUTE/NEARBY', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'EN_ROUTE',
+      isLocationFresh: true,
+      isRouteAvailable: true,
+      durationSeconds: 600,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.body).toContain("state.isLocationFresh === true");
+    expect(res.body).toContain("presentation === 'EN_ROUTE' || presentation === 'NEARBY'");
+    // Never phrased as exact / traffic-aware.
+    expect(res.body).toContain('זמן הגעה משוער');
+    expect(res.body).toContain("'פחות מדקה'");
+  });
+});
+
+describe('GET /t/:token — marker animation with snap guard', () => {
+  it('ships requestAnimationFrame interpolation and the 2km snap guard', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'EN_ROUTE',
+      isLocationFresh: true,
+      isRouteAvailable: true,
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.body).toContain('requestAnimationFrame(step)');
+    expect(res.body).toContain('jumpMeters > 2000');
+    expect(res.body).toContain('durationMs = 1500');
+  });
+});
+
+describe('GET /t/:token — initial-state embedding remains safe (safeJson regression)', () => {
+  it('escapes a </script> breakout attempt inside the address field', async () => {
+    getPublicView.mockResolvedValueOnce({
+      status: 'ACTIVE',
+      taskFieldStatus: 'EN_ROUTE',
+      updatedAt: '2026-07-08T09:00:00Z',
+      presentationStatus: 'EN_ROUTE',
+      isLocationFresh: true,
+      isRouteAvailable: true,
+      destinationLocation: { lat: 32, lng: 34, address: '</script><script>alert(1)</script>' },
+    });
+    const res = await app.inject({ method: 'GET', url: `/t/${VALID_TOKEN}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('</script><script>alert(1)</script>');
+    // The neutralized form must still be present — safeJson() escapes `<`
+    // only (that's all that's needed to prevent a `</script>` breakout).
+    expect(res.body).toContain('\\u003c/script>\\u003cscript>alert(1)\\u003c/script>');
+  });
+});

@@ -37,6 +37,14 @@ vi.mock('../services/siteGeocodeCache', () => ({
   resolveTaskFieldDestination: (...a: unknown[]) => resolveDestMock(...a),
 }));
 
+// OSRM road-routing is a separate service (TRACK-A) — mock so getPublicView
+// tests never touch the network; unit tests for `osrmRoute.ts` itself live
+// in `osrmRoute.test.ts`.
+const getRoadRouteMock = vi.fn();
+vi.mock('../services/osrmRoute', () => ({
+  getRoadRoute: (...a: unknown[]) => getRoadRouteMock(...a),
+}));
+
 beforeEach(() => {
   poolQuery.mockReset();
   clientQuery.mockReset();
@@ -45,6 +53,12 @@ beforeEach(() => {
   resolveDestMock.mockReset();
   // Default: no destination unless a specific test opts in.
   resolveDestMock.mockResolvedValue(null);
+  getRoadRouteMock.mockReset();
+  // Default: OSRM unreachable/disabled unless a specific test opts in.
+  getRoadRouteMock.mockResolvedValue(null);
+  delete process.env.TRACKING_OSRM_ENABLED;
+  delete process.env.TRACKING_STALE_SECONDS;
+  delete process.env.TRACKING_NEARBY_METERS;
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -205,14 +219,27 @@ describe('getPublicView', () => {
       }],
     });
     const view = await getPublicView('token-x');
-    expect(view).toEqual({
+    // Regression: every pre-TRACK-A key is unchanged — use toMatchObject
+    // (not toEqual) because the view is now additively extended with the
+    // TRACK-A presentation fields (headline, presentationStatus, etc.).
+    expect(view).toMatchObject({
       status: 'ACTIVE',
       taskFieldStatus: 'EN_ROUTE',
       updatedAt: '2026-07-08T09:00:00Z',
       lastLocation: { lat: 32.0853, lng: 34.7818, at: '2026-07-08T09:00:00Z', accuracy: 15 },
-      etaMinutes: 25,
       expectedArrivalAt: '2026-07-08T09:25:00Z',
     });
+    // etaMinutes is now the *prioritized* ETA value (TRACK-A) rather than a
+    // raw passthrough of travelEtaMinutes — an intended improvement. This
+    // fixture's location is far too stale (fixed 2026-07-08 timestamp) to
+    // win priority (1), but `expectedArrivalAt` (2026-07-08T09:25:00Z) is
+    // also in the past relative to "now", so priority (2) doesn't win
+    // either — it falls through to travelEtaMinutes (priority 3).
+    expect(view?.etaMinutes).toBe(25);
+    // New additive fields are present and well-typed.
+    expect(typeof view?.headline).toBe('string');
+    expect(typeof view?.isLocationFresh).toBe('boolean');
+    expect(typeof view?.isRouteAvailable).toBe('boolean');
     // Explicit non-leaks — internal ids MUST NOT appear.
     const asString = JSON.stringify(view);
     expect(asString).not.toMatch(/taskFieldId/);
@@ -329,6 +356,278 @@ describe('getPublicView — destination', () => {
     expect(view?.status).toBe('EXPIRED');
     expect(view?.destination).toBeUndefined();
     expect(resolveDestMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── getPublicView — TRACK-A enrichment (ETA / freshness / presentation) ────
+//
+// Uses relative timestamps (Date.now() +/- offsets) rather than fixed 2026
+// dates, since freshness/staleness is computed against wall-clock "now" at
+// call time.
+
+function buildActiveRow(overrides: Record<string, unknown> = {}) {
+  const now = Date.now();
+  return {
+    taskFieldId: 'tf-9',
+    status: 'ACTIVE',
+    fieldStatus: 'EN_ROUTE',
+    updatedAt: new Date(now - 30_000).toISOString(),
+    arrivedAt: null,
+    endedAt: null,
+    expiresAt: new Date(now + 3_600_000).toISOString(),
+    lastLocationAt: new Date(now - 5_000).toISOString(),
+    lat: 32.0,
+    lng: 34.0,
+    accuracy: 10,
+    liveAt: new Date(now - 5_000).toISOString(), // fresh by default
+    travelEtaMinutes: null,
+    expectedArrivalAt: null,
+    ...overrides,
+  };
+}
+
+const FAR_DEST = { lat: 32.05, lng: 34.05, address: 'רחוב רחוק 1, עיר' }; // ~6.6km away
+const NEAR_DEST = { lat: 32.001, lng: 34.0, address: 'רחוב קרוב 1, עיר' }; // ~111m away
+
+describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
+  it('fresh location + OSRM success → OSRM route, eta from duration, EN_ROUTE', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [buildActiveRow()] });
+    resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+    getRoadRouteMock.mockResolvedValueOnce({
+      geometry: { type: 'LineString', coordinates: [[34, 32], [34.05, 32.05]] },
+      distanceMeters: 6000,
+      durationSeconds: 600,
+    });
+
+    const view = await getPublicView('token-x');
+
+    expect(getRoadRouteMock).toHaveBeenCalledWith({ lat: 32.0, lng: 34.0 }, { lat: 32.05, lng: 34.05 });
+    expect(view?.presentationStatus).toBe('EN_ROUTE');
+    expect(view?.headline).toBe('הבודק בדרך אליך');
+    expect(view?.route).toEqual({
+      type: 'OSRM',
+      geometry: { type: 'LineString', coordinates: [[34, 32], [34.05, 32.05]] },
+      distanceMeters: 6000,
+      durationSeconds: 600,
+    });
+    expect(view?.distanceMeters).toBe(6000);
+    expect(view?.durationSeconds).toBe(600);
+    expect(view?.isRouteAvailable).toBe(true);
+    expect(view?.etaMinutes).toBe(10); // ceil(600/60)
+    expect(view?.etaText).toBe('זמן הגעה משוער: 10 דקות');
+    expect(view?.fallbackReason).toBeUndefined();
+    expect(view?.isLocationFresh).toBe(true);
+  });
+
+  it('fresh location + OSRM failure → STRAIGHT_LINE + haversine distance, eta falls back to expectedArrivalAt', async () => {
+    process.env.TRACKING_OSRM_ENABLED = 'true'; // enabled but the call itself fails
+    const future = new Date(Date.now() + 15 * 60_000).toISOString();
+    poolQuery.mockResolvedValueOnce({ rows: [buildActiveRow({ expectedArrivalAt: future })] });
+    resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+    getRoadRouteMock.mockResolvedValueOnce(null); // OSRM failed
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.route?.type).toBe('STRAIGHT_LINE');
+    expect(view?.route?.durationSeconds).toBeUndefined();
+    expect(view?.route?.distanceMeters).toBeGreaterThan(0);
+    expect(view?.distanceMeters).toBeGreaterThan(0);
+    expect(view?.isRouteAvailable).toBe(false);
+    expect(view?.fallbackReason).toBe('OSRM_FAILED');
+    // Falls through to priority (2): expectedArrivalAt.
+    expect(view?.etaText).toMatch(/^הגעה משוערת: \d{2}:\d{2}$/);
+    expect(view?.etaMinutes).toBeGreaterThan(0);
+  });
+
+  it('OSRM disabled (default) + fresh + no expectedArrivalAt → STRAIGHT_LINE, fallbackReason OSRM_DISABLED, eta from travelEtaMinutes', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [buildActiveRow({ travelEtaMinutes: 18 })] });
+    resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+    // getRoadRouteMock default resolves null (unmocked call would be a bug — OSRM disabled means tracking.ts still calls it since gating is inside osrmRoute, but here we just confirm the fallback wiring).
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.route?.type).toBe('STRAIGHT_LINE');
+    expect(view?.fallbackReason).toBe('OSRM_DISABLED');
+    expect(view?.etaMinutes).toBe(18);
+    expect(view?.etaText).toBe('זמן הגעה משוער: 18 דקות (לפי דיווח הבודק)');
+  });
+
+  it('stale location → STALE_LOCATION, OSRM is never called, etaText is marked as an estimate', async () => {
+    const staleLiveAt = new Date(Date.now() - 10 * 60_000).toISOString(); // 10 min old
+    poolQuery.mockResolvedValueOnce({
+      rows: [buildActiveRow({ liveAt: staleLiveAt, lastLocationAt: staleLiveAt, travelEtaMinutes: 12 })],
+    });
+    resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.presentationStatus).toBe('STALE_LOCATION');
+    expect(view?.headline).toBe('הבודק בדרך אליך');
+    expect(view?.isLocationFresh).toBe(false);
+    expect(getRoadRouteMock).not.toHaveBeenCalled();
+    expect(view?.route?.type).toBe('STRAIGHT_LINE');
+    expect(view?.fallbackReason).toBe('STALE_LOCATION');
+    expect(view?.etaMinutes).toBe(12);
+    expect(view?.etaText).toBe('זמן הגעה משוער: 12 דקות (לפי דיווח הבודק) (הערכה בלבד)');
+  });
+
+  it('no worker location yet → WAITING, no route, fallbackReason NO_LOCATION', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [buildActiveRow({ lat: null, lng: null, liveAt: null, lastLocationAt: null })],
+    });
+    resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.presentationStatus).toBe('WAITING');
+    expect(view?.headline).toBe('הבודק יצא לדרך. מיקום חי יופיע בעוד רגע.');
+    expect(view?.workerLocation).toBeUndefined();
+    expect(view?.lastLocation).toBeUndefined();
+    expect(view?.route).toBeUndefined();
+    expect(view?.fallbackReason).toBe('NO_LOCATION');
+    expect(view?.isLocationFresh).toBe(false);
+    expect(getRoadRouteMock).not.toHaveBeenCalled();
+  });
+
+  it('fresh location within TRACKING_NEARBY_METERS of destination → NEARBY', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [buildActiveRow()] });
+    resolveDestMock.mockResolvedValueOnce(NEAR_DEST); // ~111m away
+    getRoadRouteMock.mockResolvedValueOnce(null); // OSRM disabled/failed — haversine still used for NEARBY
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.distanceMeters).toBeLessThanOrEqual(300);
+    expect(view?.presentationStatus).toBe('NEARBY');
+    expect(view?.headline).toBe('הבודק קרוב אליך');
+  });
+
+  it('missing destination → no route at all, fallbackReason NO_DESTINATION, page-safe (worker location still present)', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [buildActiveRow()] });
+    resolveDestMock.mockResolvedValueOnce(null); // resolver couldn't geocode
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.destination).toBeUndefined();
+    expect(view?.destinationLocation).toBeUndefined();
+    expect(view?.route).toBeUndefined();
+    expect(view?.fallbackReason).toBe('NO_DESTINATION');
+    expect(view?.isRouteAvailable).toBe(false);
+    // Page-safe: worker location is still exposed even without a destination.
+    expect(view?.workerLocation).toBeDefined();
+    expect(getRoadRouteMock).not.toHaveBeenCalled();
+  });
+
+  it('FINISHED → COMPLETED, and NO workerLocation/lastLocation keys even if the worker still has a live ping', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [buildActiveRow({ status: 'FINISHED', endedAt: new Date().toISOString() })],
+    });
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.status).toBe('FINISHED');
+    expect(view?.presentationStatus).toBe('COMPLETED');
+    expect(view?.headline).toBe('הבדיקה הסתיימה. תודה.');
+    expect(view?.workerLocation).toBeUndefined();
+    expect(view?.lastLocation).toBeUndefined();
+    expect(view?.route).toBeUndefined();
+    expect(view?.etaMinutes).toBeUndefined();
+    expect(resolveDestMock).not.toHaveBeenCalled();
+    expect(getRoadRouteMock).not.toHaveBeenCalled();
+  });
+
+  it('CANCELED / SUPERSEDED → UNAVAILABLE', async () => {
+    poolQuery.mockResolvedValueOnce({ rows: [buildActiveRow({ status: 'CANCELED' })] });
+    const view = await getPublicView('token-x');
+    expect(view?.presentationStatus).toBe('UNAVAILABLE');
+    expect(view?.headline).toBe('המעקב לא זמין כרגע, אך הבודק בדרך.');
+  });
+
+  it('ARRIVED → ARRIVED, still exposes worker location, no route/eta computed', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [buildActiveRow({ status: 'ARRIVED', arrivedAt: new Date().toISOString() })],
+    });
+    resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.presentationStatus).toBe('ARRIVED');
+    expect(view?.headline).toBe('הבודק הגיע לאתר.');
+    expect(view?.workerLocation).toBeDefined();
+    expect(view?.route).toBeUndefined();
+    expect(view?.etaMinutes).toBeUndefined();
+    expect(getRoadRouteMock).not.toHaveBeenCalled();
+  });
+
+  it('lazy EXPIRED → EXPIRED, no location, no route/eta', async () => {
+    poolQuery.mockResolvedValueOnce({
+      rows: [buildActiveRow({ expiresAt: new Date(Date.now() - 1000).toISOString() })],
+    });
+
+    const view = await getPublicView('token-x');
+
+    expect(view?.status).toBe('EXPIRED');
+    expect(view?.presentationStatus).toBe('EXPIRED');
+    expect(view?.headline).toBe('המעקב אינו פעיל');
+    expect(view?.workerLocation).toBeUndefined();
+    expect(view?.route).toBeUndefined();
+    expect(resolveDestMock).not.toHaveBeenCalled();
+    expect(getRoadRouteMock).not.toHaveBeenCalled();
+  });
+
+  describe('ETA priority order', () => {
+    it('priority 1: fresh location + OSRM duration wins even when expectedArrivalAt/travelEtaMinutes also exist', async () => {
+      const future = new Date(Date.now() + 20 * 60_000).toISOString();
+      poolQuery.mockResolvedValueOnce({
+        rows: [buildActiveRow({ expectedArrivalAt: future, travelEtaMinutes: 99 })],
+      });
+      resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+      getRoadRouteMock.mockResolvedValueOnce({
+        geometry: { type: 'LineString', coordinates: [] },
+        distanceMeters: 6000,
+        durationSeconds: 300,
+      });
+      const view = await getPublicView('token-x');
+      expect(view?.etaMinutes).toBe(5); // ceil(300/60), NOT 99 or the expectedArrivalAt-derived value
+      expect(view?.etaText).toBe('זמן הגעה משוער: 5 דקות');
+    });
+
+    it('priority 2: no OSRM route, but expectedArrivalAt in the future wins over travelEtaMinutes', async () => {
+      const future = new Date(Date.now() + 20 * 60_000).toISOString();
+      poolQuery.mockResolvedValueOnce({
+        rows: [buildActiveRow({ expectedArrivalAt: future, travelEtaMinutes: 99 })],
+      });
+      resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+      getRoadRouteMock.mockResolvedValueOnce(null);
+      const view = await getPublicView('token-x');
+      expect(view?.etaMinutes).not.toBe(99);
+      expect(view?.etaText).toMatch(/^הגעה משוערת: \d{2}:\d{2}$/);
+    });
+
+    it('priority 3: no OSRM route, no future expectedArrivalAt → travelEtaMinutes wins', async () => {
+      const past = new Date(Date.now() - 60_000).toISOString(); // already in the past — not a valid ETA source
+      poolQuery.mockResolvedValueOnce({
+        rows: [buildActiveRow({ expectedArrivalAt: past, travelEtaMinutes: 7 })],
+      });
+      resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+      getRoadRouteMock.mockResolvedValueOnce(null);
+      const view = await getPublicView('token-x');
+      expect(view?.etaMinutes).toBe(7);
+      expect(view?.etaText).toBe('זמן הגעה משוער: 7 דקות (לפי דיווח הבודק)');
+    });
+
+    it('priority 4: none of the three sources available → no etaMinutes/etaText, fallbackReason NO_ETA_SOURCE', async () => {
+      poolQuery.mockResolvedValueOnce({
+        rows: [buildActiveRow({ expectedArrivalAt: null, travelEtaMinutes: null })],
+      });
+      resolveDestMock.mockResolvedValueOnce(FAR_DEST);
+      getRoadRouteMock.mockResolvedValueOnce(null);
+      const view = await getPublicView('token-x');
+      expect(view?.etaMinutes).toBeUndefined();
+      expect(view?.etaText).toBeUndefined();
+      // OSRM_DISABLED already claimed fallbackReason (route-level failure) —
+      // NO_ETA_SOURCE only applies when nothing else claimed it first.
+      expect(view?.fallbackReason).toBe('OSRM_DISABLED');
+    });
   });
 });
 

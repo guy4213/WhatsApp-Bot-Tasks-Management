@@ -9,6 +9,89 @@ Conventions:
 
 ---
 
+## 0.7 Wolt-lite tracking upgrade — OSRM routing, live ETA, customer link (2026-07-09)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+Meta v2 template (`customer_worker_en_route_v2`) prepared but NOT submitted
+(needs `TRACKING_PUBLIC_BASE_URL` + Meta creds — see follow-ups).
+
+**Spec:** the in-session product brief (2026-07-09): keep the existing
+architecture (TrackingSession / WorkerLiveLocation / OwnTracks / `/tracking/:token`
+/ `/t/:token` / Leaflet); NO Navigation Connect, NO Google Cloud, NO native app,
+NO browser GPS. ETA is a road-routing ESTIMATE from latest GPS + OSRM — never
+presented as exact/traffic-aware ("זמן הגעה משוער" wording only; enforced in
+code comments and UI strings).
+
+**Implemented (3 parallel Sonnet sub-agents; orchestrator integration + QA):**
+
+1. **`src/services/osrmRoute.ts` (new)** — `getRoadRoute(worker, dest)`:
+   `TRACKING_OSRM_ENABLED` flag, `OSRM_BASE_URL` (public demo server for
+   dev/MVP only), 3s AbortController timeout, in-memory 20s cache keyed on
+   4-decimal-rounded coordinates (null results cached too), injectable fetch,
+   never throws. 18 tests.
+
+2. **`src/services/tracking.ts`** — `getPublicView` enriched ADDITIVELY (no
+   existing key removed): `headline` (Hebrew), `presentationStatus`
+   (WAITING/EN_ROUTE/NEARBY/ARRIVED/COMPLETED/STALE_LOCATION/UNAVAILABLE/EXPIRED),
+   `workerLocation`/`destinationLocation` (new naming mirrors), `route`
+   (OSRM GeoJSON or straight-line fallback), `distanceMeters`,
+   `durationSeconds`, prioritized `etaMinutes` + `etaText`
+   (OSRM-fresh → expectedArrivalAt → travelEtaMinutes → none; stale appends
+   "(הערכה בלבד)"), `lastUpdatedAt`, `locationFreshnessSeconds`,
+   `isLocationFresh` (`TRACKING_STALE_SECONDS`, default 120),
+   `isRouteAvailable`, `fallbackReason`. NEARBY within
+   `TRACKING_NEARBY_METERS` (default 300). Stale location SKIPS the OSRM call.
+   Nothing sensitive exposed (no task/user ids, no phone, no raw payload).
+
+3. **`src/routes/trackingPage.template.ts`** — customer page: all Hebrew
+   states incl. the stale two-liner ("לא התקבל עדכון מיקום בדקות האחרונות." /
+   "זמן ההגעה מוצג כהערכה בלבד."), distance line (ק״מ/מטרים), OSRM solid
+   polyline (GeoJSON [lng,lat]→[lat,lng] flip) vs dashed straight fallback,
+   smooth marker animation (rAF ease-out 1.5s, >2km snap guard), live ETA
+   countdown between polls gated STRICTLY on `isLocationFresh === true` +
+   EN_ROUTE/NEARBY, terminal statuses stop polling. Legacy payloads (old
+   backend) still render byte-identically (regression-tested).
+
+4. **Order fix (`src/ai/router.ts` `performTransition`)** — on DEPARTED the
+   tracking session is now opened (awaited, try/catch) BEFORE
+   `advanceFieldStatus`, because the customer EN_ROUTE notification fires
+   inside `advanceFieldStatus` and needs the session token for the link.
+   Call-order regression test added.
+
+5. **Customer link (`src/services/customerNotifications.ts` + new
+   `src/services/trackingLink.ts`)** — after the dedup claim, resolves the
+   active session token → `TRACKING_PUBLIC_BASE_URL`/t/<token>. Freeform
+   (in-window) path appends the link to the message text NOW; the template
+   path passes a URL-button param ONLY when
+   `WHATSAPP_TEMPLATE_CUSTOMER_WORKER_EN_ROUTE` is overridden to the v2
+   template (legacy-guard identical to `dueDateReminder.ts` — v1 keeps its
+   exact current payload). No token/base-url → sends exactly as before.
+   Dedup via `CustomerNotificationLog` unchanged.
+
+6. **Scripts** — `scripts/create-customer-en-route-template-v2.ts` (v1 body
+   verbatim + URL button `<base>/t/{{1}}`; refuses LIVE without
+   `TRACKING_PUBLIC_BASE_URL`; dry-run verified by the orchestrator) and
+   `scripts/seedTrackingDemo.ts` (opens a session, prints the /t/ URL, steps a
+   fake WorkerLiveLocation along a line for demos).
+
+**New env (documented in .env.example):** `TRACKING_OSRM_ENABLED=false`,
+`OSRM_BASE_URL`, `TRACKING_PUBLIC_BASE_URL`, `TRACKING_STALE_SECONDS=120`,
+`TRACKING_NEARBY_METERS=300`. **DB changes: NONE** (016+017 suffice).
+
+**Orchestrator QA:** all diffs reviewed line by line; backend↔page contract
+compared field-by-field (matches; page also falls back to legacy fields);
+`npx tsc --noEmit` clean repo-wide; 254/254 tests across the 12
+tracking-related files; v2 template dry-run payload verified; full-suite run
+green (see report). Known follow-ups: (1) submit v2 template once
+`TRACKING_PUBLIC_BASE_URL` + Meta creds available, then set
+`WHATSAPP_TEMPLATE_CUSTOMER_WORKER_EN_ROUTE=customer_worker_en_route_v2`;
+(2) set `TRACKING_OSRM_ENABLED=true` + `TRACKING_PUBLIC_BASE_URL` in Render
+when ready; (3) demo-server OSRM is dev/MVP only — move to a self-hosted OSRM
+before scale; (4) `fallbackReason='NO_ETA_SOURCE'` currently unreachable
+(defensive only, documented in code).
+
+---
+
 ## 0.6 Live tracking foundation — Wolt-lite backend (2026-07-08)
 
 **Status:** DONE (local, uncommitted). Plan approved in-session — see

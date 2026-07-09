@@ -26,9 +26,11 @@
  */
 import { pool } from '../db/connection';
 import { moduleLogger } from '../utils/logger';
-import { notify } from '../whatsapp/templates';
+import { notify, type NotifyArgs } from '../whatsapp/templates';
 import { sendTextMessage } from '../whatsapp/sender';
 import { writeAuditLog } from '../utils/auditLog';
+import { getActiveTrackingToken, buildTrackingUrl } from './trackingLink';
+import { templateName, DEFAULT_TEMPLATE_NAMES } from '../whatsapp/templateNames';
 
 const log = moduleLogger('customerNotifications');
 
@@ -155,13 +157,17 @@ function buildFallbackText(
   workerName: string,
   inspectionLabel: string,
   workerPhone: string | null,
+  trackingUrl?: string | null,
 ): string {
-  return (
+  const base =
     `שלום ${recipientName}!\n\n` +
     `${workerName} מ־${COMPANY_NAME} יצא לדרך אליך לביצוע ${inspectionLabel}.\n\n` +
     `לפניות ישירות לבודק: ${workerPhone ?? ''}\n\n` +
-    `בהצלחה!`
-  );
+    `בהצלחה!`;
+  if (trackingUrl) {
+    return `${base}\n\nלצפייה במיקום הבודק ובזמן הגעה משוער:\n${trackingUrl}`;
+  }
+  return base;
 }
 
 /**
@@ -218,13 +224,38 @@ export async function sendWorkerEnRouteNotification(
     return;
   }
 
+  // Best-effort tracking link — never blocks or fails the notification.
+  const token = await getActiveTrackingToken(taskFieldId);
+  const trackingUrl = token ? buildTrackingUrl(token) : null;
+  if (!trackingUrl) {
+    log.info({ taskFieldId }, 'tracking link unavailable — sent without link');
+  }
+
+  // The still-approved `customer_worker_en_route` template (v1) is body-only:
+  // 4 vars, no BUTTONS component. Until an operator explicitly points
+  // WHATSAPP_TEMPLATE_CUSTOMER_WORKER_EN_ROUTE at the new `_v2` template
+  // (same body + a URL button) once Meta approves it, the OUT-OF-WINDOW
+  // template path must never send a buttonParams payload against the v1
+  // template — Meta rejects a component-count mismatch. Mirrors the
+  // legacy-template guard in `dueDateReminder.ts`.
+  const usingLegacyTemplate =
+    templateName('CUSTOMER_WORKER_EN_ROUTE') === DEFAULT_TEMPLATE_NAMES.CUSTOMER_WORKER_EN_ROUTE;
+
+  const notifyArgs: NotifyArgs = {
+    to: recipientPhone,
+    key: 'CUSTOMER_WORKER_EN_ROUTE',
+    bodyParams: [recipientName, workerName, inspectionLabel, workerPhone ?? ''],
+    fallbackText: buildFallbackText(recipientName, workerName, inspectionLabel, workerPhone, trackingUrl),
+  };
+  if (trackingUrl && token && !usingLegacyTemplate) {
+    notifyArgs.templateButtonParams = [{ subType: 'url', index: 0, payload: token }];
+  }
+
   try {
-    await notify({
-      to: recipientPhone,
-      key: 'CUSTOMER_WORKER_EN_ROUTE',
-      bodyParams: [recipientName, workerName, inspectionLabel, workerPhone ?? ''],
-      fallbackText: buildFallbackText(recipientName, workerName, inspectionLabel, workerPhone),
-    });
+    await notify(notifyArgs);
+    if (trackingUrl) {
+      log.info({ taskFieldId }, 'customer tracking link sent');
+    }
     await auditCustomerNotification(taskFieldId, workerUserId, recipientPhone, 'SUCCESS');
     await sendWorkerFeedback(
       workerPhone,

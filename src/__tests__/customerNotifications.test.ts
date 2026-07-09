@@ -154,16 +154,19 @@ describe('sendWorkerEnRouteNotification — send behavior', () => {
     poolQueryMock
       .mockResolvedValueOnce({ rows: [mockContextRow()], rowCount: 1 })  // loadNotificationContext
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })                    // claim (won)
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })                    // getActiveTrackingToken (none)
       .mockResolvedValueOnce({ rows: [], rowCount: 1 });                   // stampWorkerFeedback
 
     const svc = await loadService();
     await svc.sendWorkerEnRouteNotification('tf-1', 'worker-user-1');
 
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    const notifyArgs = (notifyMock.mock.calls as unknown as Array<Array<{ to: string; key: string; bodyParams: string[] }>>)[0][0];
+    const notifyArgs = (notifyMock.mock.calls as unknown as Array<Array<{ to: string; key: string; bodyParams: string[]; templateButtonParams?: unknown }>>)[0][0];
     expect(notifyArgs.to).toBe('972501234567');
     expect(notifyArgs.key).toBe('CUSTOMER_WORKER_EN_ROUTE');
     expect(notifyArgs.bodyParams).toEqual(['דני', 'אלירן', 'בדיקת ראדון', '972541234567']);
+    // Regression: no token available → no buttonParams key at all.
+    expect(notifyArgs).not.toHaveProperty('templateButtonParams');
 
     expect(sendTextMock).toHaveBeenCalledTimes(1);
     const feedback = (sendTextMock.mock.calls as unknown as Array<Array<{ to: string; text: string }>>)[0][0];
@@ -182,6 +185,7 @@ describe('sendWorkerEnRouteNotification — send behavior', () => {
         rowCount: 1,
       })
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // getActiveTrackingToken (none)
       .mockResolvedValueOnce({ rows: [], rowCount: 1 });
 
     const svc = await loadService();
@@ -190,6 +194,61 @@ describe('sendWorkerEnRouteNotification — send behavior', () => {
     const args = (notifyMock.mock.calls as unknown as Array<Array<{ to: string; bodyParams: string[] }>>)[0][0];
     expect(args.to).toBe('972509998877');
     expect(args.bodyParams[0]).toBe('לקוח מהחוזה');
+  });
+
+  it('appends the tracking link to fallbackText when a token + base URL exist (default template → no buttonParams)', async () => {
+    process.env.TRACKING_PUBLIC_BASE_URL = 'https://bot.example.com';
+    poolQueryMock
+      .mockResolvedValueOnce({ rows: [mockContextRow()], rowCount: 1 })            // loadNotificationContext
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })                            // claim (won)
+      .mockResolvedValueOnce({ rows: [{ publicToken: 'tok123' }], rowCount: 1 })    // getActiveTrackingToken
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 });                           // stampWorkerFeedback
+
+    const svc = await loadService();
+    await svc.sendWorkerEnRouteNotification('tf-1', 'worker-user-1');
+
+    const args = (notifyMock.mock.calls as unknown as Array<Array<{ fallbackText: string; templateButtonParams?: unknown }>>)[0][0];
+    expect(args.fallbackText).toContain('https://bot.example.com/t/tok123');
+    // Default template name (v1) — never send buttonParams, even with a token.
+    expect(args).not.toHaveProperty('templateButtonParams');
+  });
+
+  it('passes templateButtonParams with the url button ONLY when the template name is overridden to v2', async () => {
+    process.env.TRACKING_PUBLIC_BASE_URL = 'https://bot.example.com';
+    process.env.WHATSAPP_TEMPLATE_CUSTOMER_WORKER_EN_ROUTE = 'customer_worker_en_route_v2';
+    poolQueryMock
+      .mockResolvedValueOnce({ rows: [mockContextRow()], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ publicToken: 'tok123' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+    const svc = await loadService();
+    await svc.sendWorkerEnRouteNotification('tf-1', 'worker-user-1');
+
+    const args = (notifyMock.mock.calls as unknown as Array<Array<{ templateButtonParams?: Array<{ subType: string; index: number; payload: string }> }>>)[0][0];
+    expect(args.templateButtonParams).toEqual([{ subType: 'url', index: 0, payload: 'tok123' }]);
+  });
+
+  it('no token available → sends without a link, notify() args shape unchanged (regression)', async () => {
+    process.env.TRACKING_PUBLIC_BASE_URL = 'https://bot.example.com';
+    poolQueryMock
+      .mockResolvedValueOnce({ rows: [mockContextRow()], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // no active session
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+    const svc = await loadService();
+    await svc.sendWorkerEnRouteNotification('tf-1', 'worker-user-1');
+
+    const args = (notifyMock.mock.calls as unknown as Array<Array<{ to: string; key: string; bodyParams: string[]; fallbackText: string; templateButtonParams?: unknown }>>)[0][0];
+    expect(args).toEqual({
+      to: '972501234567',
+      key: 'CUSTOMER_WORKER_EN_ROUTE',
+      bodyParams: ['דני', 'אלירן', 'בדיקת ראדון', '972541234567'],
+      fallbackText: expect.stringContaining('יצא לדרך'),
+    });
+    expect(args.fallbackText).not.toContain('לצפייה במיקום');
+    expect(args).not.toHaveProperty('templateButtonParams');
   });
 
   it('when no customer phone at all — no template send, worker gets ⚠️ manual-call message', async () => {
@@ -216,6 +275,7 @@ describe('sendWorkerEnRouteNotification — send behavior', () => {
     poolQueryMock
       .mockResolvedValueOnce({ rows: [mockContextRow()], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })  // claim won
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })  // getActiveTrackingToken (none)
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })  // markFailed
       .mockResolvedValueOnce({ rows: [], rowCount: 1 }); // stampWorkerFeedback
     notifyMock.mockRejectedValueOnce(new Error('Meta 400 template not approved'));

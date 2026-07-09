@@ -27,6 +27,7 @@ import crypto from 'crypto';
 import { pool } from '../db/connection';
 import { moduleLogger } from '../utils/logger';
 import { resolveTaskFieldDestination } from './siteGeocodeCache';
+import { getRoadRoute, type LatLng } from './osrmRoute';
 
 const log = moduleLogger('tracking');
 
@@ -189,12 +190,26 @@ export async function bumpSessionLocation(workerUserId: string): Promise<void> {
 
 // ── Public view (GET /tracking/:token) ────────────────────────────────────
 
+/**
+ * Wolt-lite presentation status — a customer-friendly collapse of the raw
+ * `TrackingSessionStatus` plus GPS freshness/proximity, driving the headline
+ * copy and the map/route rendering on the public tracking page.
+ */
+export type PresentationStatus =
+  | 'WAITING'
+  | 'EN_ROUTE'
+  | 'NEARBY'
+  | 'ARRIVED'
+  | 'COMPLETED'
+  | 'STALE_LOCATION'
+  | 'UNAVAILABLE'
+  | 'EXPIRED';
+
 export interface PublicTrackingView {
   status: TrackingSessionStatus;
   taskFieldStatus: string;
   updatedAt: string;
   lastLocation?: { lat: number; lng: number; at: string; accuracy?: number | null };
-  etaMinutes?: number;
   expectedArrivalAt?: string;
   /**
    * Destination site coords + address label. Only present when the session
@@ -203,6 +218,106 @@ export interface PublicTrackingView {
    * never carry this — same discipline as `lastLocation`.
    */
   destination?: { lat: number; lng: number; address?: string };
+
+  // ── TRACK-A additive enrichment (ETA / freshness / presentation) ────────
+  /** Ready-made Hebrew headline for the customer page — see `HEADLINES`. */
+  headline: string;
+  presentationStatus: PresentationStatus;
+  /** Mirror of `lastLocation` under the new naming used by the presentation layer. */
+  workerLocation?: { lat: number; lng: number; updatedAt: string };
+  /** Mirror of `destination` under the new naming used by the presentation layer. */
+  destinationLocation?: { lat: number; lng: number; address?: string };
+  /**
+   * Road route (OSRM) when available and location is fresh; otherwise a
+   * straight-line fallback (haversine) so the page always has *something*
+   * to draw. `undefined` when there is no worker location or no destination.
+   */
+  route?: {
+    type: 'OSRM' | 'STRAIGHT_LINE';
+    geometry: unknown;
+    distanceMeters?: number;
+    durationSeconds?: number;
+  };
+  distanceMeters?: number;
+  durationSeconds?: number;
+  /**
+   * Best-available ETA in minutes, per the priority chain in `getPublicView`
+   * (fresh OSRM duration > future `expectedArrivalAt` > `travelEtaMinutes`).
+   * NOTE: this supersedes the legacy `TaskField.travelEtaMinutes`-only value
+   * previously returned here — an intended improvement, not a regression.
+   */
+  etaMinutes?: number;
+  /** Ready-made Hebrew ETA sentence — "זמן הגעה משוער" wording only, never "waze"/traffic language. */
+  etaText?: string;
+  /** Worker location time if present, else the session's `updatedAt`. */
+  lastUpdatedAt?: string;
+  locationFreshnessSeconds?: number;
+  isLocationFresh: boolean;
+  isRouteAvailable: boolean;
+  fallbackReason?:
+    | 'STALE_LOCATION'
+    | 'OSRM_DISABLED'
+    | 'OSRM_FAILED'
+    | 'NO_DESTINATION'
+    | 'NO_LOCATION'
+    | 'NO_ETA_SOURCE';
+}
+
+const HEADLINES: Record<PresentationStatus, string> = {
+  WAITING: 'הבודק יצא לדרך. מיקום חי יופיע בעוד רגע.',
+  EN_ROUTE: 'הבודק בדרך אליך',
+  NEARBY: 'הבודק קרוב אליך',
+  ARRIVED: 'הבודק הגיע לאתר.',
+  COMPLETED: 'הבדיקה הסתיימה. תודה.',
+  STALE_LOCATION: 'הבודק בדרך אליך',
+  UNAVAILABLE: 'המעקב לא זמין כרגע, אך הבודק בדרך.',
+  EXPIRED: 'המעקב אינו פעיל',
+};
+
+function staleThresholdSeconds(): number {
+  const raw = process.env.TRACKING_STALE_SECONDS;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : 120;
+}
+
+function nearbyMeters(): number {
+  const raw = process.env.TRACKING_NEARBY_METERS;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : 300;
+}
+
+/** Great-circle distance in meters (haversine) — good enough for a straight-line fallback. */
+function haversineMeters(a: LatLng, b: LatLng): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** GeoJSON LineString between two points — note lng,lat coordinate order. */
+function straightLineGeometry(a: LatLng, b: LatLng): unknown {
+  return {
+    type: 'LineString',
+    coordinates: [
+      [a.lng, a.lat],
+      [b.lng, b.lat],
+    ],
+  };
+}
+
+/** `HH:MM` in Asia/Jerusalem, for the "הגעה משוערת: HH:MM" ETA sentence. */
+function formatJerusalemTime(iso: string): string {
+  return new Intl.DateTimeFormat('he-IL', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Jerusalem',
+  }).format(new Date(iso));
 }
 
 interface JoinedRow {
@@ -267,18 +382,37 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
     status: effectiveStatus,
     taskFieldStatus: row.fieldStatus,
     updatedAt: row.updatedAt,
+    // Non-optional defaults — overwritten below where applicable.
+    headline: '',
+    presentationStatus: 'WAITING',
+    isLocationFresh: false,
+    isRouteAvailable: false,
   };
 
   const showLocation =
     effectiveStatus === 'ACTIVE' || effectiveStatus === 'ARRIVED';
-  if (showLocation && row.lat != null && row.lng != null && row.liveAt) {
+  const hasLocation = Boolean(showLocation && row.lat != null && row.lng != null && row.liveAt);
+
+  if (hasLocation) {
     view.lastLocation = {
-      lat: row.lat,
-      lng: row.lng,
-      at: row.liveAt,
+      lat: row.lat as number,
+      lng: row.lng as number,
+      at: row.liveAt as string,
       accuracy: row.accuracy,
     };
+    view.workerLocation = {
+      lat: row.lat as number,
+      lng: row.lng as number,
+      updatedAt: row.liveAt as string,
+    };
+    const freshnessSeconds = Math.max(0, Math.round((now - new Date(row.liveAt as string).getTime()) / 1000));
+    view.locationFreshnessSeconds = freshnessSeconds;
+    view.isLocationFresh = freshnessSeconds <= staleThresholdSeconds();
   }
+
+  // Legacy fields kept exactly as before (ACTIVE-only, unconditional expose
+  // of expectedArrivalAt regardless of "future" — that gate only affects
+  // whether it's chosen as an ETA *source*, see computeEta below).
   if (effectiveStatus === 'ACTIVE' && row.travelEtaMinutes != null) {
     view.etaMinutes = row.travelEtaMinutes;
   }
@@ -290,12 +424,107 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
   // sessions get it; terminal statuses match the `lastLocation` discipline
   // and remain destination-less. Resolver is best-effort — a transient
   // geocoder failure returns null and the page falls back to worker-only.
+  let hasDestination = false;
   if (showLocation) {
     const dest = await resolveTaskFieldDestination(row.taskFieldId);
     if (dest) {
+      hasDestination = true;
       view.destination = { lat: dest.lat, lng: dest.lng, address: dest.address };
+      view.destinationLocation = { lat: dest.lat, lng: dest.lng, address: dest.address };
     }
   }
+
+  let fallbackReason: PublicTrackingView['fallbackReason'];
+
+  // Route + distance — ACTIVE only (ARRIVED needs no route; WAITING has no
+  // location; terminal statuses show nothing at all).
+  if (effectiveStatus === 'ACTIVE') {
+    const worker: LatLng | null = hasLocation ? { lat: row.lat as number, lng: row.lng as number } : null;
+    const dest: LatLng | null = view.destinationLocation
+      ? { lat: view.destinationLocation.lat, lng: view.destinationLocation.lng }
+      : null;
+
+    if (!worker) {
+      fallbackReason = 'NO_LOCATION';
+    } else if (!dest) {
+      fallbackReason = 'NO_DESTINATION';
+    } else if (!view.isLocationFresh) {
+      // Stale: skip the OSRM call entirely — don't burn requests on old coords.
+      const distance = haversineMeters(worker, dest);
+      view.route = { type: 'STRAIGHT_LINE', geometry: straightLineGeometry(worker, dest), distanceMeters: distance };
+      view.distanceMeters = distance;
+      fallbackReason = 'STALE_LOCATION';
+    } else {
+      const distance = haversineMeters(worker, dest);
+      const osrm = await getRoadRoute(worker, dest);
+      if (osrm) {
+        view.route = {
+          type: 'OSRM',
+          geometry: osrm.geometry,
+          distanceMeters: osrm.distanceMeters,
+          durationSeconds: osrm.durationSeconds,
+        };
+        view.distanceMeters = osrm.distanceMeters;
+        view.durationSeconds = osrm.durationSeconds;
+        view.isRouteAvailable = true;
+      } else {
+        view.route = { type: 'STRAIGHT_LINE', geometry: straightLineGeometry(worker, dest), distanceMeters: distance };
+        view.distanceMeters = distance;
+        fallbackReason = process.env.TRACKING_OSRM_ENABLED === 'true' ? 'OSRM_FAILED' : 'OSRM_DISABLED';
+      }
+    }
+  }
+
+  // presentationStatus — collapse raw session status + freshness/proximity.
+  if (effectiveStatus === 'EXPIRED') {
+    view.presentationStatus = 'EXPIRED';
+  } else if (effectiveStatus === 'FINISHED') {
+    view.presentationStatus = 'COMPLETED';
+  } else if (effectiveStatus === 'CANCELED' || effectiveStatus === 'SUPERSEDED') {
+    view.presentationStatus = 'UNAVAILABLE';
+  } else if (effectiveStatus === 'ARRIVED') {
+    view.presentationStatus = 'ARRIVED';
+  } else {
+    // ACTIVE
+    if (!hasLocation) {
+      view.presentationStatus = 'WAITING';
+    } else if (!view.isLocationFresh) {
+      view.presentationStatus = 'STALE_LOCATION';
+    } else if (hasDestination && view.distanceMeters != null && view.distanceMeters <= nearbyMeters()) {
+      view.presentationStatus = 'NEARBY';
+    } else {
+      view.presentationStatus = 'EN_ROUTE';
+    }
+  }
+  view.headline = HEADLINES[view.presentationStatus];
+
+  // ETA priority chain (ACTIVE only — ARRIVED/terminal need no ETA).
+  if (effectiveStatus === 'ACTIVE') {
+    if (view.isLocationFresh && view.route?.type === 'OSRM' && view.durationSeconds != null) {
+      view.etaMinutes = Math.ceil(view.durationSeconds / 60);
+      view.etaText = `זמן הגעה משוער: ${view.etaMinutes} דקות`;
+    } else if (row.expectedArrivalAt && new Date(row.expectedArrivalAt).getTime() > now) {
+      const minutes = Math.max(0, Math.ceil((new Date(row.expectedArrivalAt).getTime() - now) / 60000));
+      view.etaMinutes = minutes;
+      view.etaText = `הגעה משוערת: ${formatJerusalemTime(row.expectedArrivalAt)}`;
+    } else if (row.travelEtaMinutes != null) {
+      view.etaMinutes = row.travelEtaMinutes;
+      view.etaText = `זמן הגעה משוער: ${row.travelEtaMinutes} דקות (לפי דיווח הבודק)`;
+    } else if (!fallbackReason) {
+      fallbackReason = 'NO_ETA_SOURCE';
+    }
+
+    // Stale location: still show the best available ETA, but mark it as an estimate.
+    if (hasLocation && !view.isLocationFresh && view.etaText) {
+      view.etaText += ' (הערכה בלבד)';
+    }
+  }
+
+  view.lastUpdatedAt = view.workerLocation?.updatedAt ?? row.updatedAt;
+  if (fallbackReason) {
+    view.fallbackReason = fallbackReason;
+  }
+
   return view;
 }
 

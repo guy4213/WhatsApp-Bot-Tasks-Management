@@ -2375,6 +2375,19 @@ async function performTransition(
   taskFieldId: string,
   transition: AdvanceTransition,
 ): Promise<void> {
+  if (transition === 'DEPARTED') {
+    // Live-tracking (migration 016): open the tracking session BEFORE
+    // advanceFieldStatus so the customer EN_ROUTE notification (fired inside
+    // advanceFieldStatus) can already resolve the session token for the
+    // tracking link. A tracking failure must never block the status write.
+    // openTrackingSession transactionally supersedes any prior ACTIVE|ARRIVED
+    // session this worker still owns.
+    try {
+      await openTrackingSession({ taskFieldId, workerUserId: user.id });
+    } catch (err) {
+      log.error({ err, taskFieldId, workerUserId: user.id }, 'openTrackingSession failed (continuing)');
+    }
+  }
   await advanceFieldStatus({ taskFieldId, transition, updatedBy: user.id });
   if (transition === 'FINISHED') {
     // finished_followup carries no activeInspection → the pointer is dropped.
@@ -2392,13 +2405,6 @@ async function performTransition(
     // is the source of truth for the next "הגעתי"/"סיימתי", independent of the ETA.
     await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
       awaiting: 'status_eta_prompt',
-    });
-    // Live-tracking (migration 016): open a customer-facing session. Fires and
-    // forgets — a tracking failure MUST NOT block the worker's ETA prompt.
-    // openTrackingSession transactionally supersedes any prior ACTIVE|ARRIVED
-    // session this worker still owns.
-    void openTrackingSession({ taskFieldId, workerUserId: user.id }).catch((err) => {
-      log.error({ err, taskFieldId, workerUserId: user.id }, 'openTrackingSession failed');
     });
     const wamid = await sendTextMessage({ to: user.phone, text: departedEtaPrompt() });
     // Phase 2: quoted-reply context ref (best-effort). A reply to the ETA prompt
