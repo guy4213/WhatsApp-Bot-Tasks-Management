@@ -40,10 +40,11 @@ export function matchTaskDetailsPayload(raw: string): { taskId: string } | null 
  * being silently marked as handled.
  *
  * The reminder body is enriched (customer/contact/description + a "פרטים נוספים"
- * quick-reply button):
- *  - in-window recipients always get the full freeform body (`fallbackText`) + button;
- *  - out-of-window recipients get the enriched `due_reminder_v2` template (10 body
- *    vars + quick-reply button) ONLY once an operator points
+ * quick-reply button + a URL button opening the task in the CRM):
+ *  - in-window recipients always get the full freeform body (`fallbackText`) + button
+ *    — the CRM URL is baked into the fallback text since freeform can't render buttons;
+ *  - out-of-window recipients get the enriched `due_reminder_v2` template (9 body
+ *    vars + URL button + quick-reply button) ONLY once an operator points
  *    WHATSAPP_TEMPLATE_DUE_REMINDER at it (after Meta approval). Until then, the
  *    still-approved `due_reminder` v1 template (2 vars: title, time; no button) is
  *    used for the template path, so out-of-window sends keep working today instead
@@ -105,19 +106,28 @@ export async function runDueDateReminder(): Promise<void> {
 
       // The still-approved `due_reminder` template (v1) is body-only: 2 vars
       // (title, time), no button. Until an operator explicitly points
-      // WHATSAPP_TEMPLATE_DUE_REMINDER at the new `due_reminder_v2` (10 vars +
-      // button) once Meta approves it, the OUT-OF-WINDOW template path must
-      // keep sending the legacy 2-var/no-button shape — otherwise Meta rejects
-      // the send (param-count / component mismatch) on every out-of-window
-      // reminder. The in-window freeform path always gets the full enriched
-      // body regardless, since it never goes through template validation.
+      // WHATSAPP_TEMPLATE_DUE_REMINDER at the new `due_reminder_v2` (9 vars +
+      // URL button + quick-reply button) once Meta approves it, the
+      // OUT-OF-WINDOW template path must keep sending the legacy 2-var/no-button
+      // shape — otherwise Meta rejects the send (param-count / component
+      // mismatch) on every out-of-window reminder. The in-window freeform path
+      // always gets the full enriched body regardless, since it never goes
+      // through template validation.
+      //
+      // v2 button layout (Meta requires URL/PHONE buttons before QUICK_REPLY):
+      //   index 0 → URL button (dynamic suffix = row.task_id, fills {{1}} in the
+      //             approved URL template `https://crm.galit.co.il/dashboard?taskid={{1}}`)
+      //   index 1 → QUICK_REPLY button carrying the details-request payload
       const usingLegacyTemplate = templateName('DUE_REMINDER') === DEFAULT_TEMPLATE_NAMES.DUE_REMINDER;
       const bodyParams = usingLegacyTemplate
         ? [details.taskTitle, dueTime]
-        : reminderTemplateParams(details, crmUrl);
+        : reminderTemplateParams(details);
       const templateButtonParams = usingLegacyTemplate
         ? undefined
-        : [{ subType: 'quick_reply' as const, index: 0, payload: payloadId }];
+        : [
+            { subType: 'url' as const, index: 0, payload: row.task_id },
+            { subType: 'quick_reply' as const, index: 1, payload: payloadId },
+          ];
 
       try {
         await notify({

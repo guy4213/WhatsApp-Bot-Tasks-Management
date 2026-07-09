@@ -184,7 +184,7 @@ describe('runDueDateReminder — enhanced reminder body + button + context', () 
     expect(call.templateButtonParams).toBeUndefined();
   });
 
-  it('once WHATSAPP_TEMPLATE_DUE_REMINDER=due_reminder_v2 is configured, sends the enriched 10-var bodyParams + templateButtonParams', async () => {
+  it('once WHATSAPP_TEMPLATE_DUE_REMINDER=due_reminder_v2 is configured, sends the enriched 9-var bodyParams + URL/QUICK_REPLY templateButtonParams', async () => {
     process.env.WHATSAPP_TEMPLATE_DUE_REMINDER = 'due_reminder_v2';
     const details = makeDetails();
     getTaskDetailsForReminder.mockResolvedValue(details);
@@ -198,10 +198,15 @@ describe('runDueDateReminder — enhanced reminder body + button + context', () 
     expect(notify).toHaveBeenCalledWith({
       to: '972501111111',
       key: 'DUE_REMINDER',
-      bodyParams: reminderTemplateParams(details, null),
+      bodyParams: reminderTemplateParams(details),
       fallbackText: formatTaskReminderBody(details, null),
       buttons: [{ id: 'TASK_DETAILS_t-1', title: 'פרטים נוספים' }],
-      templateButtonParams: [{ subType: 'quick_reply', index: 0, payload: 'TASK_DETAILS_t-1' }],
+      // URL button (index 0) carries the taskId → fills {{1}} of the approved
+      // URL template. QUICK_REPLY (index 1) carries the details payload.
+      templateButtonParams: [
+        { subType: 'url', index: 0, payload: 't-1' },
+        { subType: 'quick_reply', index: 1, payload: 'TASK_DETAILS_t-1' },
+      ],
     });
   });
 

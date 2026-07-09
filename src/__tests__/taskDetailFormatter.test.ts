@@ -42,7 +42,7 @@ function substituteTemplate(body: string, params: string[]): string {
 }
 
 describe('formatTaskReminderBody — short reminder body', () => {
-  it('renders all 10 short-body fields with real values', () => {
+  it('renders all 9 body fields + the injected CRM URL section', () => {
     const text = formatTaskReminderBody(makeDetails(), 'https://crm/tasks/task-abc123');
     expect(text).toContain('🔔 תזכורת משימה');
     expect(text).toContain('כותרת: בדיקת מעלית שנתית');
@@ -54,9 +54,12 @@ describe('formatTaskReminderBody — short reminder body', () => {
     expect(text).toContain('אחראי: יוסי אחראי');
     expect(text).toContain('תיאור קצר:\nלבדוק את מערכת הבלמים');
     expect(text).toContain('הערות:\nהלקוח ביקש להתקשר לפני');
+    // Freeform surfaces the CRM URL as text (template side has this as a URL button).
     expect(text).toContain('📋 לפתיחת המשימה ב-CRM:\nhttps://crm/tasks/task-abc123');
     // static trailing line (satisfies Meta's no-trailing-variable rule)
     expect(text).toContain('יום עבודה טוב.');
+    // The CRM section must sit BEFORE the trailing salutation.
+    expect(text.indexOf('לפתיחת המשימה')).toBeLessThan(text.indexOf('יום עבודה טוב.'));
   });
 
   it('renders — for every empty optional field, including crmUrl', () => {
@@ -190,28 +193,35 @@ describe('buildCrmTaskUrl', () => {
   });
 });
 
-// ── The consistency invariant (100 % coverage requirement) ──────────────────
-describe('freeform ↔ template consistency invariant', () => {
-  it('substituting reminderTemplateParams into the template body === formatTaskReminderBody', () => {
+// ── Freeform ↔ template relationship ────────────────────────────────────────
+describe('freeform ↔ template body relationship', () => {
+  it('formatTaskReminderBody = substituted body + injected CRM URL section before the salutation', () => {
     for (const d of [
       makeDetails(),
       makeDetails({ customerName: null, description: null, processNotes: null }),
       makeDetails({ description: 'ד'.repeat(400), processNotes: 'ה'.repeat(400) }),
     ]) {
       for (const crmUrl of ['https://crm/tasks/x', null]) {
-        const params = reminderTemplateParams(d, crmUrl);
-        const substituted = substituteTemplate(DUE_REMINDER_V2_TEMPLATE_BODY, params);
-        expect(substituted).toBe(formatTaskReminderBody(d, crmUrl));
+        const substituted = substituteTemplate(DUE_REMINDER_V2_TEMPLATE_BODY, reminderTemplateParams(d));
+        const crmSection = `\n\n📋 לפתיחת המשימה ב-CRM:\n${crmUrl ?? '—'}`;
+        const trailing = '\n\nיום עבודה טוב.';
+        const idx = substituted.lastIndexOf(trailing);
+        const expected = substituted.slice(0, idx) + crmSection + substituted.slice(idx);
+        expect(formatTaskReminderBody(d, crmUrl)).toBe(expected);
       }
     }
   });
 
-  it('reminderTemplateParams returns exactly 10 params, none empty (Meta rejects empty vars)', () => {
+  it('reminderTemplateParams returns exactly 9 params, none empty (Meta rejects empty vars)', () => {
     const params = reminderTemplateParams(
       makeDetails({ customerName: null, customerPhone: null, contactName: null, contactPhone: null, assignedTo: null, description: null, processNotes: null }),
-      null,
     );
-    expect(params).toHaveLength(10);
+    expect(params).toHaveLength(9);
     for (const p of params) expect(p.length).toBeGreaterThan(0); // '—' for empties, never ''
+  });
+
+  it('DUE_REMINDER_V2_TEMPLATE_BODY has no CRM URL section — that lives in the URL button', () => {
+    expect(DUE_REMINDER_V2_TEMPLATE_BODY).not.toContain('לפתיחת המשימה ב-CRM');
+    expect(DUE_REMINDER_V2_TEMPLATE_BODY).not.toContain('{{10}}');
   });
 });

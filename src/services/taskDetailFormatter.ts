@@ -4,14 +4,16 @@
  * NO database or network access here — trivially unit-testable. The only import
  * is `formatShortDateTimeIL` (pure, Intl-based) for the due-date rendering.
  *
- * ── Single source of truth / consistency invariant ──────────────────────────
- * The reminder must render byte-identically on both delivery paths:
+ * ── Freeform ↔ template relationship ────────────────────────────────────────
+ * The reminder must render consistently on both delivery paths:
  *   • Freeform (in 24h window) → `formatTaskReminderBody(d, crmUrl)` as text.
  *   • Template  (out of window) → Meta renders `DUE_REMINDER_V2_TEMPLATE_BODY`
- *     with the params from `reminderTemplateParams(d, crmUrl)`.
- * To make this impossible to drift, `formatTaskReminderBody` is DEFINED as the
- * substitution of `reminderTemplateParams(...)` into `DUE_REMINDER_V2_TEMPLATE_BODY`.
- * Both the submission script and the tests reference the same frozen body.
+ *     with the params from `reminderTemplateParams(d)`, PLUS a URL button that
+ *     opens the CRM task.
+ * The freeform path can't render buttons, so `formatTaskReminderBody` builds
+ * the template body via substitution AND injects the CRM URL as a text section
+ * before the trailing salutation — that's the equivalent of the URL button on
+ * the template side. The template body itself has no {{10}} / CRM section.
  */
 import { formatShortDateTimeIL } from '../ai/inspectionFormatters';
 
@@ -36,9 +38,11 @@ export interface TaskDetailForReminder {
 
 // ── Frozen template body (must match the submitted due_reminder_v2 body) ──────
 //
-// Meta rejects a body that starts or ends with a variable, so it ends with the
-// static "יום עבודה טוב." line AFTER {{10}}. `formatTaskReminderBody` shares this
-// exact structure (including that trailing line) so both delivery paths match.
+// The template has 9 body vars + a dynamic URL button that opens the CRM task.
+// Meta rejects a body that ends with a variable, so it closes with the static
+// "יום עבודה טוב." line. The CRM link is NOT in the body — it lives in the URL
+// button component instead. The freeform path injects the URL as text before
+// the trailing salutation (freeform can't render buttons).
 export const DUE_REMINDER_V2_TEMPLATE_BODY =
   '🔔 תזכורת משימה\n\n' +
   'כותרת: {{1}}\n' +
@@ -50,11 +54,13 @@ export const DUE_REMINDER_V2_TEMPLATE_BODY =
   'אחראי: {{7}}\n\n' +
   'תיאור קצר:\n{{8}}\n\n' +
   'הערות:\n{{9}}\n\n' +
-  '📋 לפתיחת המשימה ב-CRM:\n{{10}}\n\n' +
   'יום עבודה טוב.';
 
 /** Number of body variables the template expects. */
-export const DUE_REMINDER_V2_PARAM_COUNT = 10;
+export const DUE_REMINDER_V2_PARAM_COUNT = 9;
+
+/** The trailing static line — freeform injects the CRM URL section right before it. */
+const REMINDER_TRAILING_LINE = '\n\nיום עבודה טוב.';
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -109,15 +115,15 @@ export function buildCrmTaskUrl(taskId: string): string | null {
 // ── Public formatters ─────────────────────────────────────────────────────────
 
 /**
- * The 10 body params for `due_reminder_v2`, in template order. Substituting
- * these into `DUE_REMINDER_V2_TEMPLATE_BODY` yields exactly
- * `formatTaskReminderBody(d, crmUrl)` — the two are mechanically linked below.
+ * The 9 body params for `due_reminder_v2`, in template order. Substituting
+ * these into `DUE_REMINDER_V2_TEMPLATE_BODY` yields the template body text
+ * (without the CRM link section — the link is a URL button on the template
+ * side, added on send via `templateButtonParams`).
  *
  * `description` and `processNotes` are truncated to 200 chars so the assembled
- * template body stays well under Meta's ~1024-char limit. `crmUrl` becomes `—`
- * when null (Meta rejects empty template variables).
+ * template body stays well under Meta's ~1024-char limit.
  */
-export function reminderTemplateParams(d: TaskDetailForReminder, crmUrl: string | null): string[] {
+export function reminderTemplateParams(d: TaskDetailForReminder): string[] {
   return [
     orDash(d.taskTitle),                        // {{1}}
     orDash(d.customerName),                      // {{2}}
@@ -128,17 +134,21 @@ export function reminderTemplateParams(d: TaskDetailForReminder, crmUrl: string 
     orDash(d.assignedTo),                        // {{7}}
     truncateForTemplate(d.description, 200),     // {{8}}
     truncateForTemplate(d.processNotes, 200),    // {{9}}
-    orDash(crmUrl),                              // {{10}}
   ];
 }
 
 /**
- * Short reminder body — identical text on both delivery paths. Defined as the
- * substitution of `reminderTemplateParams` into the frozen template body, so it
- * can never drift from what Meta renders.
+ * Short reminder body for the freeform (in-24h-window) path. Builds the shared
+ * template body text via substitution, then injects the CRM URL section before
+ * the trailing salutation — freeform can't render URL buttons, so the link is
+ * surfaced as clickable text instead.
  */
 export function formatTaskReminderBody(d: TaskDetailForReminder, crmUrl: string | null): string {
-  return substitute(DUE_REMINDER_V2_TEMPLATE_BODY, reminderTemplateParams(d, crmUrl));
+  const substituted = substitute(DUE_REMINDER_V2_TEMPLATE_BODY, reminderTemplateParams(d));
+  const crmSection = `\n\n📋 לפתיחת המשימה ב-CRM:\n${orDash(crmUrl)}`;
+  const idx = substituted.lastIndexOf(REMINDER_TRAILING_LINE);
+  if (idx < 0) return substituted + crmSection;
+  return substituted.slice(0, idx) + crmSection + substituted.slice(idx);
 }
 
 /**

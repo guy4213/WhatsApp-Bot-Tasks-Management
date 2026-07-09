@@ -2,9 +2,13 @@
  * Submit the `due_reminder_v2` WhatsApp template to Meta — the enhanced
  * out-of-window due-date reminder (TASK_ENHANCED_DUE_REMINDER.md).
  *
- * 10 body vars + one QUICK_REPLY button ("פרטים נוספים"). The body is imported
+ * 9 body vars + a URL button ("פתח משימה ב-CRM", dynamic suffix filling {{1}}
+ * in the URL) + a QUICK_REPLY button ("פרטים נוספים"). The body is imported
  * from `src/services/taskDetailFormatter.ts` (DUE_REMINDER_V2_TEMPLATE_BODY) so
  * it can never drift from what the code substitutes at send time.
+ *
+ * Meta button ordering rule: URL/PHONE buttons must come before QUICK_REPLY,
+ * so URL is at index 0 and QUICK_REPLY at index 1.
  *
  * Usage:
  *   npx tsx scripts/create-due-reminder-v2-template.ts --dry-run   # preview only
@@ -23,9 +27,15 @@ dotenv.config();
 
 const CATEGORY = 'UTILITY';
 const NAME = 'due_reminder_v2';
-const BUTTON_TEXT = 'פרטים נוספים';
+const QUICK_REPLY_BUTTON_TEXT = 'פרטים נוספים';
+const URL_BUTTON_TEXT = 'פתח משימה ב-CRM';
+// The URL button's variable must sit at the END of the URL (Meta rule).
+const URL_BUTTON_URL = 'https://crm.galit.co.il/dashboard?taskid={{1}}';
+// One example taskId Meta uses for approval preview — the send-time value is
+// the actual Task.id (see dueDateReminder.ts).
+const URL_BUTTON_EXAMPLE = '5320b5c0-35f7-4d57-ab81-3162a5e631a7';
 
-// One example value per {{1}}..{{10}}, in order.
+// One example value per {{1}}..{{9}}, in order.
 const EXAMPLE: string[] = [
   'בדיקת מעלית שנתית',      // {{1}} taskTitle
   'משה כהן',                // {{2}} customerName
@@ -36,7 +46,6 @@ const EXAMPLE: string[] = [
   'יוסי אחראי',             // {{7}} assignedTo
   'לבדוק את מערכת הבלמים',  // {{8}} description
   'הלקוח ביקש להתקשר לפני', // {{9}} notes
-  '—',                      // {{10}} crmTaskUrl
 ];
 
 function placeholders(body: string): number[] {
@@ -59,7 +68,10 @@ function validate(): string[] {
     errs.push(`placeholder count (${max}) != expected ${DUE_REMINDER_V2_PARAM_COUNT}`);
   }
   if (EXAMPLE.length !== max) errs.push(`example count (${EXAMPLE.length}) != placeholders (${max})`);
-  if (BUTTON_TEXT.length > 25) errs.push('button text > 25 chars');
+  if (QUICK_REPLY_BUTTON_TEXT.length > 25) errs.push('quick_reply button text > 25 chars');
+  if (URL_BUTTON_TEXT.length > 25) errs.push('URL button text > 25 chars');
+  // Meta requires the URL variable to be positioned at the END of the URL.
+  if (!/\{\{1\}\}$/.test(URL_BUTTON_URL)) errs.push('URL button URL must end with {{1}}');
   return errs;
 }
 
@@ -70,7 +82,14 @@ function buildPayload(lang: string) {
     language: lang,
     components: [
       { type: 'BODY', text: DUE_REMINDER_V2_TEMPLATE_BODY, example: { body_text: [EXAMPLE] } },
-      { type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: BUTTON_TEXT }] },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          // URL/PHONE buttons must precede QUICK_REPLY buttons (Meta rule).
+          { type: 'URL', text: URL_BUTTON_TEXT, url: URL_BUTTON_URL, example: [URL_BUTTON_EXAMPLE] },
+          { type: 'QUICK_REPLY', text: QUICK_REPLY_BUTTON_TEXT },
+        ],
+      },
     ],
   };
 }
@@ -116,7 +135,9 @@ async function main() {
   if (dryRun) {
     console.log(`── ${NAME} (body) ──`);
     console.log(DUE_REMINDER_V2_TEMPLATE_BODY);
-    console.log(`\n── button ──\n[QUICK_REPLY] ${BUTTON_TEXT}`);
+    console.log(`\n── buttons ──`);
+    console.log(`[URL]         ${URL_BUTTON_TEXT} → ${URL_BUTTON_URL}`);
+    console.log(`[QUICK_REPLY] ${QUICK_REPLY_BUTTON_TEXT}`);
     console.log('\n── payload ──');
     console.log(JSON.stringify(buildPayload(lang), null, 2));
     console.log('\nDRY RUN — nothing sent.');
