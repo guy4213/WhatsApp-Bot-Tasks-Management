@@ -29,6 +29,7 @@ function osmProxy(...args: unknown[]) {
 }
 
 import { getRouteEstimate } from '../services/routeProvider';
+import { _clearMovementCache } from '../services/routeMovementCache';
 
 const WORKER = { lat: 32.0853, lng: 34.7818 };
 const DEST   = { lat: 32.0110, lng: 34.7712 };
@@ -40,6 +41,9 @@ beforeEach(() => {
   orsGet.mockReset();
   osrmGet.mockReset();
   delete process.env.TRACKING_ROUTE_PROVIDER;
+  // Movement cache persists across tests by design; clear so each test starts
+  // with a fresh MISS_NO_PRIOR state and hits its mocked provider.
+  _clearMovementCache();
 });
 afterEach(() => {
   vi.restoreAllMocks();

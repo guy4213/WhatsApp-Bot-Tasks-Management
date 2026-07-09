@@ -654,6 +654,9 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
       const view = await getPublicView('token-x');
       expect(view?.etaMinutes).toBe(15);
       expect(view?.etaText).toBe('זמן הגעה משוער: 15 דקות');
+      // Observability: the JSON must announce which layer served this ETA
+      // so QA can tell calibration-driven from hourly-fallback at a glance.
+      expect(view?.etaSource).toBe('calibration');
     });
 
     it('priority 2: no calibration + no route → worker_only wins on travelEtaMinutes (expectedArrivalAt IGNORED)', async () => {
@@ -670,6 +673,7 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
       // worker_only: 99 min × 60 + 180s buffer = 6120s = 102 → round up 105.
       expect(view?.etaMinutes).toBe(105);
       expect(view?.etaText).toBe('זמן הגעה משוער: 105 דקות');
+      expect(view?.etaSource).toBe('worker_only');
     });
 
     it('priority 4: no calibration, no OSRM route, past expectedArrivalAt → worker_only wins on travelEtaMinutes', async () => {

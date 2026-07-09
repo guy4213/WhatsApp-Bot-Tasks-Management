@@ -180,6 +180,8 @@ describe('getPublicView — hourly multiplier fallback', () => {
     const view = await getPublicView(TOKEN);
     // 20 * 1.25 = 25 + 3 buffer = 28 → round up 30.
     expect(view?.etaMinutes).toBe(30);
+    // QA observability: hourly path is announced in the JSON.
+    expect(view?.etaSource).toBe('hourly');
   });
 });
 

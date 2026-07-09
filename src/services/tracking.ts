@@ -34,7 +34,7 @@ import {
   readPreviousDisplayedEta,
   commitDisplayedEta,
 } from './progressDetector';
-import { computeConservativeEta } from './conservativeEta';
+import { computeConservativeEta, type EtaSource } from './conservativeEta';
 
 const log = moduleLogger('tracking');
 
@@ -270,6 +270,16 @@ export interface PublicTrackingView {
   etaMinutes?: number;
   /** Ready-made Hebrew ETA sentence — "זמן הגעה משוער" wording only, never "waze"/traffic language. */
   etaText?: string;
+  /**
+   * Which layer inside `computeConservativeEta` produced `etaMinutes`.
+   * Purely observational — the template does not read this. Added for QA
+   * so an inspector can tell at a glance whether the shown ETA is
+   * calibration-driven (`'calibration'` — worker's Waze reading applied to
+   * the current base), the rush-hour fallback (`'hourly'`), or the
+   * constant worker declaration when there is no GPS/base yet
+   * (`'worker_only'`). Absent when there is no ETA at all.
+   */
+  etaSource?: EtaSource;
   /** Worker location time if present, else the session's `updatedAt`. */
   lastUpdatedAt?: string;
   locationFreshnessSeconds?: number;
@@ -569,6 +579,10 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
     if (eta.etaMinutes != null && eta.etaText != null) {
       view.etaMinutes = eta.etaMinutes;
       view.etaText = eta.etaText;
+      // Observability for QA: which layer produced the ETA. `null` shouldn't
+      // occur here (the `etaMinutes != null` guard implies a source was picked)
+      // but the coalesce keeps the type strict without leaking `null`.
+      view.etaSource = eta.source ?? undefined;
       // KILL the client-side mm:ss countdown ticker. Product decision
       // (2026-07-09 field test): the ETA must update ONLY on poll.
       view.durationSeconds = undefined;

@@ -3479,3 +3479,61 @@ Per Section 14 of the spec (with 2026-07-01 Addendum adjustments), deferred — 
 - **M12: Sasha lead-assignment from WhatsApp.** `D3-T6`. Added via 2026-07-01 SPEC Addendum. Bot writes `IncomingLead.ownerId` (first CRM-table write from the bot); existing D3-T3 poller fires the worker alert automatically. Lead CLOSURE stays in the CRM.
 - **M13: WhatsApp-based corrections.** `D2-T12` (site metadata override on TaskField — no CRM write), `D2-T13` (reassign worker — writes `Task.ownerId` + resets `TaskField.workerNotifiedAt`), `D2-T14` (inspection type — writes BOTH `TaskField.inspectionTypeId/family` AND `Task.productName`, with worker confirmation + office notification + audit). Added via 2026-07-01 SPEC Addendum. Editing scheduling / duration / instructions and all other CRM Task fields still stay in the CRM.
 - **M14: Unified 6-item manager menu.** `D5-T7`. Added 2026-07-01. Everyone matching `role IN ('ADMIN','MANAGER')` OR name-based special sets sees a top-level 6-item navigation that wires into all existing flows (snapshot, today's inspections, exceptions, leads, workers, search). Regular field workers keep the §5 spec menu.
+
+---
+
+### T-ROUTE-CACHE — Movement-gated route cache above routeProvider (ORS quota fix)
+
+**Status:** DONE (local, uncommitted)
+
+**Why:** the ORS dashboard was showing 16+ calls per tracking session even for a
+stationary phone. Root cause: the orsRoute internal cache is keyed on 4-decimal
+coords (~11m), but real-world GPS jitter routinely exceeds 11m even when the
+worker isn't moving. Every jitter busted the cache and cost an ORS credit.
+
+**What changed:**
+- NEW `src/services/routeMovementCache.ts` — a `Map<destKey, Entry>` cache with
+  two code-constant gates: `MIN_ROUTE_RECALC_MOVE_METERS = 75` (below → HIT) and
+  `MAX_STATIONARY_ROUTE_CACHE_MS = 10 * 60 * 1000` (safety refresh even without
+  movement). `checkCache` returns a discriminated union (`HIT` /
+  `MISS_NO_PRIOR` / `MISS_DEST_CHANGED` / `MISS_MOVEMENT` / `MISS_MAX_AGE`) with
+  `movedMeters` and `routeAgeSeconds` for observability.
+- `src/services/routeProvider.ts` — `getRouteEstimate` consults the cache
+  BEFORE calling ORS/OSRM. On MISS it delegates to the existing provider chain
+  (unchanged behavior) and stores the successful result. On HIT it logs
+  `{ provider, cacheHit: true, skipReason: 'NO_SIGNIFICANT_MOVEMENT',
+  movedMeters, routeAgeSeconds }` and returns the cached estimate without
+  hitting the network. Null results are NOT cached (orsRoute keeps its own
+  short null-cache to avoid null-spamming).
+- `src/__tests__/routeProvider.test.ts` — added `_clearMovementCache()` in
+  `beforeEach` so existing tests start with an empty cache each run.
+
+**No env, no DB.** Both thresholds are code constants (per the "minimal ENV"
+project decision).
+
+**Files:**
+- `src/services/routeMovementCache.ts` (new)
+- `src/services/routeProvider.ts` (wire the cache in `getRouteEstimate`)
+- `src/__tests__/routeMovementCache.test.ts` (new — 18 unit tests: threshold
+  boundaries, decision matrix, multi-destination isolation)
+- `src/__tests__/routeProviderMovementGate.test.ts` (new — 10 integration tests:
+  first call → ORS, second same location → no ORS, 6× jitter under 75m → no
+  ORS, > 75m → ORS again, destination change → ORS again, max stationary age
+  → refresh, ORS null → OSRM cached and reused, both null → not cached / retry,
+  OSRM-only deployment obeys the same gate)
+- `src/__tests__/routeProvider.test.ts` (clear cache in beforeEach)
+
+**Tests run:** `npx tsc --noEmit` clean; new + updated route tests → 34/34
+pass; existing `tracking.test.ts`, `trackingConservativeIntegration.test.ts`,
+`orsRoute.test.ts` → 55/55 pass (they mock routeProvider wholesale so the new
+cache is fully transparent to them).
+
+**Stale-location requirement (spec item 10) — behavior verified upstream:**
+`tracking.ts` skips `getRouteEstimate` entirely on stale coords (falls straight
+to STRAIGHT_LINE); routeProvider never sees stale calls. Covered by the
+existing tracking suite, not duplicated here.
+
+**Follow-up:** monitor the ORS dashboard after next deploy — expected drop from
+~16 calls/hour per stationary worker to ~1 call per 10 min (the safety
+refresh). If numbers still look high, tune `MIN_ROUTE_RECALC_MOVE_METERS`
+upward (e.g. 100) before promoting the constants to env.

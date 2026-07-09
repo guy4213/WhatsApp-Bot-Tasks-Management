@@ -26,6 +26,7 @@
 import { getRoadRoute as getRoadRouteFromOsrm } from './osrmRoute';
 import { getRoadRoute as getRoadRouteFromOrs } from './orsRoute';
 import type { LatLng, RoadRoute } from './orsRoute';
+import { checkCache, storeCache } from './routeMovementCache';
 import { moduleLogger } from '../utils/logger';
 
 const log = moduleLogger('routeProvider');
@@ -47,19 +48,69 @@ function primaryProvider(): RouteProvider {
  * Fetch a driving route for `worker → dest`, from whichever configured
  * provider is available. Returns `null` when neither provider can serve —
  * caller falls back to straight-line.
+ *
+ * Movement gate (routeMovementCache) short-circuits the whole provider chain
+ * when the worker hasn't moved meaningfully since the last stored route.
+ * Successful routes are stored back into the cache so the next nearby call
+ * skips the provider entirely.
  */
 export async function getRouteEstimate(
   worker: LatLng,
   dest: LatLng,
 ): Promise<RouteEstimate | null> {
-  const primary = primaryProvider();
+  const decision = checkCache(worker, dest);
+  if (decision.kind === 'HIT') {
+    log.debug(
+      {
+        provider: decision.estimate.provider,
+        cacheHit: true,
+        skipReason: 'NO_SIGNIFICANT_MOVEMENT',
+        movedMeters: Math.round(decision.movedMeters),
+        routeAgeSeconds: decision.routeAgeSeconds,
+      },
+      'route served from movement cache — provider not called',
+    );
+    return decision.estimate;
+  }
 
+  const primary = primaryProvider();
+  const result = await callProviders(primary, worker, dest);
+
+  if (result) {
+    storeCache(worker, dest, result);
+    log.debug(
+      {
+        provider: result.provider,
+        cacheHit: false,
+        cacheMissReason: decision.kind,
+        movedMeters:
+          decision.kind === 'MISS_MOVEMENT' || decision.kind === 'MISS_MAX_AGE'
+            ? Math.round(decision.movedMeters)
+            : undefined,
+        routeAgeSeconds:
+          decision.kind === 'MISS_MOVEMENT' || decision.kind === 'MISS_MAX_AGE'
+            ? decision.routeAgeSeconds
+            : undefined,
+      },
+      'route served from provider (cache miss)',
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Provider chain — separated so `getRouteEstimate` can focus on the cache
+ * decision. Behavior unchanged vs. the pre-movement-gate code.
+ */
+async function callProviders(
+  primary: RouteProvider,
+  worker: LatLng,
+  dest: LatLng,
+): Promise<RouteEstimate | null> {
   if (primary === 'openrouteservice') {
     const ors = await getRoadRouteFromOrs(worker, dest);
-    if (ors) {
-      return { ...ors, provider: 'openrouteservice' };
-    }
-    // ORS failed / quota / no key — fall through to OSRM.
+    if (ors) return { ...ors, provider: 'openrouteservice' };
     const osrm = await getRoadRouteFromOsrm(worker, dest);
     if (osrm) {
       log.debug('ORS unavailable, served route via OSRM fallback');
@@ -70,10 +121,7 @@ export async function getRouteEstimate(
 
   // primary === 'osrm' (default). ORS is never contacted.
   const osrm = await getRoadRouteFromOsrm(worker, dest);
-  if (osrm) {
-    return { ...osrm, provider: 'osrm' };
-  }
-  return null;
+  return osrm ? { ...osrm, provider: 'osrm' } : null;
 }
 
 // Re-export so callers can keep a single import surface.
