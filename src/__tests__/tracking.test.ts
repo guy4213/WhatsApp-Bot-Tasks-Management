@@ -438,6 +438,11 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
     expect(view?.headline).toBe('הבודק בדרך אליך');
     expect(view?.route).toEqual({
       type: 'OSRM',
+      // `provider` is the observational tag added on 2026-07-09 so operators
+      // can tell which provider actually served the route (independent of
+      // the `type` label, which is a template rendering flag). The mock
+      // in this file forwards through `routeProvider` stamping 'osrm'.
+      provider: 'osrm',
       geometry: { type: 'LineString', coordinates: [[34, 32], [34.05, 32.05]] },
       distanceMeters: 6000,
       durationSeconds: 600,

@@ -240,7 +240,21 @@ export interface PublicTrackingView {
    * to draw. `undefined` when there is no worker location or no destination.
    */
   route?: {
+    /**
+     * Rendering label for the tracking-page template ONLY. `'OSRM'` means
+     * "we have a road route — draw the solid line"; `'STRAIGHT_LINE'` means
+     * "no route — draw the dashed haversine line". Historical name, kept
+     * for template backward compatibility. It is NOT the underlying
+     * provider — see `provider` below.
+     */
     type: 'OSRM' | 'STRAIGHT_LINE';
+    /**
+     * Which provider actually served this route. Populated when a road route
+     * was obtained, regardless of the `type` label. Missing when the
+     * straight-line fallback fired. Purely observational — not read by the
+     * template, safe to inspect from the JSON response.
+     */
+    provider?: 'openrouteservice' | 'osrm';
     geometry: unknown;
     distanceMeters?: number;
     durationSeconds?: number;
@@ -461,6 +475,7 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
       if (routeEstimate) {
         view.route = {
           type: 'OSRM',
+          provider: routeEstimate.provider,
           geometry: routeEstimate.geometry,
           distanceMeters: routeEstimate.distanceMeters,
           durationSeconds: routeEstimate.durationSeconds,
@@ -468,6 +483,17 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
         view.distanceMeters = routeEstimate.distanceMeters;
         view.durationSeconds = routeEstimate.durationSeconds;
         view.isRouteAvailable = true;
+        // Observability: which provider actually served this poll — proves
+        // `TRACKING_ROUTE_PROVIDER` is doing what we expect and catches
+        // silent ORS → OSRM fallbacks (bad key, quota exhausted, timeout).
+        log.info(
+          {
+            provider: routeEstimate.provider,
+            distanceMeters: routeEstimate.distanceMeters,
+            durationSeconds: routeEstimate.durationSeconds,
+          },
+          'route served',
+        );
       } else {
         view.route = { type: 'STRAIGHT_LINE', geometry: straightLineGeometry(worker, dest), distanceMeters: distance };
         view.distanceMeters = distance;
