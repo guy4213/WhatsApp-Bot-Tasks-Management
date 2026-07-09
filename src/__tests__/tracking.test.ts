@@ -438,13 +438,17 @@ describe('getPublicView — TRACK-A road-route + ETA + presentation', () => {
       durationSeconds: 600,
     });
     expect(view?.distanceMeters).toBe(6000);
-    expect(view?.durationSeconds).toBe(600);
+    // Route metadata still carries the raw provider duration.
+    expect(view?.route?.durationSeconds).toBe(600);
     expect(view?.isRouteAvailable).toBe(true);
     // Conservative ETA at PINNED_NOW (Wed 14:00 IL, hourly=1.25): no
     // calibration nor countdown source in this fixture → hourly wins.
     // 600s × 1.25 + 180s buffer = 930s = 15.5 min → round up 20.
     expect(view?.etaMinutes).toBe(20);
     expect(view?.etaText).toBe('זמן הגעה משוער: 20 דקות');
+    // Top-level durationSeconds now mirrors the Conservative ETA so the
+    // client-side countdown ticker matches — NOT the raw 600.
+    expect(view?.durationSeconds).toBe(20 * 60);
     expect(view?.fallbackReason).toBeUndefined();
     expect(view?.isLocationFresh).toBe(true);
   });

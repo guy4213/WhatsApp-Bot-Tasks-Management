@@ -543,6 +543,16 @@ export async function getPublicView(token: string): Promise<PublicTrackingView |
     if (eta.etaMinutes != null && eta.etaText != null) {
       view.etaMinutes = eta.etaMinutes;
       view.etaText = eta.etaText;
+      // Critical: the tracking page template maintains a CLIENT-SIDE mm:ss
+      // countdown driven by `state.durationSeconds` (see trackingPage.template.ts).
+      // If we leave this at the raw ORS/OSRM free-flow duration, the visible
+      // countdown ticks from that raw value and the Conservative ETA above is
+      // never actually shown as a live number — worker Waze updates would look
+      // like they had no effect. Override the top-level `durationSeconds` to
+      // Conservative ETA seconds so the ticker matches everything else.
+      // Route metadata under `view.route.durationSeconds` still carries the raw
+      // provider value — that field feeds map/route info, not the ETA ticker.
+      view.durationSeconds = eta.etaMinutes * 60;
       commitDisplayedEta(token, eta.etaMinutes, nowDate);
     } else if (!fallbackReason) {
       fallbackReason = 'NO_ETA_SOURCE';
