@@ -201,10 +201,10 @@ describe('runDueDateReminder — enhanced reminder body + button + context', () 
       bodyParams: reminderTemplateParams(details),
       fallbackText: formatTaskReminderBody(details, null),
       buttons: [{ id: 'TASK_DETAILS_t-1', title: 'פרטים נוספים' }],
-      // URL button (index 0) carries the taskId → fills {{1}} of the approved
-      // URL template. QUICK_REPLY (index 1) carries the details payload.
+      // URL button (index 0) carries the URL-encoded taskId → fills {{1}} of
+      // the approved URL template. QUICK_REPLY (index 1) carries the details payload.
       templateButtonParams: [
-        { subType: 'url', index: 0, payload: 't-1' },
+        { subType: 'url', index: 0, payload: encodeURIComponent('t-1') },
         { subType: 'quick_reply', index: 1, payload: 'TASK_DETAILS_t-1' },
       ],
     });

@@ -115,8 +115,10 @@ export async function runDueDateReminder(): Promise<void> {
       // through template validation.
       //
       // v2 button layout (Meta requires URL/PHONE buttons before QUICK_REPLY):
-      //   index 0 → URL button (dynamic suffix = row.task_id, fills {{1}} in the
-      //             approved URL template `https://crm.galit.co.il/dashboard?taskid={{1}}`)
+      //   index 0 → URL button (dynamic suffix = URL-encoded row.task_id, fills
+      //             {{1}} in the approved URL template
+      //             `https://crm.galit.co.il/dashboard?taskid={{1}}`). Encode so
+      //             an id with `&`/`?`/`#` can't break the URL.
       //   index 1 → QUICK_REPLY button carrying the details-request payload
       const usingLegacyTemplate = templateName('DUE_REMINDER') === DEFAULT_TEMPLATE_NAMES.DUE_REMINDER;
       const bodyParams = usingLegacyTemplate
@@ -125,7 +127,7 @@ export async function runDueDateReminder(): Promise<void> {
       const templateButtonParams = usingLegacyTemplate
         ? undefined
         : [
-            { subType: 'url' as const, index: 0, payload: row.task_id },
+            { subType: 'url' as const, index: 0, payload: encodeURIComponent(row.task_id) },
             { subType: 'quick_reply' as const, index: 1, payload: payloadId },
           ];
 
