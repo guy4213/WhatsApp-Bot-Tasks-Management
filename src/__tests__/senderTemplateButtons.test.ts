@@ -10,6 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Set WhatsApp creds + capture array BEFORE the sender module loads (hoisted runs
 // before imports). Without creds the sender short-circuits and never calls https.
 const { capturedBodies } = vi.hoisted(() => {
+  // Pin the Meta provider — this suite tests Meta's template payload shape, and
+  // PR#2 flipped the default provider to Green API.
+  process.env.WHATSAPP_PROVIDER = 'meta';
   process.env.WHATSAPP_PHONE_NUMBER_ID = 'PNID';
   process.env.WHATSAPP_ACCESS_TOKEN = 'TOKEN';
   process.env.WHATSAPP_API_VERSION = 'v19.0';

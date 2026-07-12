@@ -96,6 +96,21 @@ export interface VoiceMessage {
   from: string;
   /** ID of the initial WhatsappAuditLog row for this inbound message (if any). */
   auditLogId?: string;
+  /**
+   * Provider seam: Green API delivers a direct, pre-authorized media URL. When
+   * present, the two-step Meta media download is bypassed (see
+   * downloadAudioFromUrl). Meta path: undefined.
+   */
+  downloadUrl?: string;
+}
+
+/**
+ * Direct media download (Green API). The URL is already authorized by Green API,
+ * so no Bearer token is attached. Mirrors the Meta binary-download plumbing.
+ */
+export async function downloadAudioFromUrl(url: string): Promise<DownloadedAudio> {
+  const { buffer, contentType } = await httpGetBinary(url, {});
+  return { buffer, mimeType: contentType || 'audio/ogg' };
 }
 
 /**
@@ -114,7 +129,10 @@ export async function handleVoiceMessage(msg: VoiceMessage): Promise<string | nu
 
   let audio: DownloadedAudio;
   try {
-    audio = await downloadWhatsappAudio(mediaId);
+    // Green API supplies a direct URL; Meta requires the two-step token'd download.
+    audio = msg.downloadUrl
+      ? await downloadAudioFromUrl(msg.downloadUrl)
+      : await downloadWhatsappAudio(mediaId);
   } catch (err) {
     log.error({ err, mediaId, from }, 'Voice download failed');
     return null;

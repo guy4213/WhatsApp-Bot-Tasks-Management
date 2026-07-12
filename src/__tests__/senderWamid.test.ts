@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'events';
 
 // Credentials must exist BEFORE sender.ts is imported (it reads them at load).
+// Pin the Meta provider — this suite tests Meta's wamid parsing, and PR#2 flipped
+// the default provider to Green API.
 vi.hoisted(() => {
+  process.env.WHATSAPP_PROVIDER = 'meta';
   process.env.WHATSAPP_PHONE_NUMBER_ID = 'PN';
   process.env.WHATSAPP_ACCESS_TOKEN = 'TOK';
 });

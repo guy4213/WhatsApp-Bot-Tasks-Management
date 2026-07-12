@@ -16,10 +16,9 @@ interface Required {
 const REQUIRED: Required[] = [
   { key: 'DATABASE_URL' },
   { key: 'SUPABASE_URL' },
-  { key: 'WHATSAPP_PHONE_NUMBER_ID', productionOnly: true },
-  { key: 'WHATSAPP_ACCESS_TOKEN', productionOnly: true },
-  { key: 'WHATSAPP_VERIFY_TOKEN', productionOnly: true },
-  { key: 'WHATSAPP_APP_SECRET', productionOnly: true },
+  // WhatsApp transport credentials are validated per-provider below (they differ
+  // for Meta vs Green API), not here — a Green API deployment must not be blocked
+  // by absent Meta creds, and vice versa.
   {
     key: 'INTERNAL_API_SECRET',
     productionOnly: true,
@@ -48,6 +47,22 @@ export function runPreflight(): void {
     if (msg) errors.push(`${c.key} ${msg}`);
   }
 
+  // WhatsApp transport provider (PR#2): Green API is the default; Meta stays
+  // reachable via WHATSAPP_PROVIDER=meta. Validate ONLY the active provider's
+  // credentials.
+  //   meta     → WHATSAPP_PHONE_NUMBER_ID / _ACCESS_TOKEN / _VERIFY_TOKEN / _APP_SECRET
+  //   greenapi → GREENAPI_ID_INSTANCE / _API_TOKEN_INSTANCE / _WEBHOOK_TOKEN
+  const waProvider = (process.env.WHATSAPP_PROVIDER ?? 'greenapi').trim().toLowerCase();
+  const providerVars = waProvider === 'meta'
+    ? ['WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_VERIFY_TOKEN', 'WHATSAPP_APP_SECRET']
+    : ['GREENAPI_ID_INSTANCE', 'GREENAPI_API_TOKEN_INSTANCE', 'GREENAPI_WEBHOOK_TOKEN'];
+  for (const key of providerVars) {
+    const v = process.env[key];
+    if (v && v.trim()) continue;
+    if (isProd) errors.push(`${key} is missing (WHATSAPP_PROVIDER=${waProvider})`);
+    else warnings.push(`${key} not set (ok outside production; WHATSAPP_PROVIDER=${waProvider})`);
+  }
+
   // AI provider must have its matching key
   const provider = (process.env.AI_PROVIDER ?? '').toLowerCase();
   if (!provider) {
@@ -58,8 +73,9 @@ export function runPreflight(): void {
     errors.push('AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing');
   }
 
-  // Non-fatal production warnings
-  if (isProd && process.env.WHATSAPP_TEMPLATES_ENABLED !== 'true') {
+  // Non-fatal production warnings. The templates/24h-window concern is Meta-only:
+  // Green API is always in-window (WhatsApp Web) and ignores WHATSAPP_TEMPLATES_ENABLED.
+  if (isProd && waProvider === 'meta' && process.env.WHATSAPP_TEMPLATES_ENABLED !== 'true') {
     warnings.push('WHATSAPP_TEMPLATES_ENABLED!=true — proactive messages deliver only inside each user\'s 24h window');
   }
 

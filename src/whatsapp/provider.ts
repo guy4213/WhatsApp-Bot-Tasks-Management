@@ -7,13 +7,15 @@
  * module (ai/, routes/, auth/, utils/, scheduler/, scripts/) imports a provider
  * directly.
  *
- * PR#1 introduces this seam with Meta as the only/default provider, so behavior
- * is unchanged. PR#2 adds the Green API provider and flips the default.
+ * PR#1 introduced this seam with Meta as the only/default provider. PR#2 adds the
+ * Green API provider and flips the default to it (Meta stays reachable via
+ * WHATSAPP_PROVIDER=meta — see docs/ROLLBACK.md).
  *
  * The message shapes below are the single source of truth; sender.ts re-exports
  * them so existing importers keep working unchanged.
  */
 import { metaProvider } from './providers/meta';
+import { greenapiProvider } from './providers/greenapi';
 
 // ── Message shapes ─────────────────────────────────────────────────────────────
 
@@ -92,16 +94,18 @@ export interface WhatsAppProvider {
 /**
  * Resolve the active provider from `WHATSAPP_PROVIDER`.
  *
- * PR#1: Meta is the only provider, and the default — an unset or unknown value
- * resolves to Meta so nothing changes operationally. PR#2 wires 'greenapi' and
- * flips the default.
+ * PR#2: Green API is the default — an unset or unknown value resolves to
+ * greenapi. Set WHATSAPP_PROVIDER=meta to roll back to the Meta Cloud API with a
+ * single env change (no code redeploy).
  */
 export function getProvider(): WhatsAppProvider {
-  const name = (process.env.WHATSAPP_PROVIDER ?? 'meta').trim().toLowerCase();
+  const name = (process.env.WHATSAPP_PROVIDER ?? 'greenapi').trim().toLowerCase();
   switch (name) {
     case 'meta':
       return metaProvider;
+    case 'greenapi':
+      return greenapiProvider;
     default:
-      return metaProvider;
+      return greenapiProvider;
   }
 }

@@ -18,6 +18,7 @@ import { enqueueInbound, markDone, markFailed, claimPending, type InboundMessage
 import { dispatchInternal } from '../utils/internalApi';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
+import type { ResolvedUser } from '../types';
 
 const log = moduleLogger('webhook');
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN ?? 'changeme';
@@ -180,6 +181,10 @@ export async function processInbound(item: InboundMessage): Promise<void> {
       // downstream handler cannot tell the two apart. Missing OPENAI_API_KEY
       // or any download/transcription failure degrades to the fallback reply.
       const mediaId = ((m.audio as Record<string, unknown>)?.id as string) ?? '';
+      // Provider seam: Green API carries a direct, pre-authorized media URL here;
+      // Meta payloads never do (mediaId-only). voice.ts bypasses the Meta two-step
+      // download when a downloadUrl is present.
+      const downloadUrl = ((m.audio as Record<string, unknown>)?.downloadUrl as string) || undefined;
       log.info({ from: item.fromPhone, msgId: item.msgId, mediaId }, 'Inbound audio message');
 
       // Seed an audit-log row so the transcript has somewhere to land.
@@ -206,6 +211,7 @@ export async function processInbound(item: InboundMessage): Promise<void> {
       const { handleVoiceMessage } = await import('../whatsapp/voice');
       const transcript = await handleVoiceMessage({
         mediaId,
+        downloadUrl,
         from: item.fromPhone,
         auditLogId: auditLogId ?? undefined,
       });
@@ -327,38 +333,52 @@ async function handleIncomingMessage(from: string, text: string, quotedWamid?: s
     return;
   }
 
-  // First message of the day → greet the user by name (formal). Non-fatal:
-  // a greeting failure must never block the actual request.
-  //
-  // K6: after the greeting, auto-open the v2 inspections menu so the user
-  // immediately sees what they can do (matches SPEC_FIELD_V2 §5 example
-  // "שלום דני, מה תרצה לעשות?"). When the user's message is itself a menu
-  // trigger word (e.g. "שלום"), skip the extra menu send here — handleAIMessage
-  // will open the menu with proper context via the MENU_TRIGGER_RE path.
-  // Otherwise, send the menu text as an informational display (no awaiting
-  // state change) so the user's real request still flows into handleAIMessage.
-  let greetedToday = false;
+  // First message of the day → greet by name + auto-open the v2 menu (K6 /
+  // SPEC_FIELD_V2 §5 "שלום דני, מה תרצה לעשות?"). Coalesced into one message under
+  // a paced provider; unchanged two-message UX under Meta. See greetAndOpenMenu.
+  await greetAndOpenMenu(from, auth.user, text);
+
+  const { handleAIMessage } = await import('../ai/router');
+  await handleAIMessage(auth.user, text, quotedWamid);
+}
+
+/**
+ * First-message-of-the-day greeting + auto-opened v2 menu.
+ *
+ * Under a PACED provider (Green API delays every send ~15s server-side) the
+ * greeting and the menu are coalesced into a SINGLE message, so the user doesn't
+ * wait a full pace between them. Under an unpaced provider (Meta) they stay two
+ * separate sends — the existing, working UX is byte-for-byte unchanged, which
+ * keeps rollback clean. When the user's own message is a menu trigger (e.g.
+ * "שלום"), handleAIMessage opens the menu, so only the greeting is sent here.
+ * Every step is best-effort — a greeting/menu failure never blocks the request.
+ */
+export async function greetAndOpenMenu(from: string, user: ResolvedUser, incomingText: string): Promise<void> {
+  const { sendTextMessage } = await import('../whatsapp/sender');
   try {
     const { claimDailyGreeting, buildGreeting } = await import('../services/greetings');
-    if (await claimDailyGreeting(from)) {
-      greetedToday = true;
-      await sendTextMessage({ to: from, text: buildGreeting(auth.user.name) });
+    if (!(await claimDailyGreeting(from))) return;
+    const greeting = buildGreeting(user.name);
+
+    // Resolve the auto-open menu text (best-effort — never blocks the greeting).
+    let menuText: string | null = null;
+    try {
+      const { MENU_TRIGGER_RE, renderMenu } = await import('../ai/menu');
+      if (!MENU_TRIGGER_RE.test(incomingText.trim())) menuText = renderMenu(user);
+    } catch (err) {
+      log.error({ err, from }, 'Auto-open menu after greeting failed (continuing)');
+    }
+
+    const { getProvider } = await import('../whatsapp/provider');
+    if (getProvider().paced && menuText) {
+      // Paced (Green API): one message avoids stacking the ~15s per-send delay.
+      await sendTextMessage({ to: from, text: `${greeting}\n\n${menuText}` });
+    } else {
+      // Unpaced (Meta): greeting, then a separate menu — unchanged behavior.
+      await sendTextMessage({ to: from, text: greeting });
+      if (menuText) await sendTextMessage({ to: from, text: menuText });
     }
   } catch (err) {
     log.error({ err, from }, 'Daily greeting failed (continuing)');
   }
-
-  if (greetedToday) {
-    try {
-      const { MENU_TRIGGER_RE, renderMenu } = await import('../ai/menu');
-      if (!MENU_TRIGGER_RE.test(text.trim())) {
-        await sendTextMessage({ to: from, text: renderMenu(auth.user) });
-      }
-    } catch (err) {
-      log.error({ err, from }, 'Auto-open menu after greeting failed (continuing)');
-    }
-  }
-
-  const { handleAIMessage } = await import('../ai/router');
-  await handleAIMessage(auth.user, text, quotedWamid);
 }
