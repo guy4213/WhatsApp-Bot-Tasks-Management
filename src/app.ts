@@ -4,6 +4,7 @@ import { pool } from './db/connection';
 import { logger } from './utils/logger';
 import { taskRoutes }    from './routes/tasks';
 import { webhookRoutes } from './routes/webhook';
+import { greenapiWebhookRoutes } from './routes/greenapiWebhook';
 import { owntracksPocRoutes } from './routes/owntracksPoc';
 import { trackingRoutes } from './routes/tracking';
 import { trackingPageRoutes } from './routes/trackingPage';
@@ -44,6 +45,7 @@ export async function buildApp() {
 
   await app.register(taskRoutes);
   await app.register(webhookRoutes);
+  await app.register(greenapiWebhookRoutes);
   await app.register(owntracksPocRoutes);
   await app.register(trackingRoutes);
   await app.register(trackingPageRoutes);

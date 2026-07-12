@@ -11,7 +11,7 @@ Conventions:
 
 ## TRANSPORT — החלפת שכבת ה-transport ל-Green API (זמני) (2026-07-12)
 
-**סטטוס כללי:** IN PROGRESS. מפוצל לשני PRs. **PR#1 (אבסטרקציית ספק) — DONE (local, committed).** PR#2 (מימוש Green API) — TODO.
+**סטטוס כללי:** IN PROGRESS. מפוצל לשני PRs. **PR#1 (אבסטרקציית ספק) — DONE (merged, `d7465c5`).** **PR#2 (מימוש Green API) — DONE (local, committed; PR פתוח ל-main).**
 
 מטרה: החלפה **זמנית** של Meta Cloud API ב-Green API (ספק לא רשמי, WhatsApp Web) עד שאישור Meta יגיע. אסור לשכתב לוגיקה — השינוי מוגבל לשכבת ה-transport בלבד (`ai/`, `routes/tasks*`, `auth/`, `utils/` לא יודעים שהוחלף ספק). חזרה ל-Meta = החלפת env אחת (`WHATSAPP_PROVIDER=meta`).
 
@@ -39,7 +39,36 @@ Conventions:
 
 ### TRANSPORT-T2..T7 — מימוש Green API (PR#2)
 
-**Status:** TODO (תלוי במיזוג PR#1). `providers/greenapi.ts` (4 שולחים דרך `sendMessage`, כפתורים→טקסט ממוספר, `supportsTemplates=false`, `paced=true`); `POST /greenapi/webhook` (אימות `Authorization: Bearer <GREENAPI_WEBHOOK_TOKEN>` → 404; `incomingMessageReceived` בלבד; dedup `greenapi:${idMessage}` לפני ACK); `PendingChoice` (migration 019, TTL 60 דק'); `preflight` provider-aware; voice seam ב-`voice.ts`; מיזוג greeting+menu ב-`webhook.ts` כש-`paced`; `.env.example`; `docs/ROLLBACK.md` + `docs/GREENAPI_OPS.md`. **אין OutboundQueue** — Green API מנהל את תור השליחה (`delaySendMessagesMilliseconds`, שמירה 24h).
+**What to do:** `providers/greenapi.ts` (4 שולחים דרך `sendMessage`, כפתורים→טקסט ממוספר, `supportsTemplates=false`, `paced=true`); `POST /greenapi/webhook` (אימות `Authorization: Bearer <GREENAPI_WEBHOOK_TOKEN>` → 404; `incomingMessageReceived` בלבד; dedup `greenapi:${idMessage}` לפני ACK); `PendingChoice` (migration 019, TTL 60 דק'); `preflight` provider-aware; voice seam ב-`voice.ts`; מיזוג greeting+menu ב-`webhook.ts` כש-`paced`; `.env.example`; `docs/ROLLBACK.md` + `docs/GREENAPI_OPS.md`. **אין OutboundQueue** — Green API מנהל את תור השליחה (`delaySendMessagesMilliseconds`, שמירה 24h).
+
+**Status:** DONE (local, committed; PR פתוח ל-main).
+
+**Files changed (new):**
+- `src/whatsapp/providers/greenapi.ts` — ספק Green API. 4 שולחים דרך `sendMessage`; `sendButton`/`sendList` → טקסט ממוספר + `savePendingChoice`; `sendTemplate` דיפנסיבי (טקסט בלבד, לא נגיש דרך `notify` כי `supportsTemplates=false`); `chatId = normalizeIsraeliPhone + '@c.us'`; retry/DLQ דרך `httpDelivery` המשותף. **אין throttling מקומי.**
+- `src/services/pendingChoice.ts` — `savePendingChoice` (upsert, TTL 60 דק') + `resolvePendingChoice` (consume אטומי `DELETE ... jsonb_exists`, טקסט חופשי → null בלי DB).
+- `src/routes/greenapiWebhook.ts` — `POST /greenapi/webhook`. Bearer timing-safe → 404; `incomingMessageReceived` בלבד (אחר → 200 ignore); `idMessage` ריק → 200 warn; תרגום מספר→id **לפני** enqueue; `msgId=greenapi:${idMessage}` enqueue לפני ACK; מעבד דרך `processInbound` המשותף.
+- `src/db/migrations/019_pending_choice.sql` — טבלת `PendingChoice`, additive, idempotent, RLS deny-all (כמו 003).
+- `docs/GREENAPI_OPS.md`, `docs/ROLLBACK.md`.
+- טסטים: `greenapiProvider`, `greenapiWebhook`, `greenapiTemplates`, `pendingChoice`, `greetingMenuMerge`.
+
+**Files changed (edit):**
+- `src/whatsapp/provider.ts` — wire `greenapi` + ברירת מחדל → `greenapi`.
+- `src/config/preflight.ts` — provider-aware: מאמת רק את creds של הספק הפעיל; אזהרת templates/24h מוגבלת ל-meta.
+- `src/whatsapp/voice.ts` — seam `downloadUrl` (הורדה ישירה ל-Green API) + `downloadAudioFromUrl`.
+- `src/routes/webhook.ts` — שורה אדיטיבית ל-`downloadUrl` ב-audio; `greetAndOpenMenu` — מיזוג greeting+menu **רק כש-`paced`** (meta = 2 שליחות ללא שינוי).
+- `src/app.ts` — רישום `greenapiWebhookRoutes`.
+- `.env.example` — §2b provider selector + `GREENAPI_*`.
+- `src/__tests__/providerSelection.test.ts` — עודכן ל-default greenapi.
+- `src/__tests__/senderWamid.test.ts`, `senderTemplateButtons.test.ts` — נעצו `WHATSAPP_PROVIDER=meta` (הם בודקים את ספק Meta; ה-default התהפך).
+
+**Tests run:** `npx tsc --noEmit` נקי. 52 טסטים חדשים (6 קבצים) → ירוקים. רגרסיה: shards 1/2/4 של 4 ירוקים במלואם; תוכן shard 3 אומת ב-shards עדינים יותר (5/8, 11/16, 12/16) — כל הקבצים עוברים פרט ל-`routerManagerMenu.test.ts` שנכשל ב-OOM של V8 **גם על הקוד המקורי** (edits ב-stash) — קדם-קיים, לא רגרסיה (הקובץ טוען את כל `router.ts` 297KB; ממוקק את ה-sender כך שה-flip לא נוגע בו).
+
+**Deviations from plan:**
+- **מיזוג greeting+menu מותנה ב-`provider.paced`** (לא `supportsTemplates`). `paced` הוא הדגל שכבר קיים ב-interface ומתעד בדיוק את הסיבה למיזוג ("מונע ערימת דיליי per-send"); `supportsTemplates` היה מקרי (גם false ל-greenapi) אבל סמנטית שגוי. תוצאה זהה: מיזוג רק תחת greenapi.
+- **40 האתרים ב-router.ts → 11 אמיתיים.** קריאה מלאה של `router.ts` הראתה ש-~40 היה over-count של grep. 11 double-sends אמיתיים (רשימה קונקרטית ב-GREENAPI_OPS §5.1) + multiplier של `sendChunked` (§5.2); ~15 מה-hits הם fallbacks של try/catch (הודעה אחת) ותפריטי מנהל שכבר ממזגים ack+menu. **תועדו, לא תוקנו** (כפי שאושר).
+- **ספירת נמענים לא רצה חיה** — סביבת ה-PR היא clone ephemeral בלי creds של פרודקשן. השאילתה + נוסחת הניקוז + טבלת הערכות ב-GREENAPI_OPS §6; להריץ מול פרודקשן ל-N האמיתי (~10 → ~2.3 דק').
+
+**What remains:** להריץ את מיגרציה 019 בפרודקשן; להזין `GREENAPI_*` ולהגדיר את הקונסול (GREENAPI_OPS §1); החלטה עתידית על תיקון 11 האתרים.
 
 ---
 
