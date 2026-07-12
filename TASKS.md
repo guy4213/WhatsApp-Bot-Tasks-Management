@@ -9,6 +9,106 @@ Conventions:
 
 ---
 
+## 4.20 Auto-provisioning OwnTracks לעובדים (2026-07-12)
+
+**סטטוס כללי:** DONE (local, uncommitted). כל PROV-T1..PROV-T7 מומשו. בדיקות: 32 חדשות עברו; `npx tsc --noEmit` נקי; מיגרציה 018 רצה בפרודקשן. תיעוד מלא ב-[docs/OWNTRACKS_PROVISIONING.md](docs/OWNTRACKS_PROVISIONING.md). משתמשים לא נבנו מחדש — הם כבר קיימים ב-`User`. השורה הקיימת מ-`seedWorkerDeviceIdentity.ts` (`workerKey='guy'`) ממשיכה לעבוד דרך fallback ה-ENV — לא נשברה. אין סוד גולמי ב-DB — הסיסמה נוצרת בזיכרון בזמן צריכת ה-token, נשמרת bcrypt hash בלבד, ומוזרקת פעם אחת ל-`.otrc` שחוזר לאפליקציה.
+
+**Follow-ups:**
+- הרשמת template `owntracks_provisioning` ב-Meta Business Manager (UTILITY, 2 body params: שם עובד, magic URL). עד להרשמה + אישור, שליחה מחוץ ל-24h תיכשל — הבוט מדווח למנהל וממשיך.
+- קונפיגורציית `PUBLIC_BASE_URL` ב-`.env` בפרודקשן — חובה לזרימה.
+- Revoke בבוט (intent "כבה מעקב") — לא נדרש עכשיו, הטבלה כבר תומכת (`revokedAt`).
+
+### PROV-T1 — Migration 018: הרחבת `WorkerDeviceIdentity` לפרוביז'נינג
+
+**Status:** DONE (local, uncommitted).
+
+**What to do:** להוסיף עמודות `passwordHash`, `trackerId`, `provisioningToken`, `provisioningExpiresAt`, `provisionedAt`, `revokedAt` על גבי הטבלה הקיימת. אינדקס partial על `provisioningToken` (WHERE NOT NULL) + partial על `(workerKey) WHERE isActive AND passwordHash NOT NULL` ל-hot-path.
+
+**Definition of Done:** MIG רץ; כל השדות nullable כך שהשורה הקיימת מ-`seedWorkerDeviceIdentity.ts` (`workerKey='guy'`) ממשיכה לעבוד דרך fallback ה-ENV; migration idempotent.
+
+**Files changed:** `src/db/migrations/018_owntracks_provisioning.sql` (חדש).
+
+**Tests run:** `npx ts-node src/db/migrate.ts` → applied.
+
+### PROV-T2 — Provisioning service (יצירה + צריכה של token)
+
+**Status:** DONE (local, uncommitted).
+
+**What to do:** קובץ חדש `src/services/owntracksProvisioning.ts`:
+- `createProvisioning(workerUserId): Promise<{ magicUrl, expiresAt }>` — מייצר `workerKey` ייחודי (הזרע: תעתיק שם + suffix random), `trackerId` (2 אותיות), `provisioningToken` (32-byte base64url). UPSERT ל-`WorkerDeviceIdentity` לפי `workerUserId` — אם קיימת שורה, revoke לישנה + חדשה. `provisioningExpiresAt = now()+48h`. `passwordHash` נשאר NULL עד ל-consume.
+- `consumeProvisioning(token): Promise<OtrcPayload | null>` — קורא לפי token עם `FOR UPDATE`; אם token תפוג/חסר → null; **מייצר סיסמה גולמית בזיכרון**, מחשב bcrypt hash, שומר, מוחק את ה-token, מסמן `provisionedAt=now()`, `isActive=true`, ומחזיר `{ workerKey, password, trackerId, hostUrl }`.
+
+**Definition of Done:** בדיקות ל-happy-path, expired-token, double-consume-idempotency (הפעם השנייה מחזירה null), UPSERT מ-provision קודם. `npx tsc --noEmit` נקי.
+
+**Files:** `src/services/owntracksProvisioning.ts` (חדש), `src/services/__tests__/owntracksProvisioning.test.ts` (חדש).
+
+### PROV-T3 — `verifyWorkerCredentials` בתוך `workerLocation.ts`
+
+**Status:** DONE (local, uncommitted).
+
+**What to do:** פונקציה חדשה `verifyWorkerCredentials(workerKey, plaintext): Promise<{ workerUserId } | null>`:
+- Cache in-process (Map פשוט עם TTL 60s) של `workerKey → { passwordHash, workerUserId, cachedAt }`.
+- Cache miss: `SELECT "passwordHash", "workerUserId" FROM "WorkerDeviceIdentity" WHERE "workerKey"=$1 AND "isActive"=true AND "revokedAt" IS NULL AND "passwordHash" IS NOT NULL`.
+- `bcrypt.compare(plaintext, passwordHash)`; אמת → מחזיר `{ workerUserId }`.
+- Cache invalidation: פונקציית export `invalidateWorkerCredentialCache(workerKey)` שנקראת מתוך `consumeProvisioning` וכל revoke.
+
+**Definition of Done:** יחידה + cache test (miss → hit → invalidate → miss). לא נוגעים בשורות ללא `passwordHash` — נשארות ל-fallback ה-ENV ב-PROV-T4.
+
+**Files:** `src/services/workerLocation.ts` (הרחבה), `src/__tests__/workerLocation.test.ts` (הרחבה).
+
+### PROV-T4 — Route: החלפת auth + endpoint config + short link
+
+**Status:** DONE (local, uncommitted).
+
+**What to do:** ב-`src/routes/owntracksPoc.ts`:
+- החלפת `authenticate()`: **קודם** מנסה `verifyWorkerCredentials()` מול DB. **fallback** ל-`USERS` (env) אם ה-workerKey לא נמצא ב-DB או שאין לו `passwordHash` — עם `log.warn` שמסמן deprecation.
+- `GET /owntracks/config/:token` (**public**, בלי `x-internal-secret`, כי OwnTracks פונה ישירות מהטלפון): קורא ל-`consumeProvisioning()`; אם null → 404; אחרת מחזיר JSON `.otrc` תואם OwnTracks (mode=3, url=`PUBLIC_BASE_URL/owntracks`, auth=true, username, password, tid, monitoring=1, locatorInterval=15, locatorDisplacement=50, pubExtendedData=true).
+- `GET /o/:token` (**public**): 302 → `owntracks:///config?url=<PUBLIC_BASE_URL>/owntracks/config/<token>`. Fallback HTML קטן אם ה-User-Agent לא מובן.
+- הוספת `PUBLIC_BASE_URL` ל-`.env.example`.
+
+**Definition of Done:** POST /owntracks עם workerKey ישן (ENV) → 200. POST עם workerKey חדש (DB) → 200. GET /owntracks/config/BAD → 404. GET /owntracks/config/VALID פעם ראשונה → JSON תקין; פעם שנייה → 404. GET /o/VALID → 302 עם Location נכון.
+
+**Files:** `src/routes/owntracksPoc.ts` (שינוי), `.env.example` (הוספת `PUBLIC_BASE_URL`), `src/__tests__/owntracksConfig.test.ts` (חדש).
+
+### PROV-T5 — Bot trigger: intent + router + שליחה (freeform או template)
+
+**Status:** DONE (local, uncommitted).
+
+**What to do:**
+- `src/ai/schema.ts`: intent חדש `enable_worker_location_tracking { workerHint: string }`.
+- `src/ai/intentParser.ts`: זיהוי ("הפעל מעקב מיקום לדני", "provision X", וכו').
+- `src/ai/router.ts`: handler חדש עם `isManagerMenuUser()` guard. Resolve העובד ל-`User.id` (משתמש בלוגיקה קיימת של איתור עובד לפי שם), קורא `createProvisioning`, שולח לעובד את ה-magic URL:
+  - **בתוך 24h:** `sendTextMessage` עם `magicUrl + checklist עברי`.
+  - **מחוץ ל-24h:** `sendOwnTracksProvisioning` (template).
+- למנהל: אישור עברי + חתימת expiry.
+
+**Definition of Done:** בדיקות router.ts: MANAGER → מבצע; WORKER → דחייה מנומסת; לא נמצא עובד → הודעה; בחירה מרובה → disambig list.
+
+**Files:** `src/ai/schema.ts`, `src/ai/intentParser.ts`, `src/ai/router.ts` (highs-conflict — Opus יטפל).
+
+### PROV-T6 — WhatsApp template `owntracks_provisioning`
+
+**Status:** DONE (local, uncommitted).
+
+**What to do:**
+- `src/whatsapp/templateNames.ts`: קבוע `OWNTRACKS_PROVISIONING = 'owntracks_provisioning'`.
+- `src/whatsapp/templates.ts`: `sendOwnTracksProvisioning({ to, name, magicUrl })` שמעטפת ל-`sendTemplateMessage`.
+- שים לב: הרשמת ה-template ב-Meta Business Manager היא צעד external (יומיים אישור). לפני שהוא מאושר — ה-fallback לא יעבוד לעובד מחוץ ל-24h; זה מטופל בטריגר שמדווח למנהל.
+
+**Files:** `src/whatsapp/templateNames.ts`, `src/whatsapp/templates.ts`.
+
+### PROV-T7 — Tests, docs, `BOT_CAPABILITIES.md`, Status → DONE
+
+**Status:** DONE (local, uncommitted).
+
+**What to do:**
+- Vitest coverage: provisioning service, verifyWorkerCredentials, config endpoint, short link, router handler.
+- `docs/OWNTRACKS_PROVISIONING.md` — הזרימה מקצה לקצה + checklist עברי להרשאות (iOS "Always" / Android battery).
+- `BOT_CAPABILITIES.md`: בסעיף "יכולות של מנהל" להוסיף "מנהל יכול להפעיל מעקב מיקום לעובד — הבוט שולח קישור אישי לוואטסאפ שמגדיר אוטומטית את OwnTracks".
+- כל שורות ה-Status של PROV-Tn משתנות ל-DONE + files/tests/deviations.
+
+---
+
 ## 0.9 Fix: ETA stuck high on the approach — removed the freeze, added a last-mile regime (2026-07-09)
 
 **Status:** DONE (local, uncommitted — awaiting user approval to commit/push).

@@ -78,6 +78,7 @@ describe('AI_INTENTS — v2 field-inspector kinds', () => {
       'correct_inspection_type',
       'correct_task_field_site',
       'day_summary_query',
+      'enable_worker_location_tracking',
       'get_task',
       'help',
       'list_my_inspections',

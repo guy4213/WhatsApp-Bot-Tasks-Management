@@ -205,7 +205,9 @@ export type AIIntent =
   | 'search_task'                // item 6: search by customer / worker / product
   // D5-T10 Phase 2: new worker free-text intents
   | 'day_summary_query'          // worker asks for their day summary via free text
-  | 'missing_equipment_free';    // worker reports missing equipment before going out (general, not task-scoped)
+  | 'missing_equipment_free'     // worker reports missing equipment before going out (general, not task-scoped)
+  // PROV-T5 (TASKS §4.20): manager enables OwnTracks auto-provisioning for a worker.
+  | 'enable_worker_location_tracking';
 
 // v2 inspector-side sub-enums (SPEC_FIELD_V2 §4, §7, §9). These are the SUBSET
 // of `fieldStatus` transitions a worker can trigger via free text — the office-

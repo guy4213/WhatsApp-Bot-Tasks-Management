@@ -31,6 +31,9 @@ export const AI_INTENTS = [
   // D5-T10 Phase 2: new worker free-text intents
   'day_summary_query',           // worker asks for their day summary via free text (routes to day_summary handler)
   'missing_equipment_free',      // worker reports missing equipment before going out (general, not task-scoped)
+  // PROV-T5 (TASKS §4.20): manager triggers OwnTracks auto-provisioning for a
+  // worker. `task_reference` (or params.workerHint) carries the worker name.
+  'enable_worker_location_tracking',
 ] as const;
 
 // Editable fields the model may target with edit_field.

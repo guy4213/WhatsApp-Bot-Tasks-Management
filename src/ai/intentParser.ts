@@ -208,6 +208,10 @@ const WORKER_FEW_SHOT = [
   '- "לתזמן ביקור מחר ב-10" → schedule_task_field, params.scheduledStartAt="<resolved ISO datetime for tomorrow 10:00 Asia/Jerusalem>".',
   '- "לשייך ליד" / "לשייך את הליד" → assign_lead (router will show the lead list).',
   '- "להקצות ליד לעובד" / "שיוך ליד לעובד" → assign_lead.',
+  // PROV-T5 (TASKS §4.20) — MANAGER-only. The router double-checks the guard,
+  // so no requires_manager_approval flag here.
+  '- "הפעל מעקב מיקום לדני" / "לחבר את דני ל-OwnTracks" / "לחבר את דני למעקב" / "provision X" → enable_worker_location_tracking, task_reference="<worker name>".',
+  '- "שלח לדני קישור למעקב מיקום" → enable_worker_location_tracking, task_reference="דני".',
 ].join('\n');
 
 const MANAGER_INTENT_LIST = [

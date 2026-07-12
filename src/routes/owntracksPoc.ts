@@ -25,8 +25,13 @@ import crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import { pool } from '../db/connection';
 import { moduleLogger } from '../utils/logger';
-import { resolveWorkerFromKey, upsertLiveLocation } from '../services/workerLocation';
+import {
+  resolveWorkerFromKey,
+  upsertLiveLocation,
+  verifyWorkerCredentials,
+} from '../services/workerLocation';
 import { bumpSessionLocation } from '../services/tracking';
+import { consumeProvisioning } from '../services/owntracksProvisioning';
 
 const log = moduleLogger('owntracks-poc');
 
@@ -73,14 +78,37 @@ function parseBasicAuth(header: string | undefined): { user: string; pass: strin
   return { user: decoded.slice(0, idx), pass: decoded.slice(idx + 1) };
 }
 
-/** Validate Basic-auth creds against the allowlist. Returns the workerKey or null. */
-function authenticate(header: string | undefined): string | null {
+/**
+ * Validate Basic-auth creds. Tries the DB-backed WorkerDeviceIdentity path
+ * first (migration 018 → provisioning flow); falls back to the legacy ENV
+ * allowlist (POC_OWNTRACKS_USERS) so the pre-provisioning POC users
+ * (e.g. `guy`) keep working. Returns the workerKey on success.
+ */
+async function authenticate(header: string | undefined): Promise<string | null> {
   const creds = parseBasicAuth(header);
   if (!creds) return null;
+
+  // 1. DB path — set once the worker has been provisioned via /owntracks/config/:token.
+  try {
+    const dbResult = await verifyWorkerCredentials(creds.user, creds.pass);
+    if (dbResult) return creds.user;
+  } catch (err) {
+    log.error({ err, user: creds.user }, 'DB auth path failed — falling back to ENV allowlist');
+  }
+
+  // 2. Legacy ENV fallback — kept for POC devices that predate migration 018.
+  //    When a device is re-provisioned via the DB flow, its ENV entry should be
+  //    dropped from POC_OWNTRACKS_USERS.
   const expected = USERS.get(creds.user);
-  if (expected === undefined) return null;
-  if (!safeEqual(creds.pass, expected)) return null;
-  return creds.user;
+  if (expected !== undefined && safeEqual(creds.pass, expected)) {
+    log.warn(
+      { user: creds.user },
+      'OwnTracks auth: matched via legacy ENV allowlist — migrate to DB provisioning',
+    );
+    return creds.user;
+  }
+
+  return null;
 }
 
 // ── Internal-secret guard for the debug route (mirrors routes/tasks.ts) ────────
@@ -102,7 +130,7 @@ export async function owntracksPocRoutes(app: FastifyInstance) {
 
   // POST /owntracks — receive one OwnTracks publish. Public + Basic auth.
   app.post('/owntracks', async (req, reply) => {
-    const workerKey = authenticate(req.headers.authorization);
+    const workerKey = await authenticate(req.headers.authorization);
     if (!workerKey) {
       const attempted = parseBasicAuth(req.headers.authorization)?.user ?? '(none)';
       log.warn({ attemptedUser: attempted }, 'OwnTracks POST rejected — bad Basic auth');
@@ -258,5 +286,106 @@ export async function owntracksPocRoutes(app: FastifyInstance) {
     }));
 
     return reply.send({ staleThresholdSeconds: STALE_SECONDS, now: new Date().toISOString(), workers });
+  });
+
+  // ── GET /owntracks/config/:token ────────────────────────────────────────────
+  // Public. The OwnTracks app fetches this URL directly from the phone when the
+  // worker taps the magic link. Returns an .otrc JSON configuration one time;
+  // subsequent calls with the same token return 404. Called by:
+  //   `owntracks:///config?url=<PUBLIC_BASE_URL>/owntracks/config/<token>`
+  // via the 302 redirect from GET /o/:token below.
+  //
+  // On success this endpoint has already:
+  //   - generated a fresh password in memory,
+  //   - written its bcrypt hash to WorkerDeviceIdentity,
+  //   - cleared the provisioningToken (single-use),
+  //   - set isActive=true and provisionedAt=now().
+  // The plaintext password is emitted once here and never persisted.
+  app.get<{ Params: { token: string } }>('/owntracks/config/:token', async (req, reply) => {
+    const { token } = req.params;
+    if (!token || token.length > 128) {
+      return reply.code(404).send({ error: 'Not found' });
+    }
+
+    let payload;
+    try {
+      payload = await consumeProvisioning(token);
+    } catch (err) {
+      log.error({ err }, 'consumeProvisioning threw');
+      return reply.code(500).send({ error: 'Internal error' });
+    }
+
+    if (!payload) {
+      log.warn({ tokenPrefix: token.slice(0, 6) }, 'OwnTracks config: token invalid or expired');
+      return reply.code(404).send({ error: 'Not found' });
+    }
+
+    // .otrc format — see https://owntracks.org/booklet/features/remoteconfig/
+    // mode=3       → HTTP private
+    // monitoring=1 → move (frequent updates while driving)
+    // locatorInterval=15s / locatorDisplacement=50m → aggressive-enough for the
+    //   Wolt-lite ETA without crushing battery. Tunable later by pushing a new
+    //   .otrc via a fresh provisioning link.
+    const otrc = {
+      _type: 'configuration',
+      mode: 3,
+      url: payload.hostUrl,
+      auth: true,
+      username: payload.workerKey,
+      password: payload.password,
+      tid: payload.trackerId,
+      deviceId: payload.workerKey,
+      monitoring: 1,
+      locatorInterval: 15,
+      locatorDisplacement: 50,
+      pubExtendedData: true,
+    };
+
+    log.info({ workerKey: payload.workerKey }, 'OwnTracks .otrc issued');
+    return reply
+      .type('application/json')
+      .send(otrc);
+  });
+
+  // ── GET /o/:token ───────────────────────────────────────────────────────────
+  // Public HTTPS short link that WhatsApp recognises as a clickable URL. When
+  // tapped on a phone with OwnTracks installed, the 302 sends the OS to
+  // `owntracks:///config?url=...`, which opens the app; the app then fetches
+  // /owntracks/config/:token itself.
+  //
+  // For desktops or phones without OwnTracks, the browser will follow the
+  // owntracks:// scheme fail; we return a small HTML fallback in the response
+  // body so a curl / desktop preview still shows something useful.
+  app.get<{ Params: { token: string } }>('/o/:token', async (req, reply) => {
+    const { token } = req.params;
+    const publicBase = process.env.PUBLIC_BASE_URL;
+    if (!publicBase) {
+      log.error('PUBLIC_BASE_URL not set — /o/:token cannot build redirect');
+      return reply.code(500).send({ error: 'Server misconfigured' });
+    }
+    if (!token || token.length > 128 || !/^[A-Za-z0-9_-]+$/.test(token)) {
+      return reply.code(404).send({ error: 'Not found' });
+    }
+
+    const configUrl = `${publicBase}/owntracks/config/${token}`;
+    const otScheme  = `owntracks:///config?url=${encodeURIComponent(configUrl)}`;
+
+    // Fallback HTML for browsers that can't launch the scheme. iOS Safari will
+    // follow the 302 (which fires the scheme) before rendering the body; for
+    // WhatsApp's in-app browser the redirect fires OwnTracks directly.
+    const fallbackHtml =
+      `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">` +
+      `<title>OwnTracks setup</title></head><body style="font-family:sans-serif;padding:2em">` +
+      `<h2>לפתיחת ההגדרות</h2>` +
+      `<p>אם האפליקציה לא נפתחה אוטומטית:</p>` +
+      `<ol><li>ודא ש-OwnTracks מותקנת (App Store / Google Play).</li>` +
+      `<li>חזור להודעת הוואטסאפ ולחץ על הקישור שוב.</li></ol>` +
+      `<p><a href="${otScheme}">פתח OwnTracks ידנית</a></p></body></html>`;
+
+    return reply
+      .code(302)
+      .header('Location', otScheme)
+      .type('text/html; charset=utf-8')
+      .send(fallbackHtml);
   });
 }

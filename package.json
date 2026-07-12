@@ -32,6 +32,8 @@
     "@fastify/formbody": "^8.0.2",
     "@fastify/rate-limit": "^11.0.0",
     "@supabase/supabase-js": "^2.108.2",
+    "@types/bcryptjs": "^3.0.0",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
     "node-cron": "^4.2.1",

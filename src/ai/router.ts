@@ -34,6 +34,8 @@ import {
 } from '../services/tasks';
 import { formatTaskDetailsExtended, buildCrmTaskUrl } from '../services/taskDetailFormatter';
 import { sendTextMessage, sendButtonMessage, sendListMessage } from '../whatsapp/sender';
+import { notify } from '../whatsapp/templates';
+import { createProvisioning } from '../services/owntracksProvisioning';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
 import {
@@ -1261,6 +1263,11 @@ async function executeIntent(
     // D2-T14: correct inspection type on a TaskField.
     case 'correct_inspection_type':
       await startCorrectInspectionTypeFlow(user, intent);
+      return;
+
+    // PROV-T5 (TASKS §4.20): manager enables OwnTracks auto-provisioning for a worker.
+    case 'enable_worker_location_tracking':
+      await startEnableWorkerLocationTracking(user, intent);
       return;
 
     // ── Manager-facing intents (role-aware) ─────────────────────────────────
@@ -4306,6 +4313,123 @@ async function handleCorrectTypeConfirmReply(
       await sendTextMessage({ to: user.phone, text: 'שגיאה בעדכון. נסה שוב.' });
     }
   }
+}
+
+// ── PROV-T5 (TASKS §4.20): enable OwnTracks tracking for a worker ────────────
+//
+// Intent: `enable_worker_location_tracking`. MANAGER / ADMIN only.
+//
+// Flow:
+//   1. Manager triggers via free text ("הפעל מעקב מיקום לדני") or menu-adjacent.
+//   2. Resolve the worker hint (`intent.task_reference` / `intent.params.workerHint`)
+//      → `User.id + name + phone`.
+//   3. Call `createProvisioning` — issues a one-time token, returns a magic
+//      https link `/o/:token` that OwnTracks opens.
+//   4. Send the worker a WhatsApp message (freeform in-window, template
+//      out-of-window via `notify`) with the link + a short permissions checklist.
+//   5. Confirm to the manager.
+
+async function startEnableWorkerLocationTracking(
+  user: ResolvedUser,
+  intent: AIIntentResult,
+): Promise<void> {
+  if (!isManagerMenuUser(user)) {
+    await sendTextMessage({ to: user.phone, text: 'אין הרשאה.' });
+    return;
+  }
+  const hintRaw =
+    (typeof intent.params?.workerHint === 'string' && intent.params.workerHint) ||
+    intent.task_reference ||
+    '';
+  const hint = hintRaw.trim();
+  if (!hint) {
+    await sendTextMessage({
+      to: user.phone,
+      text: 'לאיזה עובד להפעיל מעקב מיקום? השב עם שם העובד.',
+    });
+    return;
+  }
+
+  const matches = await findUsersByName(hint);
+  if (matches.length === 0) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `לא נמצא עובד בשם "${hint}".`,
+    });
+    return;
+  }
+  if (matches.length > 1) {
+    const lines = matches.map((w, i) => `${i + 1}. ${w.name}`).join('\n');
+    await sendTextMessage({
+      to: user.phone,
+      text: `נמצאו מספר עובדים תואמים. פרט שם מדויק יותר:\n${lines}`,
+    });
+    return;
+  }
+  const workerId = matches[0].id;
+  const workerName = matches[0].name;
+
+  // Fetch phone separately — findUsersByName does not return it.
+  const phoneRes = await pool.query<{ phone: string | null }>(
+    `SELECT phone FROM "User" WHERE id = $1`,
+    [workerId],
+  );
+  const workerPhone = phoneRes.rows[0]?.phone ?? null;
+  if (!workerPhone) {
+    await sendTextMessage({
+      to: user.phone,
+      text: `לעובד "${workerName}" לא רשום מספר טלפון. הוסף בטבלת המשתמשים ונסה שוב.`,
+    });
+    return;
+  }
+
+  let provResult;
+  try {
+    provResult = await createProvisioning(workerId);
+  } catch (err) {
+    log.error({ err, workerId }, 'PROV-T5: createProvisioning failed');
+    const msg = err instanceof Error && err.message.includes('PUBLIC_BASE_URL')
+      ? 'שרת לא מוגדר: PUBLIC_BASE_URL חסר.'
+      : 'שגיאה ביצירת קישור הפרוביז\'נינג. נסה שוב.';
+    await sendTextMessage({ to: user.phone, text: msg });
+    return;
+  }
+
+  const permissionsChecklist =
+    'לאחר לחיצה על הקישור, אשר בבקשה:\n' +
+    '• iPhone: הרשאות מיקום → "תמיד" (Always) + Precise Location פעיל\n' +
+    '• Android: הרשאות מיקום → "אפשר תמיד" + בטל אופטימיזציית סוללה';
+
+  const workerBody =
+    `שלום ${workerName}, להפעלת מעקב מיקום לצורך מעקב הגעה ללקוח:\n\n` +
+    `${provResult.magicUrl}\n\n` +
+    `${permissionsChecklist}\n\n` +
+    `הקישור בתוקף ל-48 שעות.`;
+
+  try {
+    await notify({
+      to: workerPhone,
+      key: 'OWNTRACKS_PROVISIONING',
+      bodyParams: [workerName, provResult.magicUrl],
+      fallbackText: workerBody,
+    });
+  } catch (err) {
+    log.error({ err, workerId, workerPhone }, 'PROV-T5: WhatsApp send to worker failed');
+    await sendTextMessage({
+      to: user.phone,
+      text: `יצרתי קישור אבל שליחת ההודעה לעובד ${workerName} נכשלה. הקישור:\n${provResult.magicUrl}`,
+    });
+    return;
+  }
+
+  const expiryLocal = provResult.expiresAt.toLocaleString('he-IL', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+    timeZone: 'Asia/Jerusalem',
+  });
+  await sendTextMessage({
+    to: user.phone,
+    text: `נשלח לעובד ${workerName} קישור להפעלת מעקב מיקום. תוקף עד ${expiryLocal}.`,
+  });
 }
 
 // ── D2-T11: Schedule a new TaskField for an existing Task from WhatsApp ──────

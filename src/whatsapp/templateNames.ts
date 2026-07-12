@@ -28,7 +28,14 @@ export type NotificationKey =
   // Customer-facing template — the customer is notified when the assigned
   // worker flips TaskField.fieldStatus to EN_ROUTE. Body: "שלום {{1}}, {{2}}
   // מ־גלית ... יצא לדרך ... לביצוע {{3}}. לפניות ישירות לבודק: {{4}}. בהצלחה!"
-  | 'CUSTOMER_WORKER_EN_ROUTE';
+  | 'CUSTOMER_WORKER_EN_ROUTE'
+  // Worker onboarding for OwnTracks auto-provisioning (TASKS §4.20). Sent to a
+  // worker's WhatsApp when a manager enables location tracking for them. Body:
+  // "שלום {{1}}, להפעלת מעקב מיקום: {{2}} — הקישור בתוקף 48 שעות. אחרי לחיצה,
+  // אשר הרשאות מיקום 'תמיד'/'Always'."
+  //   {{1}} worker name
+  //   {{2}} magic HTTPS link (https://<host>/o/<token>)
+  | 'OWNTRACKS_PROVISIONING';
 
 // Default Meta template names (override individually via WHATSAPP_TEMPLATE_<KEY>).
 export const DEFAULT_TEMPLATE_NAMES: Record<NotificationKey, string> = {
@@ -47,6 +54,7 @@ export const DEFAULT_TEMPLATE_NAMES: Record<NotificationKey, string> = {
   EMPLOYEE_END_OF_DAY_REPORT:  'employee_end_of_day_report',
   MANAGER_END_OF_DAY_REPORT:   'manager_end_of_day_report',
   CUSTOMER_WORKER_EN_ROUTE:    'customer_worker_en_route',
+  OWNTRACKS_PROVISIONING:      'owntracks_provisioning',
 };
 
 /** Resolved template name for a key — overridable via WHATSAPP_TEMPLATE_<KEY>. */

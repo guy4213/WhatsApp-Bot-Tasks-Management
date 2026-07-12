@@ -6,6 +6,7 @@
  *  - `resolveWorkerFromKey` ever returned an inactive mapping.
  *  - `upsertLiveLocation` was rewritten as a plain INSERT (would violate the
  *    single-row-per-worker invariant on the second ping).
+ *  - `verifyWorkerCredentials` cached DB misses or skipped bcrypt.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,14 +15,27 @@ vi.mock('../db/connection', () => ({
   pool: { query: (...args: unknown[]) => poolQuery(...args) },
 }));
 
+vi.mock('bcryptjs', () => ({
+  default: { compare: vi.fn() },
+}));
+
 beforeEach(() => {
   poolQuery.mockReset();
+  // Also reset the bcryptjs mock between tests so call-count assertions
+  // in the verifyWorkerCredentials suite are not affected by earlier tests.
+  (bcrypt.compare as ReturnType<typeof vi.fn>).mockReset();
 });
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-import { resolveWorkerFromKey, upsertLiveLocation } from '../services/workerLocation';
+import bcrypt from 'bcryptjs';
+import {
+  invalidateWorkerCredentialCache,
+  resolveWorkerFromKey,
+  upsertLiveLocation,
+  verifyWorkerCredentials,
+} from '../services/workerLocation';
 
 describe('resolveWorkerFromKey', () => {
   it('returns the workerUserId for an active mapping', async () => {
@@ -92,5 +106,119 @@ describe('upsertLiveLocation', () => {
     expect(params[8]).toBeNull(); // trigger
     expect(params[9]).toBeNull(); // recordedAt
     expect(params[10]).toBeNull(); // raw
+  });
+});
+
+describe('verifyWorkerCredentials', () => {
+  const bcryptCompare = bcrypt.compare as ReturnType<typeof vi.fn>;
+
+  // Helper: seed a valid DB row response.
+  function mockDbRow(workerUserId = 'user-42', passwordHash = '$2b$10$hashedpwd') {
+    poolQuery.mockResolvedValueOnce({ rows: [{ workerUserId, passwordHash }] });
+  }
+
+  // Each test gets a fresh cache because invalidateWorkerCredentialCache is used
+  // to clean up, or we use unique workerKeys to avoid cross-test pollution.
+
+  it('cache miss → hits DB → bcrypt.compare true → returns { workerUserId }', async () => {
+    mockDbRow('user-42', '$2b$10$hash1');
+    bcryptCompare.mockResolvedValueOnce(true);
+
+    const result = await verifyWorkerCredentials('worker-a', 'secret');
+
+    expect(poolQuery).toHaveBeenCalledTimes(1);
+    const [sql, params] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/"WorkerDeviceIdentity"/);
+    expect(sql).toMatch(/"passwordHash" IS NOT NULL/);
+    expect(sql).toMatch(/"revokedAt" IS NULL/);
+    expect(params).toEqual(['worker-a']);
+
+    expect(bcryptCompare).toHaveBeenCalledWith('secret', '$2b$10$hash1');
+    expect(result).toEqual({ workerUserId: 'user-42' });
+
+    // Clean up cache so other tests aren't affected.
+    invalidateWorkerCredentialCache('worker-a');
+  });
+
+  it('second call within TTL does NOT hit DB again', async () => {
+    mockDbRow('user-99', '$2b$10$hash2');
+    bcryptCompare.mockResolvedValue(true);
+
+    // First call — populates cache.
+    await verifyWorkerCredentials('worker-b', 'pass');
+    // Second call — should use cache, no extra DB query.
+    const result = await verifyWorkerCredentials('worker-b', 'pass');
+
+    expect(poolQuery).toHaveBeenCalledTimes(1); // Only one DB hit total.
+    expect(result).toEqual({ workerUserId: 'user-99' });
+
+    invalidateWorkerCredentialCache('worker-b');
+  });
+
+  it('wrong password → returns null, but cache entry still holds (correct password on 3rd call uses cached hash)', async () => {
+    mockDbRow('user-55', '$2b$10$hash3');
+    // First call: correct password populates cache.
+    bcryptCompare.mockResolvedValueOnce(true);
+    const first = await verifyWorkerCredentials('worker-c', 'right');
+    expect(first).toEqual({ workerUserId: 'user-55' });
+
+    // Second call: wrong password — still one DB hit total, bcrypt returns false.
+    bcryptCompare.mockResolvedValueOnce(false);
+    const second = await verifyWorkerCredentials('worker-c', 'wrong');
+    expect(second).toBeNull();
+
+    // Third call: correct password again — cache entry is still present (only 1 DB hit ever).
+    bcryptCompare.mockResolvedValueOnce(true);
+    const third = await verifyWorkerCredentials('worker-c', 'right');
+    expect(third).toEqual({ workerUserId: 'user-55' });
+
+    expect(poolQuery).toHaveBeenCalledTimes(1); // DB was hit exactly once across all three calls.
+
+    invalidateWorkerCredentialCache('worker-c');
+  });
+
+  it('DB miss is NOT cached — second call after row appears hits DB again', async () => {
+    // Call 1: no row in DB → null.
+    poolQuery.mockResolvedValueOnce({ rows: [] });
+    const first = await verifyWorkerCredentials('worker-d', 'pass');
+    expect(first).toBeNull();
+    expect(poolQuery).toHaveBeenCalledTimes(1);
+
+    // Call 2: row now exists (freshly provisioned) — MUST hit DB again.
+    mockDbRow('user-77', '$2b$10$hash4');
+    bcryptCompare.mockResolvedValueOnce(true);
+    const second = await verifyWorkerCredentials('worker-d', 'pass');
+    expect(second).toEqual({ workerUserId: 'user-77' });
+    expect(poolQuery).toHaveBeenCalledTimes(2); // Two DB hits — miss was not cached.
+
+    invalidateWorkerCredentialCache('worker-d');
+  });
+
+  it('invalidateWorkerCredentialCache removes the entry — next call hits DB again', async () => {
+    mockDbRow('user-33', '$2b$10$hash5');
+    bcryptCompare.mockResolvedValue(true);
+
+    // Populate cache.
+    await verifyWorkerCredentials('worker-e', 'pass');
+    expect(poolQuery).toHaveBeenCalledTimes(1);
+
+    // Evict.
+    invalidateWorkerCredentialCache('worker-e');
+
+    // Next call must hit DB again.
+    mockDbRow('user-33', '$2b$10$hash5');
+    await verifyWorkerCredentials('worker-e', 'pass');
+    expect(poolQuery).toHaveBeenCalledTimes(2);
+
+    invalidateWorkerCredentialCache('worker-e');
+  });
+
+  it('rows with passwordHash IS NULL are filtered — query returns 0 rows → null', async () => {
+    // The SQL filters "passwordHash" IS NOT NULL, so we simulate 0 rows returned.
+    poolQuery.mockResolvedValueOnce({ rows: [] });
+    const result = await verifyWorkerCredentials('worker-f', 'pass');
+    expect(result).toBeNull();
+    // Verify bcrypt was never called for a row-less result.
+    expect(bcryptCompare).not.toHaveBeenCalled();
   });
 });
