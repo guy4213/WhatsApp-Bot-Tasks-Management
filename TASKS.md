@@ -9,6 +9,62 @@ Conventions:
 
 ---
 
+## 0.9 Fix: ETA stuck high on the approach — removed the freeze, added a last-mile regime (2026-07-09)
+
+**Status:** DONE (local, uncommitted — awaiting user approval to commit/push).
+
+**Field symptom:** driving toward the customer, the ETA "stopped updating" — it
+stayed high not only at the doorstep ("200 m away, still 15 min") but across the
+whole slow approach.
+
+**Root cause (in `conservativeEta.ts` Layer D):** two damping mechanisms,
+compounded by an input artifact:
+1. `not_progressing` → **freeze** (blocked ANY decrease). It fired far too
+   easily: the detector's stall threshold (100 m / 2 min) treats normal slow
+   city driving as "stuck," and the movement-gated route cache only recomputes
+   the base every ~75 m, so `distanceMeters` looked flat between recomputes →
+   false `not_progressing` → the ETA refused to come down.
+2. The drop-cap of only 25 %/poll made even the non-frozen case sticky.
+
+**Insight:** since the time-based countdown was already removed (0.8-era), a
+genuinely stationary worker ALREADY has a flat ETA — the base route doesn't
+shrink while the movement-gated cache holds it. So the freeze was redundant AND
+harmful. The user's own model ("no movement → don't update; otherwise follow the
+real remaining road") argues for LESS damping, not more.
+
+**Fix (`src/services/conservativeEta.ts` only — `progressDetector.ts` untouched,
+since removing the freeze makes the stale-distance artifact harmless):**
+- **Removed the freeze entirely.** `not_progressing` no longer pins the ETA;
+  `frozen` is now always `false` (kept in the output shape for stability).
+- **Loosened the drop-cap 25 % → 50 %** — a light one-poll-glitch smoother, not a
+  hold-back.
+- **Added a "last-mile" regime** keyed on the pure base road time
+  (`LAST_MILE_BASE_SECONDS = 300`, i.e. < 5 min of road left): smaller buffer
+  (3 min → 1 min), finer rounding (5 min → 1 min), floor 3 → 1 min, and **no
+  drop-cap at all** — so the number collapses honestly as the worker reaches the
+  door. Keyed on the pre-ratio base so a high traffic ratio can't keep us out of
+  the last-mile regime near arrival.
+
+**Behavior now:** the ETA follows the real remaining road — it moves only when
+the worker moves, comes down smoothly on the approach, and no longer sticks. A
+truly stationary worker still shows a flat ETA (base doesn't shrink), preserving
+the "no movement → don't update" intent without an explicit freeze.
+
+**Tests (`conservativeEta.test.ts` + `trackingConservativeIntegration.test.ts`):**
+updated the freeze/clamp assertions to the new behavior; added a
+`last-mile collapse` block (the "200 m / 15 min" regression: not_progressing +
+high previous near the door now yields ~3 min, not 15) and a "does NOT freeze
+mid-route" regression. `npx tsc --noEmit` clean; 86/86 across the 4 tracking-ETA
+files.
+
+**Deferred (per the user, after this field test):** the self-calibration
+("observed ratio" from live progress, to grow the ETA when the worker is
+genuinely slower than the map) is designed and documented but NOT built — the
+user chose to run a full end-to-end drive on this simpler fix first and decide
+afterwards whether the extra complexity is warranted.
+
+---
+
 ## 0.8 Fix: fractional OSRM seconds broke the live countdown display (2026-07-09)
 
 **Status:** DONE (local, uncommitted — awaiting user approval to commit/push).

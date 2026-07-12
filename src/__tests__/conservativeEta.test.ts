@@ -125,7 +125,7 @@ describe('computeConservativeEta — buffer + floor + rounding', () => {
     expect(r.etaMinutes).toBe(25);
   });
 
-  it('applies the 3-minute floor even for very short routes', () => {
+  it('a very short route is the last mile → small number, 1-min buffer + granularity', () => {
     const r = computeConservativeEta({
       baseRouteSeconds: 10,
       calibrationRatio: 1.0,
@@ -136,8 +136,9 @@ describe('computeConservativeEta — buffer + floor + rounding', () => {
       previousDisplayedEtaMinutes: null,
       now: NOW,
     });
-    // 10s + 180s buffer = 190s ≈ 3.2 min. Floor 3, round up to 5.
-    expect(r.etaMinutes).toBe(5);
+    // base 10s < 5 min → last mile: 10s + 60s buffer = 70s ≈ 1.2 min,
+    // round up to the 1-min boundary → 2.
+    expect(r.etaMinutes).toBe(2);
   });
 
   it('rounds UP to the next 5-minute boundary (never down)', () => {
@@ -155,29 +156,30 @@ describe('computeConservativeEta — buffer + floor + rounding', () => {
   });
 });
 
-// ── Anti-jump / freeze ──────────────────────────────────────────────────
+// ── Anti-jitter (no freeze) + last-mile collapse ─────────────────────────
 
-describe('computeConservativeEta — anti-jump & freeze', () => {
-  it('caps a drop at MAX_REDUCTION_PCT (25%) compared to previous displayed ETA', () => {
-    // Base implies a lower raw ETA than the previous shown one.
+describe('computeConservativeEta — anti-jitter (no freeze)', () => {
+  it('caps a drop at MAX_REDUCTION_PCT (50%) vs previous, mid-route', () => {
+    // 10-min base keeps us OUT of the last mile (base ≥ 5 min) so the
+    // drop-cap applies.
     const r = computeConservativeEta({
-      baseRouteSeconds: 5 * 60, // 5 min base
+      baseRouteSeconds: 10 * 60,
       calibrationRatio: 1.0,
       expectedArrivalAt: null,
       travelEtaMinutes: null,
       progressState: 'progressing',
       isLocationFresh: true,
-      previousDisplayedEtaMinutes: 25,
+      previousDisplayedEtaMinutes: 40,
       now: NOW,
     });
-    // Raw = 5 + 3 buffer = 8 min. Previous = 25 → min allowed = 18.75.
-    // 8 < 18.75 → clamped to 18.75 → round up to 20.
+    // Raw = 10 + 3 buffer = 13 min. Previous = 40 → min allowed = 20.
+    // 13 < 20 → clamped to 20 (already a 5-boundary).
     expect(r.etaMinutes).toBe(20);
   });
 
-  it('lets the ETA rise freely (only floors decreases)', () => {
+  it('lets the ETA rise freely (raises are never capped)', () => {
     const r = computeConservativeEta({
-      baseRouteSeconds: 40 * 60, // much bigger than previous
+      baseRouteSeconds: 40 * 60,
       calibrationRatio: 1.0,
       expectedArrivalAt: null,
       travelEtaMinutes: null,
@@ -190,20 +192,23 @@ describe('computeConservativeEta — anti-jump & freeze', () => {
     expect(r.frozen).toBe(false);
   });
 
-  it("freezes at the previous ETA when progressState === 'not_progressing'", () => {
+  it("does NOT freeze on not_progressing — the ETA still comes down (mid-route)", () => {
+    // Regression for the 2026-07-09 fix: a creeping/"stuck-looking" worker must
+    // NOT pin the ETA. base 10 min, prev 40, not_progressing.
     const r = computeConservativeEta({
-      baseRouteSeconds: 5 * 60,
+      baseRouteSeconds: 10 * 60,
       calibrationRatio: 1.0,
       expectedArrivalAt: null,
       travelEtaMinutes: null,
       progressState: 'not_progressing',
       isLocationFresh: true,
-      previousDisplayedEtaMinutes: 25,
+      previousDisplayedEtaMinutes: 40,
       now: NOW,
     });
-    // Would compute to a tiny value; freeze at previous 25 → rounds to 25.
-    expect(r.etaMinutes).toBe(25);
-    expect(r.frozen).toBe(true);
+    // Raw = 13 min; only the loose 50% drop-cap applies (min allowed = 20).
+    // NOT frozen at 40.
+    expect(r.etaMinutes).toBe(20);
+    expect(r.frozen).toBe(false);
   });
 
   it("allows increase even when not_progressing (the eta CAN go up)", () => {
@@ -217,7 +222,7 @@ describe('computeConservativeEta — anti-jump & freeze', () => {
       previousDisplayedEtaMinutes: 25,
       now: NOW,
     });
-    // 45 + 3 = 48 → rounds to 50; previous 25 does not cap raise.
+    // 45 + 3 = 48 → rounds to 50; previous 25 does not cap a raise.
     expect(r.etaMinutes).toBe(50);
     expect(r.frozen).toBe(false);
   });
@@ -235,6 +240,56 @@ describe('computeConservativeEta — anti-jump & freeze', () => {
     });
     // 20 * 1.25 = 25 + 3 buffer = 28 → round up 30.
     expect(r.etaMinutes).toBe(30);
+  });
+});
+
+describe('computeConservativeEta — last-mile collapse (the "200m / 15min" fix)', () => {
+  it('near the door, the ETA is NOT held up by a high previous value or not_progressing', () => {
+    // base 2 min road left → last mile. prev shown 15, and the detector thinks
+    // we're "not progressing" (slowing to park). Pre-fix this froze at 15.
+    const r = computeConservativeEta({
+      baseRouteSeconds: 2 * 60,
+      calibrationRatio: 1.0,
+      expectedArrivalAt: null,
+      travelEtaMinutes: null,
+      progressState: 'not_progressing',
+      isLocationFresh: true,
+      previousDisplayedEtaMinutes: 15,
+      now: NOW,
+    });
+    // last mile: 2 min + 1 min buffer = 3 min, no drop-cap, round to 1 → 3.
+    expect(r.etaMinutes).toBe(3);
+    expect(r.frozen).toBe(false);
+  });
+
+  it('very close: collapses to a small 1-min-granularity number', () => {
+    const r = computeConservativeEta({
+      baseRouteSeconds: 40, // ~40s of road left
+      calibrationRatio: 1.0,
+      expectedArrivalAt: null,
+      travelEtaMinutes: null,
+      progressState: 'progressing',
+      isLocationFresh: true,
+      previousDisplayedEtaMinutes: 20,
+      now: NOW,
+    });
+    // 40s + 60s buffer = 100s ≈ 1.7 min → round up to 2 (last-mile 1-min steps).
+    expect(r.etaMinutes).toBe(2);
+  });
+
+  it('the drop-cap does NOT apply in the last mile even against a big previous', () => {
+    const r = computeConservativeEta({
+      baseRouteSeconds: 90, // 1.5 min road left → last mile
+      calibrationRatio: 1.0,
+      expectedArrivalAt: null,
+      travelEtaMinutes: null,
+      progressState: 'progressing',
+      isLocationFresh: true,
+      previousDisplayedEtaMinutes: 30, // 50% cap would floor at 15 mid-route
+      now: NOW,
+    });
+    // 90s + 60s = 150s = 2.5 min → round up to 3. Not clamped to 15.
+    expect(r.etaMinutes).toBe(3);
   });
 });
 

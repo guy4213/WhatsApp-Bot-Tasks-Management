@@ -127,7 +127,7 @@ describe('getPublicView — worker calibration path', () => {
     expect(view?.route?.durationSeconds).toBe(24 * 60);
   });
 
-  it('a subsequent poll uses the cached ratio but respects the 25% anti-jump clamp', async () => {
+  it('a subsequent poll uses the cached ratio and lets the ETA come down (loose 50% smoothing)', async () => {
     const departedAt = new Date(NOW.getTime() - 60 * 1000).toISOString();
     // Poll 1: base=24 min, worker=48 → ratio=2.0. Displayed 48+3=51 → 55.
     poolQuery.mockResolvedValueOnce({
@@ -138,13 +138,14 @@ describe('getPublicView — worker calibration path', () => {
     expect(first?.etaMinutes).toBe(55);
 
     // Poll 2: base shrunk to 10 min; ratio 2.0 → 20 + 3 buffer = 23 raw.
-    // Previous = 55; anti-jump min allowed = 55 * 0.75 = 41.25 → round up 45.
+    // Previous = 55; loosened smoothing min allowed = 55 * 0.5 = 27.5 → round up 30.
+    // (Pre-fix this was clamped to 45 by the tight 25% cap — now it descends faster.)
     poolQuery.mockResolvedValueOnce({
       rows: [joinedRow({ travelEtaMinutes: 48, departedAt, expectedArrivalAt: null })],
     });
     mockRoute(10_000, 10 * 60);
     const second = await getPublicView(TOKEN);
-    expect(second?.etaMinutes).toBe(45);
+    expect(second?.etaMinutes).toBe(30);
   });
 });
 
