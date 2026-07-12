@@ -9,6 +9,40 @@ Conventions:
 
 ---
 
+## TRANSPORT — החלפת שכבת ה-transport ל-Green API (זמני) (2026-07-12)
+
+**סטטוס כללי:** IN PROGRESS. מפוצל לשני PRs. **PR#1 (אבסטרקציית ספק) — DONE (local, committed).** PR#2 (מימוש Green API) — TODO.
+
+מטרה: החלפה **זמנית** של Meta Cloud API ב-Green API (ספק לא רשמי, WhatsApp Web) עד שאישור Meta יגיע. אסור לשכתב לוגיקה — השינוי מוגבל לשכבת ה-transport בלבד (`ai/`, `routes/tasks*`, `auth/`, `utils/` לא יודעים שהוחלף ספק). חזרה ל-Meta = החלפת env אחת (`WHATSAPP_PROVIDER=meta`).
+
+### TRANSPORT-T1 — אבסטרקציית ספק (PR#1)
+
+**Status:** DONE (local, committed).
+
+**What to do:** להכניס seam של provider מאחורי `sender.ts` בלי לשנות התנהגות. Meta נשאר הספק הפעיל, כל הטסטים ירוקים.
+
+**Definition of Done:** `sender.ts` הופך ל-facade שמאציל ל-`getProvider()`; מימוש Meta עובר verbatim ל-`providers/meta.ts`; retry/back-off/timeout/DLQ משותפים ב-`providers/httpDelivery.ts`; interface חדש `WhatsAppProvider` (4 שולחים + `supportsTemplates` + `paced`); `notify()` מכבד `provider.supportsTemplates`; אפס שינוי התנהגות תחת Meta; `tsc --noEmit` נקי.
+
+**Files changed:**
+- `src/whatsapp/provider.ts` (חדש) — `WhatsAppProvider` interface + message shapes + `getProvider()` (default meta).
+- `src/whatsapp/providers/httpDelivery.ts` (חדש) — retry/back-off/timeout/DLQ + low-level POST, הועבר מ-`sender.ts`.
+- `src/whatsapp/providers/meta.ts` (חדש) — מימוש Meta של 4 השולחים, verbatim. `supportsTemplates=true`, `paced=false`.
+- `src/whatsapp/sender.ts` (שוכתב ל-facade) — אותם exports/interfaces/חתימות בדיוק.
+- `src/whatsapp/templates.ts` (edit) — `notify()` בודק `getProvider().supportsTemplates` (no-op תחת Meta).
+- `src/__tests__/providerSelection.test.ts` (חדש).
+
+**Tests run:** `npx tsc --noEmit` נקי; טסטי ה-seam (senderWamid, senderTemplateButtons, providerSelection, interactiveButtons, dueDateReminder, deadlineAlerts, sashaLeadsDispatcher, routerEnableTracking) → 63/63; מלוא החבילה ירוקה בריצה מחולקת ל-shards (89 files / ~1678 tests). הערה: הרצת כל החבילה בבת אחת נכשלת ב-OOM של V8 (מגבלת heap 8GB — קדם-קיים, לא רגרסיה; כל קובץ עובר בבידוד).
+
+**Deviations:** ה-throw ברמת module-load של `sender.ts` (creds של Meta חסרים בפרודקשן) לא הועבר לספק — הוא היה dead-code בפועל כי `runPreflight()` רץ קודם ב-`index.ts` ודורש את אותם vars. ה-guard הרך per-send (warn+null) נשמר במלואו ב-`meta.ts`.
+
+**What remains:** PR#2.
+
+### TRANSPORT-T2..T7 — מימוש Green API (PR#2)
+
+**Status:** TODO (תלוי במיזוג PR#1). `providers/greenapi.ts` (4 שולחים דרך `sendMessage`, כפתורים→טקסט ממוספר, `supportsTemplates=false`, `paced=true`); `POST /greenapi/webhook` (אימות `Authorization: Bearer <GREENAPI_WEBHOOK_TOKEN>` → 404; `incomingMessageReceived` בלבד; dedup `greenapi:${idMessage}` לפני ACK); `PendingChoice` (migration 019, TTL 60 דק'); `preflight` provider-aware; voice seam ב-`voice.ts`; מיזוג greeting+menu ב-`webhook.ts` כש-`paced`; `.env.example`; `docs/ROLLBACK.md` + `docs/GREENAPI_OPS.md`. **אין OutboundQueue** — Green API מנהל את תור השליחה (`delaySendMessagesMilliseconds`, שמירה 24h).
+
+---
+
 ## 4.20 Auto-provisioning OwnTracks לעובדים (2026-07-12)
 
 **סטטוס כללי:** DONE (local, uncommitted). כל PROV-T1..PROV-T7 מומשו. בדיקות: 32 חדשות עברו; `npx tsc --noEmit` נקי; מיגרציה 018 רצה בפרודקשן. תיעוד מלא ב-[docs/OWNTRACKS_PROVISIONING.md](docs/OWNTRACKS_PROVISIONING.md). משתמשים לא נבנו מחדש — הם כבר קיימים ב-`User`. השורה הקיימת מ-`seedWorkerDeviceIdentity.ts` (`workerKey='guy'`) ממשיכה לעבוד דרך fallback ה-ENV — לא נשברה. אין סוד גולמי ב-DB — הסיסמה נוצרת בזיכרון בזמן צריכת ה-token, נשמרת bcrypt hash בלבד, ומוזרקת פעם אחת ל-`.otrc` שחוזר לאפליקציה.
