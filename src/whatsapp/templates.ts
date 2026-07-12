@@ -24,6 +24,7 @@
  *   REQUEST_EXPIRED_MANAGER  : {{1}} requester   {{2}} task title
  */
 import { sendTextMessage, sendTemplateMessage, sendButtonMessage, type TemplateButtonParam } from './sender';
+import { getProvider } from './provider';
 import { type NotificationKey, templateName, templateLang } from './templateNames';
 
 // Re-export so existing importers of NotificationKey from this module keep working.
@@ -64,7 +65,11 @@ export interface NotifyArgs {
  */
 export async function notify({ to, key, bodyParams, fallbackText, buttons, templateButtonParams }: NotifyArgs): Promise<string | null> {
   const name = templateName(key);
-  if (templatesEnabled() && name) {
+  // The active provider is authoritative: a provider that can't deliver templates
+  // (e.g. Green API) forces the free-form fallback path for every notification,
+  // regardless of WHATSAPP_TEMPLATES_ENABLED. Under Meta this is a no-op
+  // (supportsTemplates === true), preserving the existing env-gated behavior.
+  if (getProvider().supportsTemplates && templatesEnabled() && name) {
     // Template path: the button's static text lives in the approved template;
     // any dynamic per-send button payload is passed via `templateButtonParams`.
     return await sendTemplateMessage({ to, name, languageCode: templateLang(), bodyParams, buttonParams: templateButtonParams });
