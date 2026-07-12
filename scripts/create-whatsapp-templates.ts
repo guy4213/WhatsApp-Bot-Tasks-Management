@@ -64,6 +64,13 @@ const TEMPLATES: TemplateDef[] = [
   { key: 'REQUEST_EXPIRED_MANAGER',
     body: 'בקשת {{1}} לגבי המשימה "{{2}}" פגה ללא טיפול.',
     example: ['דניאל', 'חזרה ללקוח משה כהן'] },
+  // PROV-T6 (TASKS §4.20): out-of-window provisioning link sent to a worker
+  // when a manager enables OwnTracks location tracking. The link itself embeds
+  // the one-time token; the template body only carries the worker name and
+  // the URL, and reminds them to grant "Always" location permission.
+  { key: 'OWNTRACKS_PROVISIONING',
+    body: 'שלום {{1}}, להפעלת מעקב מיקום לצורך מעקב הגעה ללקוח לחץ על הקישור {{2}} . הקישור בתוקף 48 שעות. יש לאשר הרשאת מיקום "תמיד" באפליקציה שנפתחת.',
+    example: ['דני', 'https://bot.example.com/o/aBcDeFg123'] },
 ];
 
 // ── Validation ──────────────────────────────────────────────────────────────────
