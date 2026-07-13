@@ -336,7 +336,11 @@ async function handleIncomingMessage(from: string, text: string, quotedWamid?: s
   // First message of the day → greet by name + auto-open the v2 menu (K6 /
   // SPEC_FIELD_V2 §5 "שלום דני, מה תרצה לעשות?"). Coalesced into one message under
   // a paced provider; unchanged two-message UX under Meta. See greetAndOpenMenu.
-  await greetAndOpenMenu(from, auth.user, text);
+  const { menuServed } = await greetAndOpenMenu(from, auth.user, text);
+  // Paced provider + a menu-trigger first message: greetAndOpenMenu already sent
+  // the greeting AND the menu as ONE message and set the menu context, so skip the
+  // router — otherwise it opens the menu a SECOND time (a 15s-delayed duplicate).
+  if (menuServed) return;
 
   const { handleAIMessage } = await import('../ai/router');
   await handleAIMessage(auth.user, text, quotedWamid);
@@ -345,40 +349,86 @@ async function handleIncomingMessage(from: string, text: string, quotedWamid?: s
 /**
  * First-message-of-the-day greeting + auto-opened v2 menu.
  *
+ * Returns `{ menuServed }`: true only when this function has ALREADY opened the
+ * interactive menu (and set its awaiting context), so the caller MUST NOT let the
+ * router open it again.
+ *
  * Under a PACED provider (Green API delays every send ~15s server-side) the
- * greeting and the menu are coalesced into a SINGLE message, so the user doesn't
- * wait a full pace between them. Under an unpaced provider (Meta) they stay two
- * separate sends — the existing, working UX is byte-for-byte unchanged, which
- * keeps rollback clean. When the user's own message is a menu trigger (e.g.
- * "שלום"), handleAIMessage opens the menu, so only the greeting is sent here.
+ * greeting and the menu are coalesced into a SINGLE message. Two cases:
+ *  - the first message IS a menu trigger (e.g. "שלום"/"היי"/"תפריט"): the router
+ *    (handleAIMessage → showMenu) would open the interactive menu as a SEPARATE
+ *    send. So we open it HERE instead — merged with the greeting, setting the same
+ *    awaiting context showMenu sets — and return menuServed=true so the caller
+ *    skips the router's duplicate menu. (This is the production bug fixed here:
+ *    greeting and menu previously arrived as two messages 15s apart.)
+ *  - the first message is NOT a trigger: merge the greeting with an informational
+ *    menu (no context); the router then answers the user's actual request.
+ *
+ * Under an unpaced provider (Meta) the greeting and menu stay two separate sends —
+ * byte-for-byte unchanged, so rollback is clean and menuServed is always false.
  * Every step is best-effort — a greeting/menu failure never blocks the request.
  */
-export async function greetAndOpenMenu(from: string, user: ResolvedUser, incomingText: string): Promise<void> {
+export async function greetAndOpenMenu(
+  from: string, user: ResolvedUser, incomingText: string,
+): Promise<{ menuServed: boolean }> {
   const { sendTextMessage } = await import('../whatsapp/sender');
+
+  let greeting: string;
   try {
     const { claimDailyGreeting, buildGreeting } = await import('../services/greetings');
-    if (!(await claimDailyGreeting(from))) return;
-    const greeting = buildGreeting(user.name);
-
-    // Resolve the auto-open menu text (best-effort — never blocks the greeting).
-    let menuText: string | null = null;
-    try {
-      const { MENU_TRIGGER_RE, renderMenu } = await import('../ai/menu');
-      if (!MENU_TRIGGER_RE.test(incomingText.trim())) menuText = renderMenu(user);
-    } catch (err) {
-      log.error({ err, from }, 'Auto-open menu after greeting failed (continuing)');
-    }
-
-    const { getProvider } = await import('../whatsapp/provider');
-    if (getProvider().paced && menuText) {
-      // Paced (Green API): one message avoids stacking the ~15s per-send delay.
-      await sendTextMessage({ to: from, text: `${greeting}\n\n${menuText}` });
-    } else {
-      // Unpaced (Meta): greeting, then a separate menu — unchanged behavior.
-      await sendTextMessage({ to: from, text: greeting });
-      if (menuText) await sendTextMessage({ to: from, text: menuText });
-    }
+    if (!(await claimDailyGreeting(from))) return { menuServed: false };
+    greeting = buildGreeting(user.name);
   } catch (err) {
-    log.error({ err, from }, 'Daily greeting failed (continuing)');
+    log.error({ err, from }, 'Daily greeting claim failed (continuing)');
+    return { menuServed: false };
   }
+
+  const paced = (await import('../whatsapp/provider')).getProvider().paced;
+
+  // Resolve the menu text + whether the message is a bare menu trigger
+  // (best-effort — must never block the greeting).
+  let isMenuTrigger = false;
+  let menuText: string | null = null;
+  try {
+    const { MENU_TRIGGER_RE, renderMenu } = await import('../ai/menu');
+    isMenuTrigger = MENU_TRIGGER_RE.test(incomingText.trim());
+    menuText = renderMenu(user);
+  } catch (err) {
+    log.error({ err, from }, 'Menu render for greeting failed (continuing)');
+  }
+
+  // PACED + the first message IS a menu trigger → open the interactive menu here,
+  // merged with the greeting into ONE send, and set the SAME awaiting context the
+  // router's showMenu would; the caller then skips the router's duplicate menu.
+  if (paced && isMenuTrigger && menuText) {
+    try {
+      const { setContext } = await import('../services/conversationContext');
+      const { isManagerMenuUser } = await import('../ai/menu');
+      await setContext(user.phone, { awaiting: isManagerMenuUser(user) ? 'mgr_menu_root' : 'menu' });
+      await sendTextMessage({ to: user.phone, text: `${greeting}\n\n${menuText}` });
+      log.info({ from, paced, branch: 'paced-trigger-merged' }, 'greetAndOpenMenu: greeting+menu merged into one send; router menu skipped');
+      return { menuServed: true };
+    } catch (err) {
+      // Merge failed — fall back to a bare greeting and let the router open the
+      // menu as usual (two sends, but nothing is lost).
+      log.error({ err, from }, 'Paced greeting+menu merge failed — greeting only, router will open the menu');
+      try { await sendTextMessage({ to: from, text: greeting }); } catch { /* best-effort */ }
+      return { menuServed: false };
+    }
+  }
+
+  // Otherwise: informational menu (non-trigger only), no awaiting context.
+  const infoMenu = isMenuTrigger ? null : menuText;
+  if (paced && infoMenu) {
+    // Paced (Green API): one message avoids stacking the ~15s per-send delay.
+    await sendTextMessage({ to: from, text: `${greeting}\n\n${infoMenu}` });
+    log.info({ from, paced, branch: 'paced-info-merged' }, 'greetAndOpenMenu: greeting+info-menu merged into one send');
+  } else {
+    // Unpaced (Meta): greeting, then a separate menu — unchanged behavior. (A
+    // paced trigger with no menuText also lands here → greeting only.)
+    await sendTextMessage({ to: from, text: greeting });
+    if (infoMenu) await sendTextMessage({ to: from, text: infoMenu });
+    log.info({ from, paced, isMenuTrigger, branch: paced ? 'paced-greeting-only' : 'unpaced-separate' }, 'greetAndOpenMenu: greeting sent (menu separate / via router)');
+  }
+  return { menuServed: false };
 }
