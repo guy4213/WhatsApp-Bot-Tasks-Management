@@ -35,7 +35,7 @@ import {
 import { formatTaskDetailsExtended, buildCrmTaskUrl } from '../services/taskDetailFormatter';
 import { sendTextMessage, sendButtonMessage, sendListMessage } from '../whatsapp/sender';
 import { notify } from '../whatsapp/templates';
-import { createProvisioning } from '../services/owntracksProvisioning';
+import { createProvisioning, buildInlineConfigLink, hasActiveProvisioning } from '../services/owntracksProvisioning';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
 import {
@@ -70,7 +70,7 @@ import {
   type AdvanceTransition,
   type OpenTaskFieldPreview,
 } from '../services/inspections';
-import { getInspectionsForWorkerOnDate } from '../services/inspectionsQueries';
+import { getInspectionsForWorkerOnDate, countOpenInspectionsForWorkerOnDate } from '../services/inspectionsQueries';
 import {
   getMyInspectionsInRange,
   getAllMyInspections,
@@ -2413,6 +2413,19 @@ async function performTransition(
       log.error({ err, taskFieldId }, 'closeTrackingSession(FINISHED) failed');
     });
     await sendFinishedFollowUpMenu(user.phone);
+    // If this was the worker's LAST open field visit today, remind them they can
+    // close the tracking app (the only way to stop tracking — there's no remote
+    // off switch). advanceFieldStatus already flipped this row to FINISHED_FIELD,
+    // so it's excluded from the open count. Gated on active provisioning (never
+    // nudge an untracked worker) and best-effort — must never block the follow-up.
+    try {
+      const remaining = await countOpenInspectionsForWorkerOnDate(user.id, localJerusalemDate());
+      if (remaining === 0 && (await hasActiveProvisioning(user.id))) {
+        await sendTextMessage({ to: user.phone, text: 'סיימת להיום 👏\n📍 אפשר לסגור את אפליקציית המעקב.' });
+      }
+    } catch (err) {
+      log.error({ err, workerUserId: user.id }, 'close-app reminder check failed — continuing');
+    }
     return;
   }
   if (transition === 'DEPARTED') {
@@ -2421,7 +2434,18 @@ async function performTransition(
     await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
       awaiting: 'status_eta_prompt',
     });
-    const wamid = await sendTextMessage({ to: user.phone, text: departedEtaPrompt() });
+    // Safety net: append the idempotent OwnTracks link so a worker whose tracking
+    // drifted (app closed, or nudged off Move) can restore it in one tap. Phrased
+    // as optional — the app should already be running. Omitted silently when the
+    // worker has no active provisioning (never a broken link). Best-effort.
+    let departedBody = departedEtaPrompt();
+    try {
+      const link = await buildInlineConfigLink(user.id);
+      if (link) departedBody += `\n\n📍 המעקב לא פעיל? ${link}`;
+    } catch (err) {
+      log.error({ err, workerUserId: user.id }, 'buildInlineConfigLink (DEPARTED) failed — continuing');
+    }
+    const wamid = await sendTextMessage({ to: user.phone, text: departedBody });
     // Phase 2: quoted-reply context ref (best-effort). A reply to the ETA prompt
     // with "הגעתי"/"סיימתי" resolves back to this TaskField.
     await recordTaskFieldRef(wamid, taskFieldId, user.id, 'eta_prompt');

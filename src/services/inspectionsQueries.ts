@@ -92,6 +92,33 @@ export async function getInspectionsForWorkerOnDate(
   return rows;
 }
 
+/**
+ * Count the worker's still-OPEN field inspections for the local day. "Open" = the
+ * six worker-actionable statuses (ASSIGNED/CONFIRMED/EN_ROUTE/ARRIVED/
+ * WAITING_FOR_INFO/NEEDS_MORE_INFO); terminal states (FINISHED_FIELD, CANCELED,
+ * DECLINED, HAS_PROBLEM) are NOT open. Used to detect "this was the last inspection
+ * of the day" (count === 0 after a FINISHED write) so the bot can suggest closing
+ * the tracking app. Same Asia/Jerusalem half-open window + Task.ownerId join as
+ * getInspectionsForWorkerOnDate.
+ */
+export async function countOpenInspectionsForWorkerOnDate(
+  userId: string,
+  localDate: string,
+): Promise<number> {
+  const { rows } = await pool.query<{ n: number }>(
+    `SELECT count(*)::int AS n
+       FROM "TaskField" tf
+       JOIN "Task" t ON t.id = tf."taskId"
+      WHERE t."ownerId" = $1
+        AND tf."scheduledStartAt" >= ($2::date) AT TIME ZONE 'Asia/Jerusalem'
+        AND tf."scheduledStartAt" <  (($2::date) + INTERVAL '1 day') AT TIME ZONE 'Asia/Jerusalem'
+        AND tf."fieldStatus" IN
+            ('ASSIGNED','CONFIRMED','EN_ROUTE','ARRIVED','WAITING_FOR_INFO','NEEDS_MORE_INFO')`,
+    [userId, localDate],
+  );
+  return rows[0]?.n ?? 0;
+}
+
 // ── D2-T10: on-demand day summary (menu item 7) ─────────────────────────────
 // SPEC_FIELD_V2 §11. Returns the FINISHED_FIELD rows (customer + type) for the
 // worker's local day, plus a count of WAITING_FOR_INFO rows (the two live

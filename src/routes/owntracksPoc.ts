@@ -31,7 +31,9 @@ import {
   verifyWorkerCredentials,
 } from '../services/workerLocation';
 import { bumpSessionLocation } from '../services/tracking';
-import { consumeProvisioning, getPublicBaseUrl } from '../services/owntracksProvisioning';
+import {
+  consumeProvisioning, getPublicBaseUrl, buildOtrc, otrcToInlineScheme,
+} from '../services/owntracksProvisioning';
 
 const log = moduleLogger('owntracks-poc');
 
@@ -320,26 +322,16 @@ export async function owntracksPocRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'Not found' });
     }
 
-    // .otrc format — see https://owntracks.org/booklet/features/remoteconfig/
-    // mode=3       → HTTP private
-    // monitoring=1 → move (frequent updates while driving)
-    // locatorInterval=15s / locatorDisplacement=50m → aggressive-enough for the
-    //   Wolt-lite ETA without crushing battery. Tunable later by pushing a new
-    //   .otrc via a fresh provisioning link.
-    const otrc = {
-      _type: 'configuration',
-      mode: 3,
-      url: payload.hostUrl,
-      auth: true,
-      username: payload.workerKey,
+    // .otrc — see https://owntracks.org/booklet/features/remoteconfig/
+    // Built via the shared buildOtrc (single source of truth with the inline link):
+    // mode=3 HTTP private, monitoring=2 MOVE (continuous — was 1=SIGNIFICANT, a bug),
+    // locatorInterval=15s / locatorDisplacement=50m for a battery-sane live ETA.
+    const otrc = buildOtrc({
+      workerKey: payload.workerKey,
+      trackerId: payload.trackerId,
+      hostUrl: payload.hostUrl,
       password: payload.password,
-      tid: payload.trackerId,
-      deviceId: payload.workerKey,
-      monitoring: 1,
-      locatorInterval: 15,
-      locatorDisplacement: 50,
-      pubExtendedData: true,
-    };
+    });
 
     log.info({ workerKey: payload.workerKey }, 'OwnTracks .otrc issued');
     return reply
@@ -382,6 +374,47 @@ export async function owntracksPocRoutes(app: FastifyInstance) {
       `<p>אם האפליקציה לא נפתחה אוטומטית:</p>` +
       `<ol><li>ודא ש-OwnTracks מותקנת (App Store / Google Play).</li>` +
       `<li>חזור להודעת הוואטסאפ ולחץ על הקישור שוב.</li></ol>` +
+      `<p><a href="${otScheme}">פתח OwnTracks ידנית</a></p></body></html>`;
+
+    return reply
+      .code(302)
+      .header('Location', otScheme)
+      .type('text/html; charset=utf-8')
+      .send(fallbackHtml);
+  });
+
+  // ── GET /oi?c=<blob> ─────────────────────────────────────────────────────────
+  // Public HTTPS wrapper for the IDEMPOTENT inline config link (the safety net sent
+  // in "יצאתי" / reminder messages). `c` is base64url of the .otrc; we 302 into
+  // `owntracks:///config?inline=<standard-base64>` so the app RE-APPLIES the config
+  // (MOVE mode) on every tap. WhatsApp doesn't linkify the raw `owntracks://` scheme
+  // (same reason /o/:token exists), so messages carry this wrapper. Stateless: no DB,
+  // no consume, no expiry — the link is stable because the password is deterministic.
+  // The blob is a QUERY param, not a path segment: the real .otrc base64-encodes to
+  // ~375 chars, over Fastify's default maxParamLength (100), which would 404 a path param.
+  app.get<{ Querystring: { c?: string } }>('/oi', async (req, reply) => {
+    const blob = typeof req.query.c === 'string' ? req.query.c : '';
+    if (!blob || blob.length > 8192 || !/^[A-Za-z0-9_-]+$/.test(blob)) {
+      return reply.code(404).send({ error: 'Not found' });
+    }
+    // Decode base64url → the .otrc JSON. Reject anything that isn't a configuration
+    // (the Location is always the fixed `owntracks://` scheme — never an http host —
+    // so this can't be abused as an open redirect).
+    let otrc: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(Buffer.from(blob, 'base64url').toString('utf8')) as Record<string, unknown>;
+      if (!parsed || parsed._type !== 'configuration') throw new Error('not a configuration');
+      otrc = parsed;
+    } catch {
+      return reply.code(404).send({ error: 'Not found' });
+    }
+
+    const otScheme = otrcToInlineScheme(otrc);
+    const fallbackHtml =
+      `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">` +
+      `<title>OwnTracks</title></head><body style="font-family:sans-serif;padding:2em">` +
+      `<h2>הפעלת מעקב</h2>` +
+      `<p>אם האפליקציה לא נפתחה אוטומטית, ודא ש-OwnTracks מותקנת וחזור ללחוץ על הקישור.</p>` +
       `<p><a href="${otScheme}">פתח OwnTracks ידנית</a></p></body></html>`;
 
     return reply

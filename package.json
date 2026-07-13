@@ -10,6 +10,7 @@
     "migrate": "ts-node src/db/migrate.ts",
     "summary:now": "ts-node src/scripts/sendDailySummary.ts",
     "check:recipients": "ts-node src/scripts/checkRecipients.ts",
+    "owntracks:link": "ts-node src/scripts/owntracksLink.ts",
     "templates:dry-run": "ts-node --transpile-only scripts/create-whatsapp-templates.ts --dry-run",
     "templates:create": "ts-node --transpile-only scripts/create-whatsapp-templates.ts",
     "test": "vitest run",

@@ -47,6 +47,9 @@ vi.mock('../../db/connection', () => ({
 
 beforeEach(() => {
   process.env.PUBLIC_BASE_URL = 'https://bot.example.com';
+  // Model C: consumeProvisioning now derives a deterministic password via
+  // HMAC(OWNTRACKS_CONFIG_SECRET, workerKey), so the secret must be present.
+  process.env.OWNTRACKS_CONFIG_SECRET = 'test-owntracks-config-secret-0123456789abcdef';
   poolQuery.mockReset();
   mockClientQuery.mockReset();
   mockClientRelease.mockReset();
@@ -54,6 +57,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete process.env.OWNTRACKS_CONFIG_SECRET; // don't leak into other files in this worker
   vi.restoreAllMocks();
 });
 

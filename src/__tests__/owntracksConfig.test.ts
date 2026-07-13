@@ -37,17 +37,23 @@ const upsertLiveLocationMock = vi.hoisted(() => vi.fn());
 const bumpSessionLocationMock = vi.hoisted(() => vi.fn());
 const poolQueryMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../services/owntracksProvisioning', () => ({
-  consumeProvisioning: (...a: unknown[]) => consumeProvisioningMock(...a),
-  // getPublicBaseUrl reads PUBLIC_BASE_URL / TRACKING_PUBLIC_BASE_URL at call
-  // time. The tests toggle these envs to exercise the "missing → 500" branch,
-  // so we forward to the real implementation rather than stubbing a value here.
-  getPublicBaseUrl: () => {
-    const base = (process.env.PUBLIC_BASE_URL ?? process.env.TRACKING_PUBLIC_BASE_URL ?? '').trim();
-    if (!base) throw new Error('PUBLIC_BASE_URL env var is not set');
-    return base.replace(/\/+$/, '');
-  },
-}));
+vi.mock('../services/owntracksProvisioning', async (importOriginal) => {
+  // Keep the REAL pure helpers (buildOtrc / otrcToInlineScheme / otrcToHttpsLink)
+  // the routes now use; only consumeProvisioning + getPublicBaseUrl are stubbed.
+  const actual = await importOriginal<typeof import('../services/owntracksProvisioning')>();
+  return {
+    ...actual,
+    consumeProvisioning: (...a: unknown[]) => consumeProvisioningMock(...a),
+    // getPublicBaseUrl reads PUBLIC_BASE_URL / TRACKING_PUBLIC_BASE_URL at call
+    // time. The tests toggle these envs to exercise the "missing → 500" branch,
+    // so we forward to the real implementation rather than stubbing a value here.
+    getPublicBaseUrl: () => {
+      const base = (process.env.PUBLIC_BASE_URL ?? process.env.TRACKING_PUBLIC_BASE_URL ?? '').trim();
+      if (!base) throw new Error('PUBLIC_BASE_URL env var is not set');
+      return base.replace(/\/+$/, '');
+    },
+  };
+});
 
 vi.mock('../services/workerLocation', () => ({
   verifyWorkerCredentials: (...a: unknown[]) => verifyWorkerCredentialsMock(...a),
@@ -141,7 +147,7 @@ describe('GET /owntracks/config/:token — success', () => {
       password: 'p123',
       tid: 'DA',
       deviceId: 'w_abc',
-      monitoring: 1,
+      monitoring: 2, // MOVE (was 1 = SIGNIFICANT — the prod bug this task fixed)
       locatorInterval: 15,
       locatorDisplacement: 50,
       pubExtendedData: true,
