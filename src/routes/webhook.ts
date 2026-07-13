@@ -336,7 +336,15 @@ async function handleIncomingMessage(from: string, text: string, quotedWamid?: s
   // First message of the day → greet by name + auto-open the v2 menu (K6 /
   // SPEC_FIELD_V2 §5 "שלום דני, מה תרצה לעשות?"). Coalesced into one message under
   // a paced provider; unchanged two-message UX under Meta. See greetAndOpenMenu.
-  await greetAndOpenMenu(from, auth.user, text);
+  const { menuSent } = await greetAndOpenMenu(from, auth.user, text);
+
+  // If the greeter already sent the menu AND the text was itself a menu
+  // trigger (e.g. "שלום", "היי", "תפריט"), skip handleAIMessage — its only job
+  // for this input would be to reopen the same menu.
+  if (menuSent) {
+    const { MENU_TRIGGER_RE } = await import('../ai/menu');
+    if (MENU_TRIGGER_RE.test(text.trim())) return;
+  }
 
   const { handleAIMessage } = await import('../ai/router');
   await handleAIMessage(auth.user, text, quotedWamid);
@@ -345,40 +353,58 @@ async function handleIncomingMessage(from: string, text: string, quotedWamid?: s
 /**
  * First-message-of-the-day greeting + auto-opened v2 menu.
  *
+ * Returns `{ menuSent }`. When true and the incoming text was a MENU_TRIGGER,
+ * the caller MUST skip `handleAIMessage` (it would only reopen the same menu).
+ *
  * Under a PACED provider (Green API delays every send ~15s server-side) the
- * greeting and the menu are coalesced into a SINGLE message, so the user doesn't
- * wait a full pace between them. Under an unpaced provider (Meta) they stay two
- * separate sends — the existing, working UX is byte-for-byte unchanged, which
- * keeps rollback clean. When the user's own message is a menu trigger (e.g.
- * "שלום"), handleAIMessage opens the menu, so only the greeting is sent here.
+ * greeting and the menu are ALWAYS coalesced into a SINGLE message — including
+ * when the user's own text was itself a menu trigger. In the original design
+ * the greeter left `menuText=null` on a trigger and relied on
+ * `handleAIMessage → showMenu` to open it, but under paced sending that meant
+ * a ~15 s gap between the greeting and the menu (the user sees "בוקר טוב…"
+ * alone for 15 s). Coalescing here eliminates the gap and, via the returned
+ * `menuSent` flag, lets the caller skip the duplicate menu send from
+ * `handleAIMessage`.
+ *
+ * Under an unpaced provider (Meta) two separate sends are cheap, so the
+ * previous byte-for-byte behavior is preserved (greeting, then a separate
+ * menu — or when the text WAS a menu trigger, greeting only + let
+ * `handleAIMessage` open the menu, matching the pre-PR#2 rollback baseline).
+ *
  * Every step is best-effort — a greeting/menu failure never blocks the request.
  */
-export async function greetAndOpenMenu(from: string, user: ResolvedUser, incomingText: string): Promise<void> {
+export async function greetAndOpenMenu(from: string, user: ResolvedUser, incomingText: string): Promise<{ menuSent: boolean }> {
   const { sendTextMessage } = await import('../whatsapp/sender');
   try {
     const { claimDailyGreeting, buildGreeting } = await import('../services/greetings');
-    if (!(await claimDailyGreeting(from))) return;
+    if (!(await claimDailyGreeting(from))) return { menuSent: false };
     const greeting = buildGreeting(user.name);
 
-    // Resolve the auto-open menu text (best-effort — never blocks the greeting).
-    let menuText: string | null = null;
-    try {
-      const { MENU_TRIGGER_RE, renderMenu } = await import('../ai/menu');
-      if (!MENU_TRIGGER_RE.test(incomingText.trim())) menuText = renderMenu(user);
-    } catch (err) {
-      log.error({ err, from }, 'Auto-open menu after greeting failed (continuing)');
-    }
+    const { MENU_TRIGGER_RE, renderMenu } = await import('../ai/menu');
+    const textWasTrigger = MENU_TRIGGER_RE.test(incomingText.trim());
+    const menuText = renderMenu(user); // best-effort — pure formatter, never throws in practice
 
     const { getProvider } = await import('../whatsapp/provider');
-    if (getProvider().paced && menuText) {
-      // Paced (Green API): one message avoids stacking the ~15s per-send delay.
+    if (getProvider().paced) {
+      // Paced (Green API): ALWAYS coalesce greeting + menu into one send so the
+      // user never waits a full pace between the two. Menu is now considered
+      // "sent" regardless of whether the text was a trigger, so the caller
+      // skips handleAIMessage's redundant reopen.
       await sendTextMessage({ to: from, text: `${greeting}\n\n${menuText}` });
-    } else {
-      // Unpaced (Meta): greeting, then a separate menu — unchanged behavior.
-      await sendTextMessage({ to: from, text: greeting });
-      if (menuText) await sendTextMessage({ to: from, text: menuText });
+      return { menuSent: true };
     }
+
+    // Unpaced (Meta): match the previous rollback baseline exactly.
+    await sendTextMessage({ to: from, text: greeting });
+    if (!textWasTrigger) {
+      await sendTextMessage({ to: from, text: menuText });
+      return { menuSent: true };
+    }
+    // Trigger text under Meta → let handleAIMessage → showMenu open it (two
+    // sends are cheap here, and rollback shape is preserved).
+    return { menuSent: false };
   } catch (err) {
     log.error({ err, from }, 'Daily greeting failed (continuing)');
+    return { menuSent: false };
   }
 }

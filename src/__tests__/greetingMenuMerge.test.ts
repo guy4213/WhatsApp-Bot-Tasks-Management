@@ -43,38 +43,46 @@ afterEach(() => { vi.restoreAllMocks(); });
 describe('greetAndOpenMenu — merge gated on provider.paced', () => {
   it('paced (Green API): merges greeting + menu into ONE message', async () => {
     getProvider.mockReturnValue({ paced: true });
-    await greetAndOpenMenu('972501234567', USER, 'מה קורה');
+    const res = await greetAndOpenMenu('972501234567', USER, 'מה קורה');
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
     expect(sendTextMessage.mock.calls[0][0].text).toBe(`${GREETING}\n\n${MENU}`);
+    expect(res).toEqual({ menuSent: true });
   });
 
   it('unpaced (Meta): greeting and menu are TWO separate sends (unchanged UX)', async () => {
     getProvider.mockReturnValue({ paced: false });
-    await greetAndOpenMenu('972501234567', USER, 'מה קורה');
+    const res = await greetAndOpenMenu('972501234567', USER, 'מה קורה');
     expect(sendTextMessage).toHaveBeenCalledTimes(2);
     expect(sendTextMessage.mock.calls[0][0].text).toBe(GREETING);
     expect(sendTextMessage.mock.calls[1][0].text).toBe(MENU);
+    expect(res).toEqual({ menuSent: true });
   });
 
   it('no greeting claimed today → no sends at all', async () => {
     claimDailyGreeting.mockResolvedValue(false);
     getProvider.mockReturnValue({ paced: true });
-    await greetAndOpenMenu('972501234567', USER, 'מה קורה');
+    const res = await greetAndOpenMenu('972501234567', USER, 'מה קורה');
     expect(sendTextMessage).not.toHaveBeenCalled();
+    expect(res).toEqual({ menuSent: false });
   });
 
-  it('paced + menu-trigger text → greeting only (router opens the menu)', async () => {
+  it('paced + menu-trigger text: STILL coalesces greeting+menu — avoids the 15s pacing gap that the old design left', async () => {
+    // Before this fix, under Green API a trigger like "שלום" caused ONLY the
+    // greeting to be sent here (the router then reopened the menu ~15s later
+    // due to Green API's server-side pacing). The fix always coalesces under
+    // paced; the caller uses menuSent=true to skip the router's redundant open.
     getProvider.mockReturnValue({ paced: true });
-    await greetAndOpenMenu('972501234567', USER, 'שלום');
+    const res = await greetAndOpenMenu('972501234567', USER, 'שלום');
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
-    expect(sendTextMessage.mock.calls[0][0].text).toBe(GREETING);
-    expect(renderMenu).not.toHaveBeenCalled();
+    expect(sendTextMessage.mock.calls[0][0].text).toBe(`${GREETING}\n\n${MENU}`);
+    expect(res).toEqual({ menuSent: true });
   });
 
-  it('unpaced + menu-trigger text → greeting only, menu suppressed', async () => {
+  it('unpaced + menu-trigger text → greeting only, router opens the menu (Meta rollback baseline)', async () => {
     getProvider.mockReturnValue({ paced: false });
-    await greetAndOpenMenu('972501234567', USER, 'תפריט');
+    const res = await greetAndOpenMenu('972501234567', USER, 'תפריט');
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
     expect(sendTextMessage.mock.calls[0][0].text).toBe(GREETING);
+    expect(res).toEqual({ menuSent: false });
   });
 });
