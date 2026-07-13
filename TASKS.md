@@ -109,6 +109,11 @@ Conventions:
 
 **Tests:** 12 (10 קיימות + 2 חדשות ל-context flow) — עוברות. סה"כ 93/93.
 
+**Follow-up (2026-07-13, same day):** גיא הריץ ידנית — ה-LLM עדיין לא חילץ את "גיא פרנסס" בהודעה הראשונה. אבחון: ה-few-shot וה-intent list תחת manager (`MANAGER_INTENT_LIST` + `MANAGER_FEW_SHOT`) לא הכילו את `enable_worker_location_tracking` בכלל — הם הופיעו רק ב-`WORKER_INTENT_LIST` (שם הוספתי בגרסה הראשונה). `buildSystemPrompt` בוחר את ה-prompt לפי `isManagerLevel(user)` (שורה 578/580 ב-`intentParser.ts`), ולכן ה-LLM שרואה manager לא ידע להוציא `task_reference`. תיקון:
+- הוספת פסקה `enable_worker_location_tracking` ל-`MANAGER_INTENT_LIST` עם דגש "task_reference MUST carry the worker name".
+- הוספת ה-intent לרשימת "worker intents managers ALSO support".
+- הוספת 8 few-shot examples ל-`MANAGER_FEW_SHOT` (כולל שם מלא, שם משפחה, ניואנסים של "לחבר", "provision", וגם "בלי שם" → task_reference=null).
+
 ### PROV-T1 — Migration 018: הרחבת `WorkerDeviceIdentity` לפרוביז'נינג
 
 **Status:** DONE (local, uncommitted).
