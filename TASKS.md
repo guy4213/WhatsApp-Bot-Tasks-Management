@@ -72,6 +72,23 @@ Conventions:
 
 ---
 
+## 4.21 FIX-DUE-1: dueDateReminder תופס גם משימות עם lead-time קצר (2026-07-13)
+
+**Status:** DONE (local, uncommitted).
+
+**Problem discovered during QA walkthrough (2026-07-13):** גיא שאל "אם חיים יוצר משימה לפחות משעה מעכשיו — האם עדיין יקבל תזכורת?". בדיקה של `src/scheduler/jobs/dueDateReminder.ts` הראתה שהquery השתמש ב-`t."dueDate" BETWEEN now()+55min AND now()+65min` — חלון צר של 10 דק' סביב "שעה לפני dueDate". תוצאה: משימה שנוצרה 30 דק' לפני dueDate לא הייתה נכנסת לשום טיק — התזכורת **לעולם לא נשלחה**. Cron רץ כל 5 דק' עם window יחסי → dueDate כבר "מתחת" לחלון בכל טיק.
+
+**Fix (`src/scheduler/jobs/dueDateReminder.ts`):**
+- שינוי הquery ל-**open lower bound**: `t."dueDate" > now() AND t."dueDate" <= now() + interval '65 minutes'`.
+- אין סיכון spam — `WhatsappReminderLog(taskId, kind='DUE_1H')` כבר מבצע dedup (INSERT רק אחרי שליחה מוצלחת + SELECT-first בכל טיק).
+- המקרים הרגילים (משימה שנוצרה שעות/ימים קדימה) נכנסים לחלון בטיק שהם ~65 דק' מ-dueDate — התנהגות זהה לקודם. המקרה החדש שכיסינו: משימה עם lead time קצר נכנסת בטיק הבא.
+
+**Files:** `src/scheduler/jobs/dueDateReminder.ts` (query + comment), `src/__tests__/dueDateReminder.test.ts` (test חדש שמאמת open-lower-bound SQL + assertion שאין `BETWEEN`).
+
+**Tests:** 12/12 עוברים ב-`dueDateReminder.test.ts` (11 קיימות + 1 חדשה). `npx tsc --noEmit` נקי.
+
+---
+
 ## 4.20 Auto-provisioning OwnTracks לעובדים (2026-07-12)
 
 **סטטוס כללי:** DONE (local, uncommitted). כל PROV-T1..PROV-T7 מומשו. בדיקות: 32 חדשות עברו; `npx tsc --noEmit` נקי; מיגרציה 018 רצה בפרודקשן. תיעוד מלא ב-[docs/OWNTRACKS_PROVISIONING.md](docs/OWNTRACKS_PROVISIONING.md). משתמשים לא נבנו מחדש — הם כבר קיימים ב-`User`. השורה הקיימת מ-`seedWorkerDeviceIdentity.ts` (`workerKey='guy'`) ממשיכה לעבוד דרך fallback ה-ENV — לא נשברה. אין סוד גולמי ב-DB — הסיסמה נוצרת בזיכרון בזמן צריכת ה-token, נשמרת bcrypt hash בלבד, ומוזרקת פעם אחת ל-`.otrc` שחוזר לאפליקציה.

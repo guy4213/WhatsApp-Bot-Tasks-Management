@@ -245,3 +245,26 @@ describe('runDueDateReminder — enhanced reminder body + button + context', () 
     expect(notify).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('runDueDateReminder — short-lead-time coverage (FIX-DUE-1)', () => {
+  it('reminds a Task whose dueDate is within the 65-min window, even without the historical 55-min lower bound', async () => {
+    // Regression for the "created ~30 min before due, no reminder ever" bug:
+    // the old query used BETWEEN now+55min AND now+65min so a task with
+    // dueDate in [now, now+55min) was invisible on EVERY tick. The lower
+    // bound is now open — `dueDate > now() AND dueDate <= now()+65min` —
+    // and WhatsappReminderLog(taskId, kind='DUE_1H') still dedups.
+    poolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [makeRow()] }) // due-tasks SELECT
+      .mockResolvedValueOnce(NOT_REMINDED)                       // dedup check
+      .mockResolvedValueOnce(INSERTED);                          // INSERT after send
+
+    await runDueDateReminder();
+
+    const selectCall = poolQuery.mock.calls[0][0] as string;
+    // Assert the SQL uses the open lower-bound shape, not the old BETWEEN.
+    expect(selectCall).toMatch(/"dueDate"\s*>\s*now\(\)/);
+    expect(selectCall).toMatch(/"dueDate"\s*<=\s*now\(\)\s*\+\s*interval\s*'65 minutes'/);
+    expect(selectCall).not.toMatch(/BETWEEN/i);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+});

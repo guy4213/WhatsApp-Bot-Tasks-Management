@@ -31,13 +31,20 @@ export function matchTaskDetailsPayload(raw: string): { taskId: string } | null 
 
 /**
  * Runs every 5 minutes.
- * Reminds the owner ~1 hour before a task's due time. Running every 5 min with a
- * 10-minute look-ahead window ([now+55min, now+65min]) guarantees every due time
- * is covered (not just those near the top of the hour). Each reminder is guarded
- * by a row in "WhatsappReminderLog" (kind 'DUE_1H') — but the row is only
- * INSERTed AFTER the WhatsApp send actually succeeds, so a task is reminded
- * at most once, and a failed send is retried on the next tick instead of
- * being silently marked as handled.
+ * Reminds the owner ~1 hour before a task's due time. The pick window is
+ * OPEN LOWER-BOUND: any Task with `dueDate` in the future and within the next
+ * 65 minutes qualifies. This covers two cases with a single query:
+ *   1. The steady-state ~1h-ahead reminder (the historical intent).
+ *   2. A "short-lead-time" Task created LESS THAN 65 min before its dueDate —
+ *      previously invisible to the poll (the old `BETWEEN now+55 AND now+65`
+ *      only matched tasks that entered the window 65 min ahead, so a task
+ *      created 30 min before due never fired at all). Now it fires on the
+ *      next 5-min tick, which is close enough to "one reminder before due"
+ *      given the natural 5-minute grain.
+ *
+ * A task is still reminded AT MOST ONCE — `WhatsappReminderLog(taskId, kind='DUE_1H')`
+ * is inserted AFTER a successful send, and the dedup SELECT prunes subsequent
+ * ticks. A failed send leaves the log row absent so the next tick retries.
  *
  * The reminder body is enriched (customer/contact/description + a "פרטים נוספים"
  * quick-reply button + a URL button opening the task in the CRM):
@@ -68,8 +75,8 @@ export async function runDueDateReminder(): Promise<void> {
      JOIN "User" u ON u.id = t."ownerId"
      WHERE t.status != 'DONE'
        AND t."dueDate" IS NOT NULL
-       AND t."dueDate" BETWEEN now() + interval '55 minutes'
-                           AND now() + interval '65 minutes'
+       AND t."dueDate" > now()
+       AND t."dueDate" <= now() + interval '65 minutes'
        AND upper(u.status::text) = 'ACTIVE'`,
   );
 
