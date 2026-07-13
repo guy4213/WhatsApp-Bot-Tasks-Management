@@ -920,6 +920,14 @@ async function continueConversation(
     return;
   }
 
+  // PROV-T9 (TASKS §4.20): manager asked to enable OwnTracks tracking without
+  // naming the worker; this reply is the worker name.
+  if (ctx.awaiting === 'enable_tracking_pick_worker') {
+    await clearContext(user.phone);
+    await resolveAndTriggerEnableTracking(user, trimmed);
+    return;
+  }
+
   // D2-T14: correct inspection type.
   if (ctx.awaiting === 'correct_type_pick_task' || ctx.awaiting === 'correct_type_await_search') {
     const intent = ctx.intent;
@@ -4343,6 +4351,9 @@ async function startEnableWorkerLocationTracking(
     '';
   const hint = hintRaw.trim();
   if (!hint) {
+    // Set a context so the next inbound text is treated as the worker name —
+    // otherwise the LLM would re-parse "גיא" as a fresh intent and misfire.
+    await setContext(user.phone, { awaiting: 'enable_tracking_pick_worker', intent });
     await sendTextMessage({
       to: user.phone,
       text: 'לאיזה עובד להפעיל מעקב מיקום? השב עם שם העובד.',
@@ -4350,6 +4361,19 @@ async function startEnableWorkerLocationTracking(
     return;
   }
 
+  await resolveAndTriggerEnableTracking(user, hint);
+}
+
+/**
+ * Second half of the enable-tracking flow. Extracted so the initial free-text
+ * entry and the `enable_tracking_pick_worker` follow-up can share it. Given the
+ * worker name hint, resolves to a single `User`, provisions, sends the magic
+ * link, and confirms to the manager.
+ */
+async function resolveAndTriggerEnableTracking(
+  user: ResolvedUser,
+  hint: string,
+): Promise<void> {
   const matches = await findUsersByName(hint);
   if (matches.length === 0) {
     await sendTextMessage({

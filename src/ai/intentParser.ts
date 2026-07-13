@@ -209,8 +209,14 @@ const WORKER_FEW_SHOT = [
   '- "לשייך ליד" / "לשייך את הליד" → assign_lead (router will show the lead list).',
   '- "להקצות ליד לעובד" / "שיוך ליד לעובד" → assign_lead.',
   // PROV-T5 (TASKS §4.20) — MANAGER-only. The router double-checks the guard,
-  // so no requires_manager_approval flag here.
-  '- "הפעל מעקב מיקום לדני" / "לחבר את דני ל-OwnTracks" / "לחבר את דני למעקב" / "provision X" → enable_worker_location_tracking, task_reference="<worker name>".',
+  // so no requires_manager_approval flag here. IMPORTANT: task_reference must
+  // carry the WORKER NAME including the family name when present. A partial
+  // name still resolves via the ILIKE lookup, but passing the full name gives
+  // a unique match on the first try.
+  '- "הפעל מעקב מיקום לדני" → enable_worker_location_tracking, task_reference="דני".',
+  '- "הפעל מעקב מיקום לגיא פרנסס" → enable_worker_location_tracking, task_reference="גיא פרנסס".',
+  '- "הפעל מעקב מיקום ל<פרטי> <משפחה>" → enable_worker_location_tracking, task_reference="<פרטי> <משפחה>". Include the family name in task_reference when the user typed one.',
+  '- "לחבר את דני ל-OwnTracks" / "לחבר את דני למעקב" / "provision X" → enable_worker_location_tracking, task_reference="<full worker name as typed>".',
   '- "שלח לדני קישור למעקב מיקום" → enable_worker_location_tracking, task_reference="דני".',
 ].join('\n');
 

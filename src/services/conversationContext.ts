@@ -103,7 +103,10 @@ export type AwaitingKind =
   // Multi-action confirmation: manager sent a voice/free-text message with several
   // changes in one shot. Bot shows a consolidated confirm message; this state
   // awaits the CONFIRM_YES_MULTI_ACTION / CONFIRM_NO_MULTI_ACTION reply.
-  | 'mgr_multi_action_confirm';    // waiting for confirm/cancel of multi-action batch
+  | 'mgr_multi_action_confirm'     // waiting for confirm/cancel of multi-action batch
+  // PROV-T9 (TASKS §4.20): manager triggered `enable_worker_location_tracking`
+  // without naming the worker — the next inbound text is the worker name.
+  | 'enable_tracking_pick_worker';
 
 /**
  * Active-task pointer (Phase 1). Stored inside the conversation-context `state`

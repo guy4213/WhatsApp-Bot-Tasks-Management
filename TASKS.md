@@ -95,6 +95,20 @@ Conventions:
 
 **Tests:** 91/91 עוברים. `npx tsc --noEmit` נקי.
 
+### PROV-T9 — Context follow-up כשה-LLM לא חילץ שם עובד (2026-07-13)
+
+**Status:** DONE (local, uncommitted).
+
+**Problem:** בבדיקה של גיא (2026-07-13), שליחת "הפעל מעקב מיקום לגיא פרנסס" הופיעה במסך RTL (הצגה הפוכה) — אבל ה-LLM לא שלח את "גיא פרנסס" ל-`task_reference`. הבוט ענה "לאיזה עובד?" כי ה-few-shot הראה רק דוגמה של שם פרטי בודד ("דני"). אחרי השאלה, כל תשובה נפרסה כ-intent חדש → misfire.
+
+**What changed:**
+- `src/services/conversationContext.ts` — awaiting חדש `enable_tracking_pick_worker`.
+- `src/ai/router.ts` — כשאין `hint` ב-`startEnableWorkerLocationTracking`, שומרים context `awaiting: 'enable_tracking_pick_worker'`. הפונקציה השנייה (`resolveAndTriggerEnableTracking`) חולצה כדי לשתף בין הכניסה הראשונית וה-follow-up.
+- `src/ai/router.ts:continueConversation` — dispatch חדש: אם `awaiting === 'enable_tracking_pick_worker'`, מנקה context וקורא ל-`resolveAndTriggerEnableTracking(user, trimmed)`. הודעה חופשית — לא ב-`NUMERIC_PICKER_AWAITING`.
+- `src/ai/intentParser.ts` — few-shot הורחב עם שם מלא ("גיא פרנסס") + הוראה מפורשת ל-LLM להעביר את שם המשפחה ל-`task_reference` כשקיים.
+
+**Tests:** 12 (10 קיימות + 2 חדשות ל-context flow) — עוברות. סה"כ 93/93.
+
 ### PROV-T1 — Migration 018: הרחבת `WorkerDeviceIdentity` לפרוביז'נינג
 
 **Status:** DONE (local, uncommitted).

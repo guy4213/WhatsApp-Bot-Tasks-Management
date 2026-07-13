@@ -556,3 +556,54 @@ describe('enable_worker_location_tracking — happy path', () => {
     expect(texts.some((t) => t.includes('נשלח לעובד יוסי'))).toBe(true);
   });
 });
+
+// ── Test 11: PROV-T9 — context follow-up when the first message had no hint ───
+
+describe('enable_worker_location_tracking — context follow-up (PROV-T9)', () => {
+  it('sets awaiting=enable_tracking_pick_worker when the initial hint is empty', async () => {
+    mockParseIntent(makeTrackingIntent({ task_reference: null, params: {} }));
+
+    await handleAIMessage(makeManager(), 'הפעל מעקב מיקום');
+
+    // The prompt was sent...
+    const prompted = sendTextMessage.mock.calls.map((c) => (c[0] as { text: string }).text)
+      .some((t) => t.includes('לאיזה עובד להפעיל מעקב מיקום'));
+    expect(prompted).toBe(true);
+
+    // ...and the context was set so the next reply captures the name.
+    const setCalls = setContext.mock.calls;
+    const setThisFlow = setCalls.find(
+      (c) => (c[1] as { awaiting: string }).awaiting === 'enable_tracking_pick_worker',
+    );
+    expect(setThisFlow).toBeDefined();
+  });
+
+  it('the follow-up reply is treated as the worker name and drives the full flow', async () => {
+    // Simulate: the follow-up turn — getContext returns the awaiting state.
+    const expiresAt = new Date('2026-07-14T10:00:00Z');
+    getContext.mockImplementationOnce(async () => ({
+      awaiting: 'enable_tracking_pick_worker',
+      intent: makeTrackingIntent({ task_reference: null, params: {} }),
+    }));
+    findUsersByName.mockResolvedValueOnce([{ id: 'w1', name: 'דני' }]);
+    poolQuery.mockResolvedValueOnce({ rows: [{ phone: '972501234567' }] });
+    createProvisioning.mockResolvedValueOnce({
+      magicUrl: 'https://bot.example.com/o/tokABC',
+      workerKey: 'w_abc',
+      expiresAt,
+    });
+    notify.mockResolvedValueOnce('wamid-xyz');
+
+    // The user replies with the worker name — free text, NOT re-parsed as intent.
+    await handleAIMessage(makeManager(), 'דני');
+
+    // AI parser must NOT be called — the reply is captured by context.
+    expect(parseIntentMock).not.toHaveBeenCalled();
+    // Flow ran end-to-end: findUsersByName → createProvisioning → notify.
+    expect(findUsersByName).toHaveBeenCalledWith('דני');
+    expect(createProvisioning).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+    // Context is cleared before the flow continues.
+    expect(clearContext).toHaveBeenCalled();
+  });
+});
