@@ -31,7 +31,7 @@ import {
   verifyWorkerCredentials,
 } from '../services/workerLocation';
 import { bumpSessionLocation } from '../services/tracking';
-import { consumeProvisioning } from '../services/owntracksProvisioning';
+import { consumeProvisioning, getPublicBaseUrl } from '../services/owntracksProvisioning';
 
 const log = moduleLogger('owntracks-poc');
 
@@ -358,13 +358,15 @@ export async function owntracksPocRoutes(app: FastifyInstance) {
   // body so a curl / desktop preview still shows something useful.
   app.get<{ Params: { token: string } }>('/o/:token', async (req, reply) => {
     const { token } = req.params;
-    const publicBase = process.env.PUBLIC_BASE_URL;
-    if (!publicBase) {
-      log.error('PUBLIC_BASE_URL not set — /o/:token cannot build redirect');
-      return reply.code(500).send({ error: 'Server misconfigured' });
-    }
     if (!token || token.length > 128 || !/^[A-Za-z0-9_-]+$/.test(token)) {
       return reply.code(404).send({ error: 'Not found' });
+    }
+    let publicBase: string;
+    try {
+      publicBase = getPublicBaseUrl();
+    } catch (err) {
+      log.error({ err }, '/o/:token cannot build redirect — PUBLIC_BASE_URL/TRACKING_PUBLIC_BASE_URL unset');
+      return reply.code(500).send({ error: 'Server misconfigured' });
     }
 
     const configUrl = `${publicBase}/owntracks/config/${token}`;

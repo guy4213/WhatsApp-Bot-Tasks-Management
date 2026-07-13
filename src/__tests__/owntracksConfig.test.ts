@@ -39,6 +39,14 @@ const poolQueryMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/owntracksProvisioning', () => ({
   consumeProvisioning: (...a: unknown[]) => consumeProvisioningMock(...a),
+  // getPublicBaseUrl reads PUBLIC_BASE_URL / TRACKING_PUBLIC_BASE_URL at call
+  // time. The tests toggle these envs to exercise the "missing → 500" branch,
+  // so we forward to the real implementation rather than stubbing a value here.
+  getPublicBaseUrl: () => {
+    const base = (process.env.PUBLIC_BASE_URL ?? process.env.TRACKING_PUBLIC_BASE_URL ?? '').trim();
+    if (!base) throw new Error('PUBLIC_BASE_URL env var is not set');
+    return base.replace(/\/+$/, '');
+  },
 }));
 
 vi.mock('../services/workerLocation', () => ({
@@ -215,15 +223,22 @@ describe('GET /o/:token — happy path', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('GET /o/:token — PUBLIC_BASE_URL missing', () => {
-  it('returns 500 when PUBLIC_BASE_URL env var is not set', async () => {
+  it('returns 500 when both PUBLIC_BASE_URL and TRACKING_PUBLIC_BASE_URL are unset', async () => {
+    // getPublicBaseUrl() falls back to TRACKING_PUBLIC_BASE_URL — unset both to
+    // exercise the "server misconfigured" branch.
     delete process.env.PUBLIC_BASE_URL;
+    const savedTracking = process.env.TRACKING_PUBLIC_BASE_URL;
+    delete process.env.TRACKING_PUBLIC_BASE_URL;
 
-    const res = await app.inject({
-      method: 'GET',
-      url: '/o/validtoken123',
-    });
-
-    expect(res.statusCode).toBe(500);
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/o/validtoken123',
+      });
+      expect(res.statusCode).toBe(500);
+    } finally {
+      if (savedTracking !== undefined) process.env.TRACKING_PUBLIC_BASE_URL = savedTracking;
+    }
   });
 });
 

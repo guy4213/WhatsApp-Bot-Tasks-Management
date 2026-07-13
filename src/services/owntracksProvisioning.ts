@@ -73,10 +73,25 @@ function deriveTrackerId(slug: string): string {
   return crypto.randomBytes(1).toString('hex').slice(0, 2).toUpperCase();
 }
 
-function getPublicBaseUrl(): string {
-  const base = process.env.PUBLIC_BASE_URL;
-  if (!base) throw new Error('PUBLIC_BASE_URL env var is not set');
-  return base;
+/**
+ * Public HTTPS host of the bot server, used to build both the WhatsApp magic
+ * link (`/o/:token`) and the `.otrc` `url` field OwnTracks POSTs to. Same
+ * physical host as the customer-facing tracking page → falls back to
+ * `TRACKING_PUBLIC_BASE_URL` when `PUBLIC_BASE_URL` isn't set separately, so
+ * operators don't have to define the same URL twice. Trailing slashes are
+ * stripped so joins like `${base}/o/${token}` never yield `//`.
+ *
+ * Exported so route handlers (owntracksPoc.ts) can build the same URL without
+ * duplicating the env lookup.
+ */
+export function getPublicBaseUrl(): string {
+  const base = (process.env.PUBLIC_BASE_URL ?? process.env.TRACKING_PUBLIC_BASE_URL ?? '').trim();
+  if (!base) {
+    throw new Error(
+      'PUBLIC_BASE_URL env var is not set (and TRACKING_PUBLIC_BASE_URL not present as fallback)',
+    );
+  }
+  return base.replace(/\/+$/, '');
 }
 
 // ── createProvisioning ────────────────────────────────────────────────────────

@@ -77,9 +77,23 @@ Conventions:
 **סטטוס כללי:** DONE (local, uncommitted). כל PROV-T1..PROV-T7 מומשו. בדיקות: 32 חדשות עברו; `npx tsc --noEmit` נקי; מיגרציה 018 רצה בפרודקשן. תיעוד מלא ב-[docs/OWNTRACKS_PROVISIONING.md](docs/OWNTRACKS_PROVISIONING.md). משתמשים לא נבנו מחדש — הם כבר קיימים ב-`User`. השורה הקיימת מ-`seedWorkerDeviceIdentity.ts` (`workerKey='guy'`) ממשיכה לעבוד דרך fallback ה-ENV — לא נשברה. אין סוד גולמי ב-DB — הסיסמה נוצרת בזיכרון בזמן צריכת ה-token, נשמרת bcrypt hash בלבד, ומוזרקת פעם אחת ל-`.otrc` שחוזר לאפליקציה.
 
 **Follow-ups:**
-- הרשמת template `owntracks_provisioning` ב-Meta Business Manager (UTILITY, 2 body params: שם עובד, magic URL). עד להרשמה + אישור, שליחה מחוץ ל-24h תיכשל — הבוט מדווח למנהל וממשיך.
-- קונפיגורציית `PUBLIC_BASE_URL` ב-`.env` בפרודקשן — חובה לזרימה.
+- הרשמת template `owntracks_provisioning` ב-Meta Business Manager — **בוצע 2026-07-12** (`npm run templates:create`, id=2105597240836606, status=PENDING). לא נצרך בפועל בזמן ש-`WHATSAPP_PROVIDER=greenapi` (הדיפולט של PR#2) — Green API הוא WhatsApp Web בלי חלון 24h ובלי חובת template. שווה לרגע rollback ל-Meta.
+- קונפיגורציית `PUBLIC_BASE_URL` ב-`.env` — **fallback אוטומטי ל-`TRACKING_PUBLIC_BASE_URL`** מאז PROV-T8 (2026-07-13). מספיק להגדיר את השני.
 - Revoke בבוט (intent "כבה מעקב") — לא נדרש עכשיו, הטבלה כבר תומכת (`revokedAt`).
+
+### PROV-T8 — `PUBLIC_BASE_URL` fallback ל-`TRACKING_PUBLIC_BASE_URL` (2026-07-13)
+
+**Status:** DONE (local, uncommitted).
+
+**Rationale:** שני המשתנים מצביעים על אותו host פיזי (host הבוט הציבורי). אין סיבה שהאופרייטור יגדיר את שניהם.
+
+**What changed:**
+- `getPublicBaseUrl()` ב-`src/services/owntracksProvisioning.ts` הוסב מ-`PUBLIC_BASE_URL` בלבד ל-`PUBLIC_BASE_URL ?? TRACKING_PUBLIC_BASE_URL`, כולל trim + סטריפ trailing slash. הפונקציה מיוצאת (`export`).
+- `src/routes/owntracksPoc.ts` — `GET /o/:token` השתמש ב-`process.env.PUBLIC_BASE_URL` ישירות; עכשיו משתמש ב-`getPublicBaseUrl()` המיובא — אותה זרימה אחידה עם `createProvisioning` / `consumeProvisioning`.
+- `.env.example` — הערה מעודכנת.
+- `src/__tests__/owntracksConfig.test.ts` — mock של `owntracksProvisioning` חושף עכשיו `getPublicBaseUrl` שקורא env בזמן קריאה; בדיקת "missing" גם מוחקת `TRACKING_PUBLIC_BASE_URL` (restore ב-finally).
+
+**Tests:** 91/91 עוברים. `npx tsc --noEmit` נקי.
 
 ### PROV-T1 — Migration 018: הרחבת `WorkerDeviceIdentity` לפרוביז'נינג
 
