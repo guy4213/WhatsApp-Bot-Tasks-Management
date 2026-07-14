@@ -1,0 +1,810 @@
+[
+  {
+    "taskId": "f49245ea-137a-41e3-8a83-387a572ad7f6",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": "2026-07-17T03:00:00.000Z",
+    "createdAt": "2026-07-14T02:34:47.659Z",
+    "updatedAt": "2026-07-14T03:05:40.494Z",
+    "description": "סוג לקוח: COMPANY",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "f4461d6f-28a6-43cc-9504-db5cd80b3f46",
+      "name": "רמת אביב ג' ניהול ואחזקה בע\"מ",
+      "city": "רעננה",
+      "address": "זרחין",
+      "phone": "0526648427",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "10013",
+      "inspectionType": {
+        "code": "10013",
+        "labelHe": "ריח – איתור וסילוק מטרד ריח",
+        "family": "odor",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"10013\" מתחזה ל-InspectionType \"ריח – איתור וסילוק מטרד ריח\" (family=odor) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:10013"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "b31e883c-39c0-4629-a8e4-480d6770b786",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step6",
+    "currentStage": 5,
+    "dueDate": null,
+    "createdAt": "2026-07-13T08:12:36.365Z",
+    "updatedAt": "2026-07-14T02:31:43.850Z",
+    "description": "סוג לקוח: PRIVATE",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "81c1d693-3e3b-40f9-a671-6b21146a51b4",
+      "name": "בתיה טוקטלי - טאי טו",
+      "city": "רשפון",
+      "address": "הכפר 22",
+      "phone": "0545572178",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "10000",
+      "inspectionType": {
+        "code": "10000",
+        "labelHe": "ראדון – ערכה לבדיקת גז ראדון ארוכת טווח",
+        "family": "radon",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"10000\" מתחזה ל-InspectionType \"ראדון – ערכה לבדיקת גז ראדון ארוכת טווח\" (family=radon) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:10000"
+    ],
+    "missingData": [
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "61682839-2e23-4c7b-aea6-8dbe438ab75c",
+    "title": "פנייה - נעמי לשם",
+    "status": "OPEN",
+    "type": "step3",
+    "currentStage": 2,
+    "dueDate": null,
+    "createdAt": "2026-07-13T07:31:18.264Z",
+    "updatedAt": "2026-07-14T02:31:43.857Z",
+    "description": "",
+    "processNotes": "",
+    "owner": {
+      "id": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "name": "גלית",
+      "email": "galit@galit.co.il"
+    },
+    "customer": {
+      "id": "0ce0078d-d1d9-4478-8ea6-b29d174b159f",
+      "name": "נעמי לשם",
+      "city": "קרית אונו",
+      "address": "מנחם בגין 54",
+      "phone": "054-4405095",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "10000",
+      "inspectionType": {
+        "code": "10000",
+        "labelHe": "ראדון – ערכה לבדיקת גז ראדון ארוכת טווח",
+        "family": "radon",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"10000\" מתחזה ל-InspectionType \"ראדון – ערכה לבדיקת גז ראדון ארוכת טווח\" (family=radon) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:10000"
+    ],
+    "missingData": [
+      "dueDate",
+      "description",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "26d16950-ad31-43ce-a151-04552d61a102",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": "2026-07-16T03:00:00.000Z",
+    "createdAt": "2026-07-13T06:32:03.921Z",
+    "updatedAt": "2026-07-13T07:58:49.418Z",
+    "description": "סוג לקוח: פרטי",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "d19a1277-a951-42ba-bd2d-7eea278ceeb9",
+      "name": "בי ווי הפקות והשעות בע\"מ",
+      "city": "פתח תקווה",
+      "address": "המגשימים 20",
+      "phone": "0527485444",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "69",
+      "inspectionType": {
+        "code": "69",
+        "labelHe": "אוויר – דיגום עובשים באוויר – בדיקה ראשונה",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"69\" מתחזה ל-InspectionType \"אוויר – דיגום עובשים באוויר – בדיקה ראשונה\" (family=air) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:69"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "fb4f4bdd-007a-4cd5-a9a9-6e0b5d9568e9",
+    "title": "פנייה - זהר שמר ניהול פרויקטים בע\"מ",
+    "status": "OPEN",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": "2026-07-16T03:00:00.000Z",
+    "createdAt": "2026-07-13T06:21:00.277Z",
+    "updatedAt": "2026-07-14T04:20:11.020Z",
+    "description": "סוג לקוח: COMPANY",
+    "processNotes": "",
+    "owner": {
+      "id": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "name": "יורם",
+      "email": "yoram@galit.co.il"
+    },
+    "customer": {
+      "id": "53c3de44-8ed1-42a4-881c-5baef736c050",
+      "name": "זהר שמר ניהול פרויקטים בע\"מ",
+      "city": "כפר סבא",
+      "address": "ויצמן 42",
+      "phone": "052-6606024",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "10006",
+      "inspectionType": {
+        "code": "10006",
+        "labelHe": "קרינה – ייעוץ ופיקוח עליון לאחר בנייה (ELF היתר)",
+        "family": "radiation",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"10006\" מתחזה ל-InspectionType \"קרינה – ייעוץ ופיקוח עליון לאחר בנייה (ELF היתר)\" (family=radiation) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:10006"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "38add4fb-94a0-47c0-b218-e6412bbf1a04",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "stepQuote",
+    "currentStage": 99,
+    "dueDate": null,
+    "createdAt": "2026-07-13T05:42:53.682Z",
+    "updatedAt": "2026-07-14T02:31:43.853Z",
+    "description": "סוג לקוח: PRIVATE",
+    "processNotes": "",
+    "owner": {
+      "id": "3d99d54c-219c-45ff-83b7-9525549f3e4d",
+      "name": "אורי",
+      "email": "uri@galit.co.il"
+    },
+    "customer": {
+      "id": "6ea3071e-720d-4eb6-8033-8500d8477fc9",
+      "name": "יפה סטון",
+      "city": "מודיעין-מכבים-רעות",
+      "address": "משה דיין 10",
+      "phone": "0522926472",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "73",
+      "inspectionType": {
+        "code": "73",
+        "labelHe": "רעש – בדיקת רעש סביבתית עפ״י סעיף 1",
+        "family": "noise",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"73\" מתחזה ל-InspectionType \"רעש – בדיקת רעש סביבתית עפ״י סעיף 1\" (family=noise) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:73"
+    ],
+    "missingData": [
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "8bc0d49c-4287-47b2-84c5-8b06437d41b9",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "stepQuote",
+    "currentStage": 99,
+    "dueDate": null,
+    "createdAt": "2026-07-13T04:12:36.022Z",
+    "updatedAt": "2026-07-14T02:31:43.873Z",
+    "description": "סוג לקוח: PRIVATE",
+    "processNotes": "",
+    "owner": {
+      "id": "3d99d54c-219c-45ff-83b7-9525549f3e4d",
+      "name": "אורי",
+      "email": "uri@galit.co.il"
+    },
+    "customer": {
+      "id": "7a12b78a-f791-4109-b912-a0c98565e2d0",
+      "name": "דוד עזרן",
+      "city": "תל אביב-יפו",
+      "address": "אלקלאי 3",
+      "phone": "054-4594936",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "10026",
+      "inspectionType": {
+        "code": "10026",
+        "labelHe": "אסבסט – זיהוי צובר אסבסט",
+        "family": "asbestos",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"10026\" מתחזה ל-InspectionType \"אסבסט – זיהוי צובר אסבסט\" (family=asbestos) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:10026"
+    ],
+    "missingData": [
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "6e2935c9-2fd3-4bde-997c-e26c27fdadd1",
+    "title": "פנייה - שגרירות אוסטרליה",
+    "status": "OPEN",
+    "type": "step6",
+    "currentStage": 5,
+    "dueDate": "2026-07-14T03:00:00.000Z",
+    "createdAt": "2026-07-12T08:28:30.723Z",
+    "updatedAt": "2026-07-14T07:56:44.127Z",
+    "description": "סוג לקוח: עסקי\nפעולה הבאה: שליחת הצעה",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "3507378d-7641-4e82-9b31-9d477eb5a754",
+      "name": "שגרירות אוסטרליה",
+      "city": "תל אביב",
+      "address": "יהודה הלוי 23",
+      "phone": "050-5435424",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "69",
+      "inspectionType": {
+        "code": "69",
+        "labelHe": "אוויר – דיגום עובשים באוויר – בדיקה ראשונה",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"69\" מתחזה ל-InspectionType \"אוויר – דיגום עובשים באוויר – בדיקה ראשונה\" (family=air) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:69"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "827a84b7-ac06-4203-8ba7-6708b7cc4629",
+    "title": "פנייה - עדי ירדן",
+    "status": "OPEN",
+    "type": "step5",
+    "currentStage": 4,
+    "dueDate": null,
+    "createdAt": "2026-07-12T08:01:35.633Z",
+    "updatedAt": "2026-07-13T06:46:41.863Z",
+    "description": "סוג לקוח: עסקי",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "1b2f5ce7-3420-4017-9cda-05c9c0c73d3c",
+      "name": "עדי ירדן",
+      "city": "תל אביב",
+      "address": "הרטגלס 16",
+      "phone": "054-5611760",
+      "type": "POTENTIAL",
+      "services": []
+    },
+    "product": {
+      "raw": "69",
+      "inspectionType": {
+        "code": "69",
+        "labelHe": "אוויר – דיגום עובשים באוויר – בדיקה ראשונה",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"69\" מתחזה ל-InspectionType \"אוויר – דיגום עובשים באוויר – בדיקה ראשונה\" (family=air) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:69"
+    ],
+    "missingData": [
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "db4a2870-f173-4bd8-b70b-ed2b72b43282",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": "2027-01-01T06:00:00.000Z",
+    "createdAt": "2026-07-12T06:29:50.374Z",
+    "updatedAt": "2026-07-12T08:17:43.682Z",
+    "description": "סוג לקוח: PRIVATE\nפעולה הבאה: שליחת הצעה",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "61507c6d-c0f1-49e0-9b72-a7675b708b8f",
+      "name": "רובי סלם",
+      "city": "גיזו",
+      "address": "בית מס' 37",
+      "phone": "0524646264",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "10003",
+      "inspectionType": {
+        "code": "10003",
+        "labelHe": "ריח – בדיקת ריח ע״י צוות מריחים",
+        "family": "odor",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"10003\" מתחזה ל-InspectionType \"ריח – בדיקת ריח ע״י צוות מריחים\" (family=odor) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:10003"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "83c31a17-aa67-4549-9f9f-5c456354ca44",
+    "title": "פנייה - ת.ד.ל בע\"מ",
+    "status": "OPEN",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": "2026-07-15T03:00:00.000Z",
+    "createdAt": "2026-07-12T05:58:29.392Z",
+    "updatedAt": "2026-07-12T08:17:43.678Z",
+    "description": "סוג לקוח: עסקי\nפעולה הבאה: שליחת הצעה",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "4e94c4c6-7070-4ad2-ba33-0bfd79a30592",
+      "name": "ת.ד.ל בע\"מ",
+      "city": "לוד",
+      "address": "האיילון 12 גני יער",
+      "phone": "03-9692074",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "72",
+      "inspectionType": {
+        "code": "72",
+        "labelHe": "אוויר – בדיקת איכות אוויר תוך מבני",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"72\" מתחזה ל-InspectionType \"אוויר – בדיקת איכות אוויר תוך מבני\" (family=air) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:72"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "c2cf93ca-c4ff-44f7-9f40-dbcb1412a0de",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "stepQuote",
+    "currentStage": 99,
+    "dueDate": null,
+    "createdAt": "2026-07-12T05:48:19.481Z",
+    "updatedAt": "2026-07-14T04:13:05.250Z",
+    "description": "סוג לקוח: עסקי",
+    "processNotes": "",
+    "owner": {
+      "id": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "name": "יורם",
+      "email": "yoram@galit.co.il"
+    },
+    "customer": {
+      "id": "f7dca938-ec04-4b40-83af-1b6a53e13e48",
+      "name": "גיא ארד",
+      "city": "אופקים",
+      "address": "כעעע",
+      "phone": "0525551331",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "10064",
+      "inspectionType": {
+        "code": "10064",
+        "labelHe": "קרינה – בדיקת קרינה מרכב היברידי / חשמלי",
+        "family": "radiation",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"10064\" מתחזה ל-InspectionType \"קרינה – בדיקת קרינה מרכב היברידי / חשמלי\" (family=radiation) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:10064"
+    ],
+    "missingData": [
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "ed9a2cf5-9bec-4a07-9d28-ec814d887f86",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": "2026-07-15T03:00:00.000Z",
+    "createdAt": "2026-07-12T03:57:32.029Z",
+    "updatedAt": "2026-07-13T04:46:15.023Z",
+    "description": "סוג לקוח: PRIVATE",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "46fdc69b-bfa8-40c4-b4f1-6f5a16e2b91d",
+      "name": "עידן דיין",
+      "city": "גבעתיים",
+      "address": "שנקין",
+      "phone": "0504082727",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "69",
+      "inspectionType": {
+        "code": "69",
+        "labelHe": "אוויר – דיגום עובשים באוויר – בדיקה ראשונה",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"69\" מתחזה ל-InspectionType \"אוויר – דיגום עובשים באוויר – בדיקה ראשונה\" (family=air) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:69"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "5ae71702-af74-4d6e-a7ae-48705c7b83bd",
+    "title": "ליד חדש נכנס",
+    "status": "OPEN",
+    "type": "stepQuote",
+    "currentStage": 99,
+    "dueDate": "2026-07-15T03:00:00.000Z",
+    "createdAt": "2026-07-11T03:29:22.412Z",
+    "updatedAt": "2026-07-13T04:46:15.027Z",
+    "description": "סוג לקוח: PRIVATE",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "8e8fdf87-5880-42fe-834f-ea7435e46cbe",
+      "name": "לימור דנון",
+      "city": "בית חנן",
+      "address": "בית חנן",
+      "phone": "0506690028",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "69",
+      "inspectionType": {
+        "code": "69",
+        "labelHe": "אוויר – דיגום עובשים באוויר – בדיקה ראשונה",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {
+      "id": "524879ef-c834-4c37-977d-b33b357f2272",
+      "subject": "הודעה חדשה מאת \"גלית\"",
+      "fromName": "גלית",
+      "bodyPreview": "שם: limor\nטלפון: 0506690028\nאימייל: tanye28777@gmail.com\nהודעה: אשמח לפרטים\n\n---\n\nתאריך: יולי 11, 2026\nזמן: 9:28 am\nקישור לעמוד: https://galit.co.il/%D7%90%D7%95%D7%99%D7%A8/%D7%91%D7%93%D7%99%D7%A7%D"
+    },
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"69\" מתחזה ל-InspectionType \"אוויר – דיגום עובשים באוויר – בדיקה ראשונה\" (family=air) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:69"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "08c165eb-b0bb-4043-8a42-5db376e4472c",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "stepQuote",
+    "currentStage": 99,
+    "dueDate": null,
+    "createdAt": "2026-07-09T07:00:44.381Z",
+    "updatedAt": "2026-07-13T03:45:39.361Z",
+    "description": "סוג לקוח: PUBLIC",
+    "processNotes": "",
+    "owner": {
+      "id": "3d99d54c-219c-45ff-83b7-9525549f3e4d",
+      "name": "אורי",
+      "email": "uri@galit.co.il"
+    },
+    "customer": {
+      "id": "f8806ed8-9cdf-4bad-9c0c-eb5c516ccd55",
+      "name": "מועצה אזורית גן רווה",
+      "city": "עיינות",
+      "address": "מושב עיינות",
+      "phone": "08-9408230  ",
+      "type": "PUBLIC",
+      "services": []
+    },
+    "product": {
+      "raw": "10011",
+      "inspectionType": {
+        "code": "10011",
+        "labelHe": "רעש – בדיקת רעש סביבתית רציפה עד 24 שעות",
+        "family": "noise",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "FIELD_PROCESS_CANDIDATE",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "productName=\"10011\" מתחזה ל-InspectionType \"רעש – בדיקת רעש סביבתית רציפה עד 24 שעות\" (family=noise) — כל שורות InspectionType הן isFieldInspection=true",
+      "productName קטלוג + לקוח אמיתי → תהליך שיוליד בדיקת שטח"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_MATCHES_INSPECTION_TYPE:10011"
+    ],
+    "missingData": [
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  }
+]

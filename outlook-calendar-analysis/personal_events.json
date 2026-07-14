@@ -1,0 +1,397 @@
+[
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgFRAAgI3mRJgW1AAEYAAAAAmXMlunxls0mz20WmQ2MSUAcAPbr_hNHGkki3d6lTFgyqvAAAAAAADwAAPbr_hNHGkki3d6lTFgyqvAAAAAOdZAAAEA==",
+    "subject": "יום הולדת לנועה כהן",
+    "start": "2026-02-05T12:00:00.0000000",
+    "end": "2026-02-05T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "occurrence",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח אישי ב-subject: יום הולדת"
+    ],
+    "matchedSignals": [
+      "SUBJECT_PERSONAL_KW:יום הולדת",
+      "LOCATION_EMPTY",
+      "SHOW_AS_FREE",
+      "RECURRING_TYPE:occurrence"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAg8RIxaAAA=",
+    "subject": "אימון פאדל",
+    "start": "2026-02-26T17:30:00.0000000",
+    "end": "2026-02-26T18:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אכדיה",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "galit@galit.co.il",
+        "name": "גלית",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח אישי ב-subject: אימון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_PERSONAL_KW:אימון",
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgFRAAgI3oFcorYAAEYAAAAAmXMlunxls0mz20WmQ2MSUAcAPbr_hNHGkki3d6lTFgyqvAAAAAAADwAAPbr_hNHGkki3d6lTFgyqvAABDo59PwAAEA==",
+    "subject": "יום הולדת של רמי עשור",
+    "start": "2026-03-14T00:00:00.0000000",
+    "end": "2026-03-15T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "occurrence",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "אירוע יום שלם — סביר noise",
+      "מילות מפתח אישי ב-subject: יום הולדת"
+    ],
+    "matchedSignals": [
+      "ALL_DAY",
+      "SUBJECT_PERSONAL_KW:יום הולדת",
+      "LOCATION_EMPTY",
+      "SHOW_AS_FREE",
+      "RECURRING_TYPE:occurrence"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgFRAAgI3qWCQbaAAEYAAAAAmXMlunxls0mz20WmQ2MSUAcAPbr_hNHGkki3d6lTFgyqvAAAAAAADwAAPbr_hNHGkki3d6lTFgyqvAABDo59PQAAEA==",
+    "subject": "יום הולדת של זאב והראל משיח",
+    "start": "2026-04-29T00:00:00.0000000",
+    "end": "2026-04-30T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "occurrence",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "אירוע יום שלם — סביר noise",
+      "מילות מפתח אישי ב-subject: יום הולדת"
+    ],
+    "matchedSignals": [
+      "ALL_DAY",
+      "SUBJECT_PERSONAL_KW:יום הולדת",
+      "LOCATION_EMPTY",
+      "SHOW_AS_FREE",
+      "RECURRING_TYPE:occurrence"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjciAAA=",
+    "subject": "לשים את הלקסוס במוסך",
+    "start": "2026-06-01T08:30:00.0000000",
+    "end": "2026-06-01T09:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "פתח תקווה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח אישי ב-subject: מוסך, לקסוס"
+    ],
+    "matchedSignals": [
+      "SUBJECT_PERSONAL_KW:מוסך|לקסוס",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs4AAA=",
+    "subject": "בדיקות קרינה ELF + RF ב- 10 גני ילדים בקיבוץ שפיים- להגיע לשער ולהתקשר לאורלי- 052-6033003",
+    "start": "2026-06-14T10:00:00.0000000",
+    "end": "2026-06-14T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "קיבוץ שפיים",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח אישי ב-subject: ילדים"
+    ],
+    "matchedSignals": [
+      "SUBJECT_PERSONAL_KW:ילדים",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgFRAAgI3tY6h1MAAEYAAAAAmXMlunxls0mz20WmQ2MSUAcAPbr_hNHGkki3d6lTFgyqvAAAAAAADwAAPbr_hNHGkki3d6lTFgyqvAABDo59RgAAEA==",
+    "subject": "יום הולדת של גולדנברג שלומי",
+    "start": "2026-06-30T00:00:00.0000000",
+    "end": "2026-07-01T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "occurrence",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "אירוע יום שלם — סביר noise",
+      "מילות מפתח אישי ב-subject: יום הולדת"
+    ],
+    "matchedSignals": [
+      "ALL_DAY",
+      "SUBJECT_PERSONAL_KW:יום הולדת",
+      "LOCATION_EMPTY",
+      "SHOW_AS_FREE",
+      "RECURRING_TYPE:occurrence"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiOUjhkAAA=",
+    "subject": "טיפול פנים",
+    "start": "2026-07-02T16:00:00.0000000",
+    "end": "2026-07-02T17:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "2 החורש",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח אישי ב-subject: טיפול"
+    ],
+    "matchedSignals": [
+      "SUBJECT_PERSONAL_KW:טיפול"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgFRAAgI3tyD2qEAAEYAAAAAmXMlunxls0mz20WmQ2MSUAcAPbr_hNHGkki3d6lTFgyqvAAAAAAADwAAPbr_hNHGkki3d6lTFgyqvAABDo59QQAAEA==",
+    "subject": "יום הולדת של שרון נרקיס",
+    "start": "2026-07-08T00:00:00.0000000",
+    "end": "2026-07-09T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "occurrence",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "אירוע יום שלם — סביר noise",
+      "מילות מפתח אישי ב-subject: יום הולדת"
+    ],
+    "matchedSignals": [
+      "ALL_DAY",
+      "SUBJECT_PERSONAL_KW:יום הולדת",
+      "LOCATION_EMPTY",
+      "SHOW_AS_FREE",
+      "RECURRING_TYPE:occurrence"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAADsm2FfHXDQ5MyYIulPtx4AAfMBPilAAA=",
+    "subject": "יום חופש",
+    "start": "2026-07-09T00:00:00.0000000",
+    "end": "2026-07-10T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "אירוע יום שלם — סביר noise",
+      "מילות מפתח אישי ב-subject: חופש"
+    ],
+    "matchedSignals": [
+      "ALL_DAY",
+      "SUBJECT_PERSONAL_KW:חופש",
+      "LOCATION_EMPTY",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgFRAAgI3xwqRhbAAEYAAAAAmXMlunxls0mz20WmQ2MSUAcAPbr_hNHGkki3d6lTFgyqvAAAAAAADwAAPbr_hNHGkki3d6lTFgyqvAABDo59QAAAEA==",
+    "subject": "יום הולדת של רינת בן דוד מנצור",
+    "start": "2026-09-27T00:00:00.0000000",
+    "end": "2026-09-28T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "occurrence",
+    "recurrence": null,
+    "classification": "PERSONAL",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "אירוע יום שלם — סביר noise",
+      "מילות מפתח אישי ב-subject: יום הולדת"
+    ],
+    "matchedSignals": [
+      "ALL_DAY",
+      "SUBJECT_PERSONAL_KW:יום הולדת",
+      "LOCATION_EMPTY",
+      "SHOW_AS_FREE",
+      "RECURRING_TYPE:occurrence"
+    ]
+  }
+]

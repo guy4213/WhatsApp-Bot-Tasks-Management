@@ -1,0 +1,2118 @@
+[
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgmBh7sAAA=",
+    "subject": "מעבר Dynamics 365 לענן",
+    "start": "2026-01-27T11:00:00.0000000",
+    "end": "2026-01-27T11:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "פגישה של Microsoft Teams",
+    "organizer": {
+      "name": "Guy Tsarfati",
+      "address": "guy@1it.co.il"
+    },
+    "attendees": [
+      {
+        "email": "guy@1it.co.il",
+        "name": "Guy Tsarfati",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "fredy@softpro.co.il",
+        "name": "fredy@softpro.co.il",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "________________________________________________________________________________\r\nפגישת Microsoft Teams\r\nלהצטרף אל: https://teams.microsoft.com/meet/38445859858679?p=T14qK7HfpKGe8g1Ttr\r\nמזהה פגישה: 384 458 598 586 79\r\nקוד סיסמה: gM24nA7F\r\n______________",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": true,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "online meeting (Teams/Zoom) → MEETING_OR_AUDIT",
+      "location מכיל \"Teams\" → MEETING_OR_AUDIT",
+      "מארגן חיצוני (1it.co.il) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "IS_ONLINE_MEETING",
+      "LOCATION_TEAMS",
+      "FEW_ATTENDEES:3",
+      "EXTERNAL_ORGANIZER:1it.co.il"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F57AAA=",
+    "subject": "Gabbay Yoram <> Nova Strategica",
+    "start": "2026-01-28T16:15:00.0000000",
+    "end": "2026-01-28T16:45:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "https://meet.google.com/jje-fmyo-xjt",
+    "organizer": {
+      "name": "Andrea Piperno",
+      "address": "andrea.p@novastrategica.com"
+    },
+    "attendees": [
+      {
+        "email": "andrea.p@novastrategica.com",
+        "name": "Andrea Piperno",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "david.p@novastrategica.com",
+        "name": "David Perlmutter",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "Gabbay Yoram <> Nova Strategica\r\nPartecipa con Google Meet - פגישת אסטרטגיה לקמפיינים בגוגל אדס\r\n\r\nPartecipa con Google Meet\r\nLink della riunione\r\nmeet.google.com/jje-fmyo-xjt\r\nPartecipa tramite telefono\r\n(IL) +972 73-359-9899\r\nPIN: 1191533374034\r\n\r\nAltri",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "מארגן חיצוני (novastrategica.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "FEW_ATTENDEES:3",
+      "EXTERNAL_ORGANIZER:novastrategica.com"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AATNivNdAAA=",
+    "subject": "ראיון עבודה אבישי טיירי",
+    "start": "2026-02-01T12:00:00.0000000",
+    "end": "2026-02-01T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "משרד",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "אבישי 050-518-7296",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AATNivNcAAA=",
+    "subject": "ראיון עבודה דניאל בכר",
+    "start": "2026-02-01T15:00:00.0000000",
+    "end": "2026-02-01T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "משרד",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "דניאל 053-986-7402",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F6EAAA=",
+    "subject": "Yoram<>David",
+    "start": "2026-02-01T15:45:00.0000000",
+    "end": "2026-02-01T16:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "https://meet.google.com/ejh-aykz-raz",
+    "organizer": {
+      "name": "David Perlmutter",
+      "address": "david.p@novastrategica.com"
+    },
+    "attendees": [
+      {
+        "email": "david.p@novastrategica.com",
+        "name": "David Perlmutter",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "Yoram<>David‏\r\n‏הצטרפות באמצעות Google Meet – הוזמנת על ידי David Perlmutter להשתתף באירוע בשם \"Yoram<>David\" ב-יום ראשון 1 בפבר׳ 2026 ⋅ 3:45 PM – 4:15 PM (שעון ישראל).\r\n\r\nהאירוע עודכן.\r\nהיה שינוי: שעה\r\n\r\n‏הצטרפות באמצעות Google Meet\r\nקישור לפגישה\r\nmeet.g",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "מארגן חיצוני (novastrategica.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "FEW_ATTENDEES:2",
+      "EXTERNAL_ORGANIZER:novastrategica.com"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F58AAA=",
+    "subject": "ישיבה על אלסטום",
+    "start": "2026-02-02T11:00:00.0000000",
+    "end": "2026-02-02T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית - החברה לאיכות הסביבה בע\"מ",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "galit@galit.co.il",
+        "name": "גלית",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ori@galit.co.il",
+        "name": "אורי רונן",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: ישיבה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:ישיבה",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F6DAAA=",
+    "subject": "ראיון עבודה",
+    "start": "2026-02-03T12:00:00.0000000",
+    "end": "2026-02-03T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "משרד",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "יניב אליהו\r\n052-8745677",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcOAAA=",
+    "subject": "ישיבה עם אמירה נזאר ",
+    "start": "2026-02-04T11:00:00.0000000",
+    "end": "2026-02-04T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית ",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: ישיבה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:ישיבה",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgvrbCEAAA=",
+    "subject": "",
+    "start": "2026-02-05T17:00:00.0000000",
+    "end": "2026-02-05T17:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "https://meet.google.com/vtg-bhpu-qyk",
+    "organizer": {
+      "name": "David Perlmutter",
+      "address": "david.p@novastrategica.com"
+    },
+    "attendees": [
+      {
+        "email": "david.p@novastrategica.com",
+        "name": "David Perlmutter",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "(ללא נושא)\r\n‏הצטרפות באמצעות Google Meet – הוזמנת על ידי David Perlmutter להשתתף באירוע בשם \"(ללא נושא)\" ב-יום חמישי 5 בפבר׳ 2026 ⋅ 5 PM – 5:30 PM (שעון ישראל).\r\n\r\n‏הצטרפות באמצעות Google Meet\r\nקישור לפגישה\r\nmeet.google.com/vtg-bhpu-qyk\r\nהצטרפות דרך הטלפו",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "subject ריק — סיווג מוגבל",
+      "מארגן חיצוני (novastrategica.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "SUBJECT_EMPTY",
+      "FEW_ATTENDEES:2",
+      "EXTERNAL_ORGANIZER:novastrategica.com"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcTAAA=",
+    "subject": "אמירה נזאר פגישה",
+    "start": "2026-02-11T11:00:00.0000000",
+    "end": "2026-02-11T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "galit@galit.co.il",
+        "name": "גלית",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: פגישה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:פגישה",
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcRAAA=",
+    "subject": "פגישת זום | אורי מונרוב + עו\"ד איציק נעימי + יורם גבאי . ",
+    "start": "2026-02-11T12:30:00.0000000",
+    "end": "2026-02-11T13:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "Uri Monrov",
+      "address": "Uri-m@gus.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Uri-m@gus.co.il",
+        "name": "Uri Monrov",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ny@caspilaw.com",
+        "name": "ny@caspilaw.com",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: זום",
+      "מארגן חיצוני (gus.co.il) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:זום",
+      "LOCATION_EMPTY",
+      "FEW_ATTENDEES:3",
+      "EXTERNAL_ORGANIZER:gus.co.il"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcUAAA=",
+    "subject": "פגישת זום | אורי מונרוב + עו\"ד איציק נעימי + יורם גבאי . ",
+    "start": "2026-02-11T12:30:00.0000000",
+    "end": "2026-02-11T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "https://us02web.zoom.us/j/86749980396?pwd=z4egYbEkf14SboFeRwGi99bssgaJje.1",
+    "organizer": {
+      "name": "Orna Daniel",
+      "address": "odaniel@caspilaw.com"
+    },
+    "attendees": [
+      {
+        "email": "odaniel@caspilaw.com",
+        "name": "Orna Daniel",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ny@caspilaw.com",
+        "name": "Yzik Naimi",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri-m@gus.co.il",
+        "name": "uri-m@gus.co.il",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "Caspilaw is inviting you to a scheduled Zoom meeting.\r\nJoin Zoom Meeting\r\nhttps://us02web.zoom.us/j/86749980396?pwd=z4egYbEkf14SboFeRwGi99bssgaJje.1\r\n\r\nMeeting ID: 867 4998 0396\r\nPasscode: 687396\r\n\r\n---\r\n\r\nOne tap mobile\r\n+16468769923,,86749980396# US (Ne",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: זום",
+      "רבים משתתפים כולל דומיין חיצוני — פגישה חיצונית",
+      "מארגן חיצוני (caspilaw.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:זום",
+      "MANY_ATTENDEES:4",
+      "ATTENDEES_EXTERNAL",
+      "EXTERNAL_ORGANIZER:caspilaw.com"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgvrbCKAAA=",
+    "subject": "Corrected:‏ English:‏ HN Line Section C EMC Doc Rev.C",
+    "start": "2026-02-12T11:30:00.0000000",
+    "end": "2026-02-12T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "Réunion Microsoft Teams",
+    "organizer": {
+      "name": "DE-CHEVRON-VILLETTE Matthieu",
+      "address": "matthieu.de-chevron-villette@alstomgroup.com"
+    },
+    "attendees": [
+      {
+        "email": "matthieu.de-chevron-villette@alstomgroup.com",
+        "name": "DE-CHEVRON-VILLETTE Matthieu",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "maria.yaqub@alstomgroup.com",
+        "name": "YAQUB Maria",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ori@galit.co.il",
+        "name": "אורי רונן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "HTM@ProManage.pro",
+        "name": "Haitham Arshid | ProManage",
+        "type": "optional",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "________________________________________________________________________________\r\nRéunion Microsoft Teams\r\nRejoindre : https://teams.microsoft.com/meet/35366646989802?p=CpuYDtNQ0PWFiyLOEB\r\nNuméro de réunion : 353 666 469 898 02\r\nCode secret : dx76VJ2Y",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": true,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "online meeting (Teams/Zoom) → MEETING_OR_AUDIT",
+      "location מכיל \"Teams\" → MEETING_OR_AUDIT",
+      "רבים משתתפים כולל דומיין חיצוני — פגישה חיצונית",
+      "מארגן חיצוני (alstomgroup.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "IS_ONLINE_MEETING",
+      "LOCATION_TEAMS",
+      "MANY_ATTENDEES:5",
+      "ATTENDEES_EXTERNAL",
+      "EXTERNAL_ORGANIZER:alstomgroup.com"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcXAAA=",
+    "subject": "Yoram Gabay and Gil Gordon",
+    "start": "2026-02-17T12:30:00.0000000",
+    "end": "2026-02-17T13:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "https://simplex3d.zoom.us/j/89901383477?pwd=JSOI95qsRaDo0LUpouvyLLWXh22Aaf.1",
+    "organizer": {
+      "name": "Gil Gordon",
+      "address": "gil@simplex3d.com"
+    },
+    "attendees": [
+      {
+        "email": "gil@simplex3d.com",
+        "name": "Gil Gordon",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "galitinc@gmail.com",
+        "name": "galitinc@gmail.com",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "Yoram Gabay and Gil Gordon‏\r\nEvent Name SIMPLEX 3D Demo כאן אפשר לקבוע פגישת דמו ישירות ליומן שלך  :-) נתראה בקרוב Here you can book your free demo directly to your calendar. See you soon! Simplex 3D Location: This is a Z\r\n\r\nהאירוע עודכן.\r\nהיה שינוי: שעה",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "מארגן חיצוני (simplex3d.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "FEW_ATTENDEES:2",
+      "EXTERNAL_ORGANIZER:simplex3d.com"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcSAAA=",
+    "subject": "פאדל",
+    "start": "2026-02-18T17:30:00.0000000",
+    "end": "2026-02-18T18:45:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מלון אכדיה",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "galit@galit.co.il",
+        "name": "גלית",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAg8RIxbAAA=",
+    "subject": "פגישת זום עם יועצים - פרויקטים גני ילדים וביה\"ס - צמרות דגן.  מועצה מקומית בית דגן",
+    "start": "2026-03-04T10:00:00.0000000",
+    "end": "2026-03-04T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "זום:https://us04web.zoom.us/j/76852950174?pwd=mjcdJ5bawUMzUcTQnEf2sNI1P7Wyqu.1",
+    "organizer": {
+      "name": "שי פרידמן מהנדס המועצה",
+      "address": "engineer@beitdagan.muni.il"
+    },
+    "attendees": [
+      {
+        "email": "engineer@beitdagan.muni.il",
+        "name": "שי פרידמן מהנדס המועצה",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "handasa@beitdagan.muni.il",
+        "name": "דולב יוספטל טייכמן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "limor@nofararchitects.com",
+        "name": "Limor - Nofar Architects <limor@nofararchitects.com>",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "chaya@nofararchitects.com",
+        "name": "Chaya - Nofar Architects <chaya@nofararchitects.com>",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "osama@af-eng.co.il",
+        "name": "osama@af-eng.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Refat@topazengs.net",
+        "name": "Refat - Topaz Ltd.",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "noam400@gmail.com",
+        "name": "noam400@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "office@or-eng.co.il",
+        "name": "Office Or-Eng <office@or-eng.co.il>",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ilan@ilanarc.com",
+        "name": "ilan@ilanarc.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "handasa@a-adi.co.il",
+        "name": "לירון א.עדי אקוסטיקה <handasa@a-adi.co.il>",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "lilach@de-eng.co.il",
+        "name": "'lilach@de-eng.co.il'",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "tamara@de-eng.co.il",
+        "name": "תמרה דביר <tamara@de-eng.co.il>",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "victor@ramor.co.il",
+        "name": "Victor Mayblat <victor@ramor.co.il>",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "Join Zoom Meeting\r\n\r\nhttps://us04web.zoom.us/j/76852950174?pwd=mjcdJ5bawUMzUcTQnEf2sNI1P7Wyqu.1\r\n\r\nMeeting ID: 768 5295 0174\r\n\r\nPasscode: 7ixQ45",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: זום",
+      "מילות מפתח אישי ב-subject: ילדים",
+      "רבים משתתפים כולל דומיין חיצוני — פגישה חיצונית",
+      "מארגן חיצוני (beitdagan.muni.il) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:זום",
+      "SUBJECT_PERSONAL_KW:ילדים",
+      "MANY_ATTENDEES:14",
+      "ATTENDEES_EXTERNAL",
+      "EXTERNAL_ORGANIZER:beitdagan.muni.il"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhEC8v7AAA=",
+    "subject": "זום- תכנון תאום עכו ",
+    "start": "2026-03-09T11:00:00.0000000",
+    "end": "2026-03-09T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "zoom",
+    "organizer": {
+      "name": "office msa",
+      "address": "office@m-s-a.co.il"
+    },
+    "attendees": [
+      {
+        "email": "office@m-s-a.co.il",
+        "name": "office msa",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "sharon13shalom@gmail.com",
+        "name": "sharon13shalom@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "iter@iter.co.il",
+        "name": "iter@iter.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "moriness@m-s-a.co.il",
+        "name": "mor iness hassan",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "secretary@alter-noga.co.il",
+        "name": "secretary@alter-noga.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "soika35@gmail.com",
+        "name": "soika35@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "inna.levitas@gmail.com",
+        "name": "inna.levitas@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "sharon@m-s-a.co.il",
+        "name": "sharon hassan",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "iter1707@gmail.com",
+        "name": "iter1707@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "leon@m-s-a.co.il",
+        "name": "leon@m-s-a.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "eden@m-s-a.co.il",
+        "name": "eden@m-s-a.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ori@galit.co.il",
+        "name": "אורי רונן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yaniv@ah-arch.com",
+        "name": "yaniv@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "office@barrabi.com",
+        "name": "office@barrabi.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yuval@tiktin.com",
+        "name": "yuval@tiktin.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ron@eng-so.com",
+        "name": "ron@eng-so.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "oren.hasan@outlook.com",
+        "name": "oren.hasan@outlook.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "office@ah-arch.com",
+        "name": "office@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "fellner@netvision.net.il",
+        "name": "fellner@netvision.net.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "faina@barrabi.com",
+        "name": "faina@barrabi.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "rachel@ah-arch.com",
+        "name": "rachel@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "netanel@alter-noga.co.il",
+        "name": "netanel@alter-noga.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yehonatan@alter-noga.co.il",
+        "name": "yehonatan@alter-noga.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "amit@tiktin.com",
+        "name": "amit@tiktin.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "g.sergey@barrabi.com",
+        "name": "g.sergey@barrabi.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yair@eng-so.com",
+        "name": "yair@eng-so.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "orpaz535@outlook.co.il",
+        "name": "orpaz535@outlook.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "iter9@bezeqint.com",
+        "name": "iter9@bezeqint.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "sapirb@ah-arch.com",
+        "name": "sapirb@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ron@heffer.co.il",
+        "name": "ron@heffer.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "geffen@insitu-ge.co.il",
+        "name": "geffen@insitu-ge.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "adir@eng-so.com",
+        "name": "adir@eng-so.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "shirly@shir-arch.com",
+        "name": "shirly@shir-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "zohar@tiktin.com",
+        "name": "zohar@tiktin.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yuval@ah-arch.com",
+        "name": "yuval@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "זום- תכנון תאום עכו\r\noren hasan is inviting you to a scheduled Zoom meeting.Topic: My MeetingTime: Nov 3, 2024 09:00 AM Jerusalem        Every week on Sun, 110 occurrence(s)Please download and import the following iCalend\r\n\r\nהאירוע עודכן.\r\nהיה שינוי: שעה",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: זום",
+      "מילות מפתח משרד ב-subject: תכנון",
+      "רבים משתתפים כולל דומיין חיצוני — פגישה חיצונית",
+      "מארגן חיצוני (m-s-a.co.il) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:זום",
+      "SUBJECT_OFFICE_KW:תכנון",
+      "LOCATION_SHORT",
+      "MANY_ATTENDEES:36",
+      "ATTENDEES_EXTERNAL",
+      "EXTERNAL_ORGANIZER:m-s-a.co.il"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjccAAA=",
+    "subject": "האירוע בוטל: Canceled: יורם and Closer AI, יום א׳ 19 באפר׳ 2026, 9 AM - 9:30 AM (GMT‎+3‎) (yoram@galit.co.il)",
+    "start": "2026-04-19T09:00:00.0000000",
+    "end": "2026-04-19T09:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "Google Meet (instructions in description)",
+    "organizer": {
+      "name": "Closer AI",
+      "address": "support@closer-live.com"
+    },
+    "attendees": [
+      {
+        "email": "support@closer-live.com",
+        "name": "Closer AI",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "Canceled: יורם and Closer AI‏\r\n\r\nהאירוע בוטל\r\n\r\n‏הצטרפות באמצעות Google Meet\r\nקישור לפגישה\r\nmeet.google.com/yss-fssk-bbf\r\nהצטרפות דרך הטלפון\r\n(IL) +972 73-359-9899‏\r\nקוד אימות: 2516471218693\r\n\r\nמספרי טלפון נוספים\r\nהיי יורם,\r\n\r\nשמחים לאשר את פגישת הדמו שקב",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": true,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "אירוע מבוטל",
+      "מארגן חיצוני (closer-live.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "IS_CANCELLED",
+      "FEW_ATTENDEES:3",
+      "EXTERNAL_ORGANIZER:closer-live.com",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhg9OQ5AAA=",
+    "subject": "מפגש העשרה- איגוד היועצים לבניה ירוקה 28.4.2026",
+    "start": "2026-04-28T12:00:00.0000000",
+    "end": "2026-04-28T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "זום ישלח ביום הפגישה; https://meet.google.com/qgp-acub-bcd",
+    "organizer": {
+      "name": "Office gbcu",
+      "address": "office@gbcu.org.il"
+    },
+    "attendees": [
+      {
+        "email": "office@gbcu.org.il",
+        "name": "Office gbcu",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "galitinc@gmail.com",
+        "name": "galitinc@gmail.com",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "מפגש העשרה- איגוד היועצים לבניה ירוקה 28.4.2026\r\n\r\nהאירוע הזה עדיין לא נמצא ביומן שלך\r\nלא הייתה לך אינטראקציה עם office@gbcu.org.il לפני כן. רוצה להוסיף אוטומטית את ההזמנה הזו והזמנות עתידיות מהכתובת הזו ליומן שלך?\r\nהוספה ליומן\r\n\r\n‏הצטרפות באמצעות Google ",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "מארגן חיצוני (gbcu.org.il) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "FEW_ATTENDEES:2",
+      "EXTERNAL_ORGANIZER:gbcu.org.il"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AATNivNeAAA=",
+    "subject": "מפגש המשך - הערות הציבור ת\"י 5282 שאינם למגורים",
+    "start": "2026-05-12T11:30:00.0000000",
+    "end": "2026-05-12T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שימו לב לקישור בגוגל מיט; https://meet.google.com/naz-ufbg-equ",
+    "organizer": {
+      "name": "Office gbcu",
+      "address": "office@gbcu.org.il"
+    },
+    "attendees": [
+      {
+        "email": "office@gbcu.org.il",
+        "name": "Office gbcu",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "galitinc@gmail.com",
+        "name": "galitinc@gmail.com",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "מפגש המשך - הערות הציבור ת\"י 5282 שאינם למגורים\r\n\r\nהאירוע הזה עדיין לא נמצא ביומן שלך\r\nלא הייתה לך אינטראקציה עם office@gbcu.org.il לפני כן. רוצה להוסיף אוטומטית את ההזמנה הזו והזמנות עתידיות מהכתובת הזו ליומן שלך?\r\nהוספה ליומן\r\n\r\n‏הצטרפות באמצעות Google ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "מארגן חיצוני (gbcu.org.il) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "FEW_ATTENDEES:2",
+      "EXTERNAL_ORGANIZER:gbcu.org.il"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhw1FKLAAA=",
+    "subject": " השלכות קרינה על התכנון - ישיבה תיכונית ",
+    "start": "2026-05-18T11:00:00.0000000",
+    "end": "2026-05-18T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "https://us06web.zoom.us/j/83476701016?pwd=nrH3v0kaVsEE2gtTIgHsp2q1TfTnLp.1",
+    "organizer": {
+      "name": "משרד זהר שמר",
+      "address": "office@zs-pm.co.il"
+    },
+    "attendees": [
+      {
+        "email": "office@zs-pm.co.il",
+        "name": "משרד זהר שמר",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "carmit@zs-pm.co.il",
+        "name": "כרמית שמר",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "orit@zs-pm.co.il",
+        "name": "Orit",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ori@galit.co.il",
+        "name": "אורי רונן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "moti@zs-pm.co.il",
+        "name": "מוטי זהר",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "moti zohar is inviting you to a scheduled Zoom meeting.\r\n\r\nJoin Zoom Meeting\r\n\r\nhttps://us06web.zoom.us/j/83476701016?pwd=nrH3v0kaVsEE2gtTIgHsp2q1TfTnLp.1\r\n\r\nMeeting chat link\r\n\r\nhttps://us06web.zoom.us/launch/jc/83476701016\r\n\r\nMeeting ID: 834 7670 1016",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: ישיבה",
+      "מילות מפתח משרד ב-subject: תכנון",
+      "רבים משתתפים כולל דומיין חיצוני — פגישה חיצונית",
+      "מארגן חיצוני (zs-pm.co.il) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:ישיבה",
+      "SUBJECT_OFFICE_KW:תכנון",
+      "MANY_ATTENDEES:6",
+      "ATTENDEES_EXTERNAL",
+      "EXTERNAL_ORGANIZER:zs-pm.co.il"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsrAAA=",
+    "subject": "מבדק מכון התקנים",
+    "start": "2026-05-27T08:00:00.0000000",
+    "end": "2026-05-27T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: מבדק"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:מבדק",
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAh5VPHhAAA=",
+    "subject": "זום- תכנון תאום עכו ",
+    "start": "2026-06-08T09:30:00.0000000",
+    "end": "2026-06-08T10:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "zoom",
+    "organizer": {
+      "name": "office msa",
+      "address": "office@m-s-a.co.il"
+    },
+    "attendees": [
+      {
+        "email": "office@m-s-a.co.il",
+        "name": "office msa",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "sharon13shalom@gmail.com",
+        "name": "sharon13shalom@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "iter@iter.co.il",
+        "name": "iter@iter.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "moriness@m-s-a.co.il",
+        "name": "mor iness hassan",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "secretary@alter-noga.co.il",
+        "name": "secretary@alter-noga.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "soika35@gmail.com",
+        "name": "soika35@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "inna.levitas@gmail.com",
+        "name": "inna.levitas@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "sharon@m-s-a.co.il",
+        "name": "sharon hassan",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "iter1707@gmail.com",
+        "name": "iter1707@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "leon@m-s-a.co.il",
+        "name": "LEON Kreyin",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "eden@m-s-a.co.il",
+        "name": "eden ozana",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "office@ah-arch.com",
+        "name": "office@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ori@galit.co.il",
+        "name": "אורי רונן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yaniv@ah-arch.com",
+        "name": "yaniv@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "office@barrabi.com",
+        "name": "office@barrabi.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yuval@tiktin.com",
+        "name": "yuval@tiktin.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ron@eng-so.com",
+        "name": "ron@eng-so.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "oren.hasan@outlook.com",
+        "name": "oren.hasan@outlook.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "fellner@netvision.net.il",
+        "name": "fellner@netvision.net.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "faina@barrabi.com",
+        "name": "faina@barrabi.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "rachel@ah-arch.com",
+        "name": "rachel@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "netanel@alter-noga.co.il",
+        "name": "netanel@alter-noga.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yehonatan@alter-noga.co.il",
+        "name": "yehonatan@alter-noga.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "amit@tiktin.com",
+        "name": "amit@tiktin.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "g.sergey@barrabi.com",
+        "name": "g.sergey@barrabi.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yair@eng-so.com",
+        "name": "yair@eng-so.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "orpaz535@outlook.co.il",
+        "name": "orpaz535@outlook.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "iter9@bezeqint.com",
+        "name": "iter9@bezeqint.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "sapirb@ah-arch.com",
+        "name": "sapirb@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ron@heffer.co.il",
+        "name": "ron@heffer.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "geffen@insitu-ge.co.il",
+        "name": "geffen@insitu-ge.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "adir@eng-so.com",
+        "name": "adir@eng-so.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "shirly@shir-arch.com",
+        "name": "shirly@shir-arch.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "zohar@tiktin.com",
+        "name": "zohar@tiktin.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yuval@ah-arch.com",
+        "name": "yuval@ah-arch.com",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "זום- תכנון תאום עכו\r\noren hasan is inviting you to a scheduled Zoom meeting.Topic: My MeetingTime: Nov 3, 2024 09:00 AM Jerusalem        Every week on Sun, 110 occurrence(s)Please download and import the following iCalend\r\n\r\nהאירוע עודכן.\r\nהיה שינוי: שעה",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: זום",
+      "מילות מפתח משרד ב-subject: תכנון",
+      "רבים משתתפים כולל דומיין חיצוני — פגישה חיצונית",
+      "מארגן חיצוני (m-s-a.co.il) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:זום",
+      "SUBJECT_OFFICE_KW:תכנון",
+      "LOCATION_SHORT",
+      "MANY_ATTENDEES:36",
+      "ATTENDEES_EXTERNAL",
+      "EXTERNAL_ORGANIZER:m-s-a.co.il"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcfAAA=",
+    "subject": "בדיקות איכות אוויר רעש וקרינה עבור נתיבי איילון",
+    "start": "2026-06-15T11:00:00.0000000",
+    "end": "2026-06-15T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מתנ\"ם המפרץ חיפה",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "איריס סיסו – 054-3282024",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcgAAA=",
+    "subject": "בדיקות איכות אוויר רעש וקרינה עבור נתיבי איילון",
+    "start": "2026-06-15T13:00:00.0000000",
+    "end": "2026-06-15T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ספיר 5, חיפה ",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "פז סיבה מרגלית – 055-8813093",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs5AAA=",
+    "subject": "פגישת זום בנושא התחדשות עירונית ",
+    "start": "2026-06-23T10:00:00.0000000",
+    "end": "2026-06-23T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: זום"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:זום",
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiJP4eFAAA=",
+    "subject": "פגישה עם נציגים מסיסטם מעבדות",
+    "start": "2026-06-25T11:30:00.0000000",
+    "end": "2026-06-25T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אוסטרובסקי 11 רעננה",
+    "organizer": {
+      "name": "סשה גליקין",
+      "address": "Sasha@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: פגישה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:פגישה",
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcsAAA=",
+    "subject": "בדיקות איכות אוויר רעש וקרינה עבור נתיבי איילון",
+    "start": "2026-06-29T10:00:00.0000000",
+    "end": "2026-06-29T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "קניון ראשונים רשל\"צ",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "אבי דוד – 058-5994414",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjctAAA=",
+    "subject": "פגישה עם השמאי לגבי החנות ",
+    "start": "2026-07-06T08:30:00.0000000",
+    "end": "2026-07-06T09:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ברנדיס  רעננה1",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: פגישה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:פגישה"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcxAAA=",
+    "subject": "פגישת ליווי אונליין עם אלי אוטומציות - יורם גבאי",
+    "start": "2026-07-06T14:00:00.0000000",
+    "end": "2026-07-06T15:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "https://meet.google.com/ewk-hbsz-ork",
+    "organizer": {
+      "name": "Eli Knyazev",
+      "address": "elik717@gmail.com"
+    },
+    "attendees": [
+      {
+        "email": "elik717@gmail.com",
+        "name": "Eli Knyazev",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "galitinc@gmail.com",
+        "name": "galitinc@gmail.com",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "פגישת ליווי אונליין עם אלי אוטומציות - יורם גבאי\r\n\r\nהאירוע הזה עדיין לא נמצא ביומן שלך\r\nלא הייתה לך אינטראקציה עם elik717@gmail.com לפני כן. רוצה להוסיף אוטומטית את ההזמנה הזו והזמנות עתידיות מהכתובת הזו ליומן שלך?\r\nהוספה ליומן\r\n\r\n‏הצטרפות באמצעות Google ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "מארגן חיצוני (gmail.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "FEW_ATTENDEES:2",
+      "EXTERNAL_ORGANIZER:gmail.com"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcyAAA=",
+    "subject": "פגישה עם דן מגלוריה ",
+    "start": "2026-07-06T15:30:00.0000000",
+    "end": "2026-07-06T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: פגישה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:פגישה",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiPnKl7AAA=",
+    "subject": "חברה כלכלית חולון - אולם ספורט חולון - פגישת ביצוע שבועית ",
+    "start": "2026-07-21T11:15:00.0000000",
+    "end": "2026-07-21T12:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שטח ",
+    "organizer": {
+      "name": "מזכירות",
+      "address": "desk@rotbart-eng.com"
+    },
+    "attendees": [
+      {
+        "email": "desk@rotbart-eng.com",
+        "name": "מזכירות",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "OMER@YANO.CO.IL",
+        "name": "OMER@YANO.CO.IL",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "shadi@nash-civileng.com",
+        "name": "shadi@nash-civileng.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "lubj@netvision.net.il",
+        "name": "lubj@netvision.net.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "office@dan-aviv.co.il",
+        "name": "דן אביב",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Office@daya-eng.com",
+        "name": "דיה רבין מלכה (Office@daya-eng.com)",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "elad@s-mashiah.co.il",
+        "name": "elad@s-mashiah.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Avivar2@gmail.com",
+        "name": "'אבי ורשבסקי'",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "alond.safety@gmail.com",
+        "name": "alond.safety@gmail.com",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "alon@veredgroup.co.il",
+        "name": "alon@veredgroup.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ns_bessi@bezeqint.net",
+        "name": "ns_bessi@bezeqint.net",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "office@movement-eng.co.il",
+        "name": "office@movement-eng.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "ben@rotbart-eng.com",
+        "name": "בן כבאז",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "nir@nirzeisel.co.il",
+        "name": "ניר צייזל (nir@nirzeisel.co.il)",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yaronelfasi33@gmail.com",
+        "name": "ירון אלפסי (yaronelfasi33@gmail.com)",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "moshe@Mshaul.co.il",
+        "name": "moshe@Mshaul.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "vp.eng@calcalit-holon.co.il",
+        "name": "אחיעז כץ - חברה כלכלית חולון (vp.eng@calcalit-holon.co.il)",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "shlomi@mshaul.co.il",
+        "name": "shlomi@mshaul.co.il",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "batyap@v5arch.com",
+        "name": "batyap@v5arch.com",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "mankal@calcalit-holon.co.il",
+        "name": "שלומי צדרבוים - החברה הכלכלית לפיתוח חולון (mankal@calcalit-holon.co.il)",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "Yannay@rotbart-eng.com",
+        "name": "ינאי רוטברט",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "orit@rotbart-eng.com",
+        "name": "אורית סער",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "Alon@asafety.co.il",
+        "name": "Alon Daus",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "miki@calcalit-holon.co.il",
+        "name": "מיקי מגל (miki@calcalit-holon.co.il)",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "NuritG@v5arch.com",
+        "name": "NuritG@v5arch.com",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "MeidadG@v5arch.com",
+        "name": "MeidadG@v5arch.com",
+        "type": "optional",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "חד פעמי הפגישה זזה לשעה 11:15\r\n\r\n\r\nפגישת ביצוע שבועית – ימי שלישי החל מ 28.4.26 בשעה  9\r\n\r\nמשתתפים קבועים:\r\nירון אלפסי - קבלן\r\nשלומי ציטיאט – קבלן\r\nיועצים – נא שריינו בלו\"ז המועד ותעודכנו מראש לפי בקשה באם להגיע.\r\nאדריכלות\r\nV5 אדריכלים\r\nמידד גנדלר\r\nנורית ",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "MEETING_OR_AUDIT",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "רבים משתתפים כולל דומיין חיצוני — פגישה חיצונית",
+      "מארגן חיצוני (rotbart-eng.com) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "LOCATION_SHORT",
+      "MANY_ATTENDEES:27",
+      "ATTENDEES_EXTERNAL",
+      "EXTERNAL_ORGANIZER:rotbart-eng.com"
+    ]
+  }
+]

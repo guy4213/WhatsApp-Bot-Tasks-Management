@@ -1,0 +1,573 @@
+[
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgkasm8AAA=",
+    "subject": "עבודות פריקה במחסן",
+    "start": "2026-01-20T06:30:00.0000000",
+    "end": "2026-01-20T18:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsjAAA=",
+    "subject": "יום עיון לבודקי קרינה",
+    "start": "2026-02-15T08:00:00.0000000",
+    "end": "2026-02-15T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhc8JTrAAA=",
+    "subject": "יום עיון אסבסט",
+    "start": "2026-04-26T07:30:00.0000000",
+    "end": "2026-04-26T16:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "שלום לכולם,\r\n\r\n\r\n\r\nהנכם רשומים ליום ריענון לעוסקים באסבסט שיתקיים ביום א' 26.04.26\r\n\r\n\r\n\r\n  *   יום הריענון יתקיים במשרד להגנת הסביבה, רחוב בנק ישראל 7, בניין ג'נרי 2, ירושלים, חדר הדרכה 1 (קומה 1-) מ-8:45 עד 13:30 - רצ\"ב סדר יום\r\n  *   בשל קיצוצים רוחביי",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAho4591AAA=",
+    "subject": "ראיון עבודה לגלעד גרינפלד",
+    "start": "2026-05-03T16:00:00.0000000",
+    "end": "2026-05-03T16:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "notResponded"
+      },
+      {
+        "email": "greenfieldgilad@gmail.com",
+        "name": "greenfieldgilad@gmail.com",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "ראיון עבודה למשרת מיישם AI\r\n\r\nקישור לפגישה: https://meet.google.com/nqi-ijiw-mce",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.2,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsqAAA=",
+    "subject": "בר מצווה של זיו",
+    "start": "2026-05-04T07:00:00.0000000",
+    "end": "2026-05-04T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs3AAA=",
+    "subject": "לא פנוי",
+    "start": "2026-06-09T17:00:00.0000000",
+    "end": "2026-06-09T19:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEruAAA=",
+    "subject": "לברר מחירים לגבי חידוש ביטוח לפיאט- הביטוח מסתיים ב- 30/06/26",
+    "start": "2026-06-10T08:00:00.0000000",
+    "end": "2026-06-10T08:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcmAAA=",
+    "subject": "ראיון עבודות גיא פרנסס",
+    "start": "2026-06-11T10:00:00.0000000",
+    "end": "2026-06-11T10:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "גיא פרנסס — תקציר לראיון שני\r\n\r\n\r\nמועמד לתפקיד פיתוח מערכת / AI / סוכנים.\r\nסטודנט למדעי המחשב, נראה בחור נחמד, רציני ומבין עניין.\r\n\r\n\r\nלפי הקו״ח והראיון הראשון, יש לו ניסיון בבניית מערכות מקצה לקצה, Full Stack, עבודה עם AI, סוכנים, RAG, אוטומציות וחיבורי ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.2,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAh_r7TdAAA=",
+    "subject": "ראיון עבודה ירון אורסטי",
+    "start": "2026-06-11T10:30:00.0000000",
+    "end": "2026-06-11T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "י\r\n\r\n\r\nמועמד לתפקיד פיתוח מערכת / Full Stack / AI.\r\n\r\n\r\nלפי הקו״ח, ירון הוא מפתח עם ניסיון רחב בפיתוח מערכות Web, Backend ו־Frontend, כולל עבודה עם Node.js, React, Angular, MongoDB, MySQL, Redis, Docker, AWS/GCP וכלי AI מתקדמים כמו Claude Code, Gemini, Op",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.2,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcnAAA=",
+    "subject": "ראיון ראשון לשירה עמוסי",
+    "start": "2026-06-11T11:30:00.0000000",
+    "end": "2026-06-11T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "שירה עמוסי — תקציר לראיון\r\n\r\nלפי הקו״ח, היא סטודנטית למדעי המחשב, עם ניסיון בניהול פרויקטים, אפיון דרישות, עבודה מול לקוחות, תמיכה טכנית, דוחות, בקרה, CRM וכלים כמו Monday / Jira / Make / n8n / Power Automate וכלי AI.\r\n\r\n\r\nחוזקות:\r\nמסודרת, תפעולית, יודעת ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.2,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiFIo5BAAA=",
+    "subject": "תיאום הגעה — דני סווירי",
+    "start": "2026-06-18T15:00:00.0000000",
+    "end": "2026-06-18T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "manager@galit.local",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "יש חנייה ליד הבית",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiFIo5AAAA=",
+    "subject": "להתקשר ליבגני לחברת חשמל ",
+    "start": "2026-06-22T08:45:00.0000000",
+    "end": "2026-06-22T09:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "יבגני\r\n0768646711",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiILDBqAAA=",
+    "subject": "תיאום הגעה — ןםמצ",
+    "start": "2026-06-22T10:00:00.0000000",
+    "end": "2026-06-22T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "technician@galit.local",
+        "name": "אורי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "manager@galit.local",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.2,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiPnKl2AAA=",
+    "subject": "תיאום הגעה — יובל קרן",
+    "start": "2026-07-05T10:00:00.0000000",
+    "end": "2026-07-05T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yair@galit.co.il",
+        "name": "יאיר",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiI63_7AAA=",
+    "subject": "לקחת תרופה",
+    "start": "2026-07-05T20:15:00.0000000",
+    "end": "2026-07-05T21:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs-AAA=",
+    "subject": "הגעה לעוגן ברעננה ",
+    "start": "2026-07-13T10:00:00.0000000",
+    "end": "2026-07-13T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "OFFICE_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [],
+    "matchedSignals": [
+      "LOCATION_EMPTY"
+    ]
+  }
+]

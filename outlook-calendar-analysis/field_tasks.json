@@ -1,0 +1,3785 @@
+[
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsiAAA=",
+    "subject": "בדיקת קרינה ELF במפעל אסם- צבר + טבעול בקרית גת",
+    "start": "2026-01-18T10:00:00.0000000",
+    "end": "2026-01-18T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אסם קרית גת",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "050-7516316- אשר אלגרסי\r\n\r\n\r\nאשר אלגרסי- מחלקת תשתיות\r\nמפעל צבר וטבעול\r\nקרית גת\r\nמייל: Asher.Elgrasi@il.nestle.com\r\n\r\nהנדון: הצעת מחיר לבדיקת קרינה אלקטרומגנטית\r\n\r\nשלום רב,\r\n\r\nבהתאם לפנייתכם להעריך את פוטנציאל הסיכון של הקרינה, הננו מתכבדים להגיש הצעתנו ל",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAghVuaTAAA=",
+    "subject": "סקר אסבסט",
+    "start": "2026-01-19T10:30:00.0000000",
+    "end": "2026-01-19T11:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "החרוב 11 רשפון",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "עדן\r\n052-3947883",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AATNivNbAAA=",
+    "subject": "סקר אסבסט",
+    "start": "2026-01-22T08:00:00.0000000",
+    "end": "2026-01-22T09:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הראשונים 24 רמת גן",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEshAAA=",
+    "subject": "בדיקת קרינה ELF + RF בביה\"ס השחר ברחובות עבור עיריית רחובות- הבדיקה בנוכחות יניב ירימי + ישראל רכז ביה\"ס- חשוב להם מאוד",
+    "start": "2026-01-22T12:00:00.0000000",
+    "end": "2026-01-22T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "דוד אליעזר 19 רחובות",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "יניב ירימי- 052-4840356\r\n\r\nנא לתאם עם רכז ביה\"ס ישראל\r\nישראל - 0523270146\r\n\r\nבברכה\r\nיניב\r\n\r\nיניב ירימי\r\n​​​​\r\nמנהל מחלקת בטיחות מוסדות חינוך\r\nאגף ביטחון וחירום\r\n089392348\r\nwww.rehovot.muni.il",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKocwAAA=",
+    "subject": "בדיקת קרינה בבית במשמר דוד - קרינה ממתח גבוה - מסר פרטי כרטיס אשראי",
+    "start": "2026-01-22T14:30:00.0000000",
+    "end": "2026-01-22T15:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "חופים 36 משמר דוד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "שם לקוח: נדב אמרנט\r\nמספר טלפון: 052-2945993\r\nכתובת: חופים 36 משמר דוד\r\nמחיר: 1,100 + מעמ.\r\n\r\nבדיקת קרינה אלקטרומגנטית בחצר ובבית מעמוד חשמל מתח גבוה.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AQMkADg4AGI2NDY3Ni0zZjk5AC00ODczLTk3MjMtYmY2MDg5MTQyZmQ2AEYAAAOZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAADDwAAACb0Vp6SIsNMvUuE97lrzpIAAAKgfgAAAA==",
+    "subject": "בדיקת קרינה ELF עבור פריוריטי סופטוור - 850 ש\"ח + מע\"מ",
+    "start": "2026-01-26T11:00:00.0000000",
+    "end": "2026-01-26T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "עמל 2 ראש העין",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "נאור 0543037272\r\n\r\nמס' הצעת מחיר: 13104\r\nלכבוד\r\nנאור תם\r\nפריוריטי סופטוור בע\"מ\r\nעמל 2\r\nראש העין\r\nנייד : 050-7311876\r\nמייל: naoritam@gmail.com\r\n\r\nהנדון: הצעת מחיר לבדיקת קרינה אלקטרומגנטית\r\n\r\nשלום רב,\r\n\r\nבהתאם לפנייתכם להעריך את פוטנציאל הסיכון של הקרינה, ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AQMkADg4AGI2NDY3Ni0zZjk5AC00ODczLTk3MjMtYmY2MDg5MTQyZmQ2AEYAAAOZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAADDwAAACb0Vp6SIsNMvUuE97lrzpIAAAKgfwAAAA==",
+    "subject": "בדיקת קרינה חשמל+ סלולארי עבור חברת הדס",
+    "start": "2026-01-27T14:15:00.0000000",
+    "end": "2026-01-27T15:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אשר ברש 15 , הרצליה ",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "סוג הנכס: בית פרטי מ\"ר נכס : 200 כמות חדרים: 7 כמות מפלסים: 3\r\n\r\nלקוח: חנן זלקוביץ\r\n\r\nחנן זלקוביץ 050-8711634\r\n750 ₪ + מע\"מ.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgmy216AAA=",
+    "subject": "בדיקת קרינה חדר שנאים",
+    "start": "2026-01-28T10:15:00.0000000",
+    "end": "2026-01-28T11:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הבוצר 12 תל מונד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "ליאור דרזי\r\n\r\n0523584647",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F5-AAA=",
+    "subject": "Canceled: ראיון עבודה עוז ירושלמי תחום מיגון",
+    "start": "2026-02-01T11:00:00.0000000",
+    "end": "2026-02-01T11:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית - החברה לאיכות הסביבה בע\"מ",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "notResponded"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": true,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "אירוע מבוטל",
+      "מילות מפתח שטח ב-subject: מיגון"
+    ],
+    "matchedSignals": [
+      "IS_CANCELLED",
+      "SUBJECT_FIELD_KW:מיגון",
+      "FEW_ATTENDEES:2",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F6BAAA=",
+    "subject": "ראיון עבודה עמרי אביטל תחום מיגון",
+    "start": "2026-02-01T11:00:00.0000000",
+    "end": "2026-02-01T11:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית - החברה לאיכות הסביבה בע\"מ",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F6AAAA=",
+    "subject": "ראיון עבודה עוז ירושלמי תחום מיגון",
+    "start": "2026-02-01T13:00:00.0000000",
+    "end": "2026-02-01T13:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית - החברה לאיכות הסביבה בע\"מ",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcPAAA=",
+    "subject": "סקר אסבסט",
+    "start": "2026-02-02T12:30:00.0000000",
+    "end": "2026-02-02T13:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "כפר נוער ימין אורד",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "גדי\r\n052-6848445\r\n\r\nקובי\r\n0502288889",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F6GAAA=",
+    "subject": "ראיון עבודה אלכס בלבאי- אחראי תחום מיגון",
+    "start": "2026-02-03T11:00:00.0000000",
+    "end": "2026-02-03T11:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית - החברה לאיכות הסביבה בע\"מ",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "notResponded"
+      },
+      {
+        "email": "albalabay@gmail.com",
+        "name": "albalabay@gmail.com",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAgn8F6FAAA=",
+    "subject": "פגישה עם מיכאל- קבלן משנה למיגון",
+    "start": "2026-02-03T13:00:00.0000000",
+    "end": "2026-02-03T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גלית - החברה לאיכות הסביבה בע\"מ",
+    "organizer": {
+      "name": "גיא גבאי",
+      "address": "Guy@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "notResponded"
+      },
+      {
+        "email": "Michaelpinto9291@gmail.com",
+        "name": "Michaelpinto9291@gmail.com",
+        "type": "required",
+        "response": "notResponded"
+      }
+    ],
+    "bodyPreview": "פגישה לצורך התחלת עבודה עם מיכאל פינטו בתחום המיגונים בתור קבלן משנה:\r\n\r\nכתובת: אוסטרובסקי 11, רעננה.\r\nאיש קשר: מיכאל -  054-960-9291\r\n\r\nפרטי העבודה שנמסרו למיכאל:\r\nמדובר בעבודות התקנה של פלטות מיגון קרינה בפרויקטים ברחבי הארץ.\r\nהעבודה מתבצעת כקבלן מש",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון",
+      "מילות מפתח פגישה ב-subject: פגישה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון",
+      "SUBJECT_MEETING_KW:פגישה",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcQAAA=",
+    "subject": "אלי דאום קונה ברזל ",
+    "start": "2026-02-04T09:00:00.0000000",
+    "end": "2026-02-04T10:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "משה שרת 70 רמות השבים",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcVAAA=",
+    "subject": "סקר אסבסט ",
+    "start": "2026-02-12T11:30:00.0000000",
+    "end": "2026-02-12T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "חי\"ל 11, רמת גן ",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "טוביה\r\n054-581-2297",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcWAAA=",
+    "subject": "בדיקת רעש 24 שעות",
+    "start": "2026-02-12T12:30:00.0000000",
+    "end": "2026-02-12T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "וינגייט 1, תל אביב",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "מיכל\r\n052-3257079",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת רעש"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת רעש",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AQMkADg4AGI2NDY3Ni0zZjk5AC00ODczLTk3MjMtYmY2MDg5MTQyZmQ2AEYAAAOZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAADDwAAACb0Vp6SIsNMvUuE97lrzpIAAAKgfQAAAA==",
+    "subject": "בדיקת קרינה עבור אלון מידן",
+    "start": "2026-02-16T18:00:00.0000000",
+    "end": "2026-02-16T18:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "גיחון 28 רמת השרון ",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "אשת קשר- אליזבטה 0509729724\r\n\r\n052-4777111- אלון מידן\r\n\r\n1,400 ₪ + מע\"מ.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcZAAA=",
+    "subject": "לראות מיגון קרינה",
+    "start": "2026-02-23T09:00:00.0000000",
+    "end": "2026-02-23T09:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מתקן התפלה נחל שורק",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "מיכאל לבונטין\r\n\r\n0544801130",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון קרינה, מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון קרינה|מיגון",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcYAAA=",
+    "subject": "הצעת מחיר למיגון אברהם עמרם",
+    "start": "2026-02-23T11:00:00.0000000",
+    "end": "2026-02-23T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אקווה פארק אשדוד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "טלפון מיטב\r\n\r\nאיש קשר  052-8311214",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון",
+      "מילות מפתח משרד ב-subject: הצעת מחיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון",
+      "SUBJECT_OFFICE_KW:הצעת מחיר",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEskAAA=",
+    "subject": "בדיקת קרינה ELF לאישור מיגון שביצענו באסותא בבאר שבע- מיגון ללוח חשמל ראשי מחלקת MRI",
+    "start": "2026-02-23T14:00:00.0000000",
+    "end": "2026-02-23T15:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אסותא בבאר שבע",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "איש קשר בבדיקה- מנהל אחזקה מתן- 050-6623321 ( הוא ישלח מישהו מטעמו שילווה אותך)\r\n\r\nדוח בדיקה עבור מזמין המיגון:\r\n\r\nלכבוד\r\nבני באזא\r\nבאזא פרויקטים בע\"מ\r\nירושלים\r\nנייד : 050-2637335\r\nמייל: bazabeni1@gmail.com\r\n\r\nהנדון: הצעת מחיר עבור מיגון נגד קרינה\r\nשלום ר",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה, מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה|מיגון",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AQMkADg4AGI2NDY3Ni0zZjk5AC00ODczLTk3MjMtYmY2MDg5MTQyZmQ2AEYAAAOZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAADDwAAACb0Vp6SIsNMvUuE97lrzpIAAAKggAAAAA==",
+    "subject": "בדיקת קרינה עבור כללית מחדר תקשורת ",
+    "start": "2026-02-26T11:30:00.0000000",
+    "end": "2026-02-26T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ירמיהו 38, נתניה.",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "דורין 052-624-0925\r\n\r\nמס' הצעת מחיר: 13133\r\nלכבוד\r\nאילן בר\r\nשירותי בריאות כללית\r\nמחוז שרון ושומרון\r\nנייד : 052-4709828\r\nמייל: Shilanbar@clalit.org.il\r\n\r\n\r\n\r\n\r\nהנדון: הצעת מחיר לבדיקת קרינה אלקטרומגנטית\r\n\r\nשלום רב,\r\n\r\nבהתאם לפנייתכם להעריך את פוטנציאל הסיכ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKocxAAA=",
+    "subject": "בדיקת קרינה מרשת חשמל - מגדל העמק - בית פרטי של לקוח ",
+    "start": "2026-02-26T13:00:00.0000000",
+    "end": "2026-02-26T15:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "חבצלת 11 מגדל העמק",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "מילות מפתח משרד ב-subject: לקוח",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "SUBJECT_OFFICE_KW:לקוח",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAg6iCepAAA=",
+    "subject": "מיגון קרינה 4 חדרי חשמל אשדוד",
+    "start": "2026-03-05T07:00:00.0000000",
+    "end": "2026-03-05T17:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אשדוד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "אושר איש קשר",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון קרינה, מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון קרינה|מיגון",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsnAAA=",
+    "subject": "מיגון קרינה באילת- סמי נופי ובניו בע\"מ בתיכון שחמון",
+    "start": "2026-03-09T09:00:00.0000000",
+    "end": "2026-03-09T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לכבוד\r\nשחף יהוד\r\nסמי נופי ובניו בע\"מ\r\nאילת\r\nנייד : 053-2756123\r\nמייל: beit-sefer@noufi.co.il\r\n\r\nהנדון: הצעת מחיר עבור מיגון נגד קרינה\r\nשלום רב!\r\nבהתאם לפנייתך אלינו להצעת מחיר, הננו מתכבדים להגיש הצעה למיגון קרינה בבית ספר תיכון שחמון רובע 6 , אילת.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון קרינה, מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון קרינה|מיגון",
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsoAAA=",
+    "subject": "בדיקת קרינה ELF מעון שורשים באילת- ליאור אב הבית שיפתח את הגנים-  054-2232592",
+    "start": "2026-03-10T11:00:00.0000000",
+    "end": "2026-03-10T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ששת הימים 204 אילת",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "ליאור אב הבית שיפתח את הגנים-  054-2232592\r\n\r\nלכבוד\r\nכוכבה ינוקה יאיון\r\nהחברה למוסדות חינוך ותרבות באילת\r\nששת הימים 204\r\nאילת\r\nנייד : 054-4712603\r\nמייל: gilrach-z2@eilatmatnasim.org.il\r\n\r\n\r\n\r\n\r\nבוקר טוב,\r\n\r\nמעון חלומותיי   רח' עין בוקק 12             מנהל",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEspAAA=",
+    "subject": "בדיקת קרינה ELF במעון חלמותיי",
+    "start": "2026-03-10T12:00:00.0000000",
+    "end": "2026-03-10T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "רחוב עין בוקק 12 אילת",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "ליאור אב הבית- 054-2232592\r\n\r\nלכבוד\r\nכוכבה ינוקה יאיון\r\nהחברה למוסדות חינוך ותרבות באילת\r\nששת הימים 204\r\nאילת\r\nנייד : 054-4712603\r\nמייל: gilrach-z2@eilatmatnasim.org.il\r\n\r\n\r\n\r\nבוקר טוב,\r\n\r\nמעון חלומותיי   רח' עין בוקק 12             מנהלת מעון       גלית ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsmAAA=",
+    "subject": "בדיקות קרינה בגן ילדים באילת- מעון קולייר בתוך מתנ\"ס קולייר- ELF ",
+    "start": "2026-03-10T13:00:00.0000000",
+    "end": "2026-03-10T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מעון קולייר בתוך מתנ\"ס קולייר- רחוב צין 1 אילת",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "ליאור אב הבית- 054-2232592\r\n\r\nלכבוד\r\nכוכבה ינוקה יאיון\r\nהחברה למוסדות חינוך ותרבות באילת\r\nששת הימים 204\r\nאילת\r\nנייד : 054-4712603\r\nמייל: gilrach-z2@eilatmatnasim.org.il\r\n\r\n\r\n\r\nבוקר טוב,\r\n\r\nמעון חלומותיי   רח' עין בוקק 12             מנהלת מעון       גלית ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "מילות מפתח אישי ב-subject: ילדים",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_PERSONAL_KW:ילדים",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhIoRu3AAA=",
+    "subject": "סקר אסבסט סווירי מהנדסים",
+    "start": "2026-03-15T11:30:00.0000000",
+    "end": "2026-03-15T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "סירקין 24, גבעתיים",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "אייל סווירי\r\n058-6747470",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhIoRu4AAA=",
+    "subject": "לשים גלאים *6 ארוכי טווח* - הרצליה ",
+    "start": "2026-03-15T12:30:00.0000000",
+    "end": "2026-03-15T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "בן גוריון 22 הרצליה",
+    "organizer": {
+      "name": "סשה גליקין",
+      "address": "Sasha@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "חנן וסרמן\r\n052-2451101\r\nתתקשרו לפני שתגיעו..\r\n\r\n\r\nקומה 3- (מינוס שלוש) בבניין העירייה.\r\n\r\nזה המרתף, סימנתי בצהוב איפה צריך לשים:",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKocyAAA=",
+    "subject": "בדיקת קרינה מרשת חשמל + רדיו במשרדים של סודקסו הוד השרון",
+    "start": "2026-03-16T10:00:00.0000000",
+    "end": "2026-03-16T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "החרש 34 הוד השרון",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "**קרינה מרשת חשמל + גלי רדיו!**",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhIoRu5AAA=",
+    "subject": "סקר אסבסט ",
+    "start": "2026-03-19T11:00:00.0000000",
+    "end": "2026-03-19T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "דרך הזית 26, בית זית",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "אפרים\r\n050-540-3756",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEssAAA=",
+    "subject": "בדיקת קרינה במשרדי רדוור ELF+ RF עד 30 נקודות מדידה - יש חניה לבודק",
+    "start": "2026-03-23T11:00:00.0000000",
+    "end": "2026-03-23T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הנחושת 12 תל אביב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "מס' הצעת מחיר: 13287\r\nיניב וקנין- מנהל אחזקה- 052-6111067\r\n\r\nלכבוד\r\nרחלי דיין\r\nרדוור בע\"מ\r\nנחושת 4\r\nתל אביב\r\nנייד : 052-3992693\r\nמייל: Rachelyd@radware.com\r\n\r\n2,400 ₪ + מע\"מ.\r\n\r\nהיי\r\n\r\nנתאם ליום שני 23.3 בשעה 11.\r\nנשמור חניה לבודק.\r\nהנחושת 12 תל אביב.\r\nתו",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה, מדידה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה|מדידה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AQMkADg4AGI2NDY3Ni0zZjk5AC00ODczLTk3MjMtYmY2MDg5MTQyZmQ2AEYAAAOZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAADDwAAACb0Vp6SIsNMvUuE97lrzpIAAAKggQAAAA==",
+    "subject": "בדיקת קרינה ELF עבור גיל לחמנוביץ' - חדר טרפו",
+    "start": "2026-03-23T13:00:00.0000000",
+    "end": "2026-03-23T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שטריקר 34 תל אביב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "גיל - 054-2009700",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoczAAA=",
+    "subject": "בדיקת קרינה *משולבת* - רשת חשמל וסלולר - גן ילדים רמת אביב",
+    "start": "2026-03-24T14:00:00.0000000",
+    "end": "2026-03-24T15:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ברודצקי 36 תל אביב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "גן ילדים: \"ידיים אוהבות\"\r\n\r\nמספר קשר: דיקלה אגמון\r\n054-5656901",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "מילות מפתח אישי ב-subject: ילדים",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "SUBJECT_PERSONAL_KW:ילדים",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEstAAA=",
+    "subject": "בדיקת קרינה RF במשרדי העירייה של  מועצה מקומית מזרעה ובספרייה",
+    "start": "2026-03-26T11:00:00.0000000",
+    "end": "2026-03-26T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מזרעה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "שלום רב,\r\nמצ\"ב הצעת מחיר מאושרת לבדיקת קרינה פרויקט מועצה מקומית וספריה מזרעה\r\nלתיאום הגעה : סוהייב 0526680540\r\n\r\n\r\n\r\n מס' הצעת מחיר: 13369\r\nלכבוד\r\nסוהייב דוחאן\r\nד.ת.מ הנדסה והשקעות בע\"מ\r\nרחוב 4031\r\nנצרת\r\nנייד : 052-6680540\r\nמייל: Office@dtm-ltd.com",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhIoRu6AAA=",
+    "subject": "בדיקת קרינה בטמפו",
+    "start": "2026-04-06T10:00:00.0000000",
+    "end": "2026-04-06T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "טמפו נתניה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "אבידן 0525303910",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc0AAA=",
+    "subject": "בדיקת קרינה *משולבת* עבור תאגיד המים - מי ברק - מתקן מים",
+    "start": "2026-04-14T09:00:00.0000000",
+    "end": "2026-04-14T09:45:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מגדל המים בני ברק- פינת גרוסברד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לרשום בוויז: מגדל המים בני ברק\r\n(רחוב פינת גרוסברד)\r\n\r\nאיש קשר:\r\nשמעון אליאב: 052-6157725\r\n\r\n\r\nמס' הצעת מחיר: 13372\r\nלכבוד\r\nיעקב שכטר\r\nמי ברק- תאגיד המים בבני ברק\r\nבני - ברק\r\nנייד : 052-6157732\r\nמייל: yacov@mei-barak.co.il\r\n\r\n\r\n\r\nבהתאם לפנייתכם להעריך א",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה"
+    ]
+  },
+  {
+    "id": "AQMkADg4AGI2NDY3Ni0zZjk5AC00ODczLTk3MjMtYmY2MDg5MTQyZmQ2AEYAAAOZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAADDwAAACb0Vp6SIsNMvUuE97lrzpIAAAKgggAAAA==",
+    "subject": "בדיקת קרינה ELF עבור אורי מאירי",
+    "start": "2026-04-14T15:00:00.0000000",
+    "end": "2026-04-14T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שדרות הציונות 12, פרדס חנה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "אורי 0545893890",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcdAAA=",
+    "subject": "בדיקת קרינה ",
+    "start": "2026-04-17T10:15:00.0000000",
+    "end": "2026-04-17T11:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "בוצר 22 תל מונד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "עמרי דרזי 052-3584647\r\n\r\n750+ מע\"מ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcbAAA=",
+    "subject": "איתור ריח עבור כאן תאגיד השידור",
+    "start": "2026-04-19T11:30:00.0000000",
+    "end": "2026-04-19T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "חורי 2 חיפה מגדל הנביאים ",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "רמי – 052-5200000",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:4"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcaAAA=",
+    "subject": "Canceled: בדיקת ריח עבור עומר שלייפר",
+    "start": "2026-04-19T15:00:00.0000000",
+    "end": "2026-04-19T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "יד חנה",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "עומר - 0522501187",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": true,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "אירוע מבוטל",
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "IS_CANCELLED",
+      "LOCATION_SHORT",
+      "MANY_ATTENDEES:4",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhg9OQ7AAA=",
+    "subject": "בדיקת צוות מריחים עבור יצחק טולדנו",
+    "start": "2026-04-28T11:00:00.0000000",
+    "end": "2026-04-28T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ירושלים 112 צפת",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "יצחק – 052-5256200",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:4"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhg9OQ6AAA=",
+    "subject": "בדיקת ריח ע\"י צוות מריחים עבור עומר שלייפר ",
+    "start": "2026-04-28T15:00:00.0000000",
+    "end": "2026-04-28T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "יד חנה",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "עומר - 052-2501187",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.8,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "LOCATION_SHORT",
+      "MANY_ATTENDEES:4"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEswAAA=",
+    "subject": "בדיקת קרינה ELF + RF בדירת מגורים בראש העין- טרום קניה",
+    "start": "2026-05-07T15:30:00.0000000",
+    "end": "2026-05-07T16:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שבזי 186 ראש העין",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "אלינור צור\r\nנייד : 052-5693859\r\nמייל: elinorelinor1997@gmail.com\r\n\r\n850 ₪ + מע\"מ.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AATNivNfAAA=",
+    "subject": "Canceled: בדיקת צוות מריחים עבור יצחק טולדנו",
+    "start": "2026-05-12T10:00:00.0000000",
+    "end": "2026-05-12T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ירושלים 112 צפת",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "יצחק – 052-5256200",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": true,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "אירוע מבוטל",
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "IS_CANCELLED",
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:4",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AQMkADg4AGI2NDY3Ni0zZjk5AC00ODczLTk3MjMtYmY2MDg5MTQyZmQ2AEYAAAOZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAADDwAAACb0Vp6SIsNMvUuE97lrzpIAAAKggwAAAA==",
+    "subject": "איסוף 2 גלאים קצרים בבית כנסת ",
+    "start": "2026-05-14T13:00:00.0000000",
+    "end": "2026-05-14T13:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הענבים 3 אשדוד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "משה - 0542111454",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: כנס",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:כנס",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AQMkADg4AGI2NDY3Ni0zZjk5AC00ODczLTk3MjMtYmY2MDg5MTQyZmQ2AEYAAAOZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAADDwAAACb0Vp6SIsNMvUuE97lrzpIAAAKghAAAAA==",
+    "subject": "איסוף גלאי מחדר ממ\"ד בבית מגורים",
+    "start": "2026-05-14T13:30:00.0000000",
+    "end": "2026-05-14T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "תרשיש 38 אשדוד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "משה - 0542111454",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhpyhS0AAA=",
+    "subject": "Canceled: בדיקת צוות מריחים ואיכות אוויר עבור חברת היטאצ'י",
+    "start": "2026-05-19T11:00:00.0000000",
+    "end": "2026-05-19T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הטוחן  2 קיסריה",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "+עדי -0523442653",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": true,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "אירוע מבוטל",
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "IS_CANCELLED",
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:4",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhpyhSzAAA=",
+    "subject": "בדיקת צוות מריחים עבור עומר שלייפר",
+    "start": "2026-05-19T15:00:00.0000000",
+    "end": "2026-05-19T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הבמבוק לנסוע עד סוף הרחוב יד חנה",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "עומר - 052-2501187",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.8,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "MANY_ATTENDEES:4"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAhuhYeeAAA=",
+    "subject": "הדברה עדנה רב נוף ",
+    "start": "2026-05-25T09:00:00.0000000",
+    "end": "2026-05-25T12:45:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "צאלון 6 אודים",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "052-3863266",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc1AAA=",
+    "subject": "בדיקת קרינה מחדר חשמל - אורט מקיף ערבי רמלה",
+    "start": "2026-05-26T11:30:00.0000000",
+    "end": "2026-05-26T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "החשמל 1 רמלה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "להתקשר לבטי כהן 054-7387905\r\n\r\n\r\n\r\n________________________________",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjclAAA=",
+    "subject": "צוות מריחים - רחוב המלאכה 6 חולון - * יש להתקשר לפני היציאה ללקוח!ֱ!*",
+    "start": "2026-05-31T15:00:00.0000000",
+    "end": "2026-05-31T17:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "רחוב המלאכה 6 חולון",
+    "organizer": {
+      "name": "סשה גליקין",
+      "address": "Sasha@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "declined"
+      }
+    ],
+    "bodyPreview": "*יש להתקשר לפני היציאה ללקוח *",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "מילות מפתח משרד ב-subject: לקוח",
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (5) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "SUBJECT_OFFICE_KW:לקוח",
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:5"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcjAAA=",
+    "subject": "מיגון קרינה חאלד - שלומציון 11 תל אביב",
+    "start": "2026-06-01T07:00:00.0000000",
+    "end": "2026-06-01T08:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שלום ציון 11 תל אביב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "איש קשר – רועי – 0537226989\r\n\r\n20 מ\"ר רבוע\r\n\r\nלתת 22 מ\"ר",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון קרינה, מיגון",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון קרינה|מיגון",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjckAAA=",
+    "subject": "מיגון קרינה - חאליד - בו יהודה 213 תל אביב",
+    "start": "2026-06-02T07:00:00.0000000",
+    "end": "2026-06-02T08:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "בן יהודה 213 תל אביב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "איש קשר – רועי – 0537226989\r\n\r\n12 מ\"ר רבוע\r\n\r\nלתת 14 מ\"ר",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון קרינה, מיגון",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון קרינה|מיגון",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc2AAA=",
+    "subject": "בדיקת קרינה ELF + RF  4 גני ילדים בקיבוץ גליל ים ",
+    "start": "2026-06-03T09:45:00.0000000",
+    "end": "2026-06-03T11:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מזכירות גליל ים",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "יש להגיע אל המזכירות ולחכות לאיריס, היא תתלווה לבדיקה.\r\n\r\nיש להתקשר לאיריס כמה דק לפני שהיא תספיק להגיע למזכירות.\r\n\r\nאיריס מור\r\nמנהלת הגיל הרך, קיבוץ גליל-ים\r\n052-4348877\r\n\r\n\r\n_______________________________________________________________________________",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "מילות מפתח אישי ב-subject: ילדים"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "SUBJECT_PERSONAL_KW:ילדים",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs2AAA=",
+    "subject": "בדיקת קרינה ELF בגן ענבים בהרצליה- עבור זהר שמר ניהול פרויקטים- להתקשר לליטל חצי שעה קודם על מנת שיצמידו קב\"ט אחרת לא ניתן להיכנס לגן",
+    "start": "2026-06-03T12:00:00.0000000",
+    "end": "2026-06-03T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שמואל הנגיד 24 הרצליה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "ליטל מחברת זהר שמר ניהול פרויקטים- 054-7273000\r\n\r\n\r\nמוטי זהר\r\nזוהר שמר ניהול פרויקטים בע\"מ\r\nויצמן 42\r\nכפר סבא\r\nנייד : 052-6606024\r\nמייל: moti@zs-pm.co.il\r\n\r\nבהתאם לפנייתכם להעריך את פוטנציאל הסיכון של הקרינה, הננו מתכבדים להגיש הצעתנו לבדיקת קרינה אלקטרומ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "מילות מפתח פגישה ב-subject: כנס",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "SUBJECT_MEETING_KW:כנס",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAh7uvENAAA=",
+    "subject": "צוות מריחים - שורש טכנולוגיה באר שבע - *יש להתקשר לפני יציאה לוודא שיש ריח* ",
+    "start": "2026-06-04T13:00:00.0000000",
+    "end": "2026-06-04T15:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ישמעאל 2 באר שבע",
+    "organizer": {
+      "name": "סשה גליקין",
+      "address": "Sasha@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "לקוח שהופנה מחברת הדס.",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (5) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:5"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs1AAA=",
+    "subject": "בדיקת קרינה ELF + RF + ווי פיי בביה\"ס מעלות משולם - כ- 45 כיתות-  עבור עיריית רחובות- התראה טלפונית עשרים דקות קודם ליניב ירימי בבקשה",
+    "start": "2026-06-07T10:30:00.0000000",
+    "end": "2026-06-07T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ש\"י עגנון 1 רחובות",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "optional",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לכבוד\r\nיניב ירימי- מנהל מחלקת בטיחות מוסדות חינוך\r\nעיריית רחובות\r\nקניון רחובות, רחוב בילו 2\r\nרחובות\r\nנייד : 052-4840356\r\nמייל: yaniv@rehovot.muni.il\r\n\r\n\r\n\r\n\r\nהנדון: הצעת מחיר לבדיקת קרינה אלקטרומגנטית\r\n\r\nשלום רב,\r\n\r\nבהתאם לפנייתכם להעריך את פוטנציאל הסיכו",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "מילות מפתח משרד ב-subject: בקשה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "SUBJECT_OFFICE_KW:בקשה",
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc3AAA=",
+    "subject": "בדיקת קרינה ELF - אורט מקיף ערבי רמלה",
+    "start": "2026-06-07T13:00:00.0000000",
+    "end": "2026-06-07T14:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "החשמל 1 רמלה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "optional",
+        "response": "none"
+      },
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "optional",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:3"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AATNivNgAAA=",
+    "subject": "סקר אסבסט ",
+    "start": "2026-06-09T08:30:00.0000000",
+    "end": "2026-06-09T09:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "בורוכוב 24, גבעתיים",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "אייל\r\n0586747470",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsyAAA=",
+    "subject": " בדיקת קרינה ELF + RF  בכרטיסי אשראי לישראל בע\"מ- אתר אשדוד",
+    "start": "2026-06-16T10:00:00.0000000",
+    "end": "2026-06-16T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הבושם 3 אשדוד",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לכבוד\r\nירון חכם- רמ\"ד אחזקה ובינוי\r\nכרטיסי אשראי לישראל בע\"מ\r\nנייד : 052-2857557\r\nמייל: yaron.haham@icc.co.il\r\n\r\n3,700 ₪ + מע\"מ.\r\n\r\nקומת קרקע + קומות 1,2,3.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc5AAA=",
+    "subject": "בדיקת קרינה בבית מגורים - יפו - רק אם תגיע לפני 15:45",
+    "start": "2026-06-16T15:00:00.0000000",
+    "end": "2026-06-16T16:10:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "עבד אל ראוף אל ביטאר 22 יפו",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "הבדיקה בחדר של ילד, יש לו שם ארון חשמל .\r\n\r\nהלקוח יוצא מהבית בשעה 15:50 אז נזיז את הבדיקה למועד אחר אם לא תספיק היום.\r\n\r\nאיש קשר: פרנק 054-7430702\r\n\r\n\r\n\r\n\r\n_____________________________________\r\n-לקחנו אשראי פיקדון (1200 +מעמ)\r\nלקוחה מזמינה: קרן ענתבי\r\n05",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAh_r7TfAAA=",
+    "subject": "Canceled: צוות מריחים - ריחות המגיעים ממסעדה לדירה - *להתקשר ללקוח לפני היציאה*",
+    "start": "2026-06-17T12:00:00.0000000",
+    "end": "2026-06-17T14:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "רחוב סמטת סטודיו נתניה ",
+    "organizer": {
+      "name": "סשה גליקין",
+      "address": "Sasha@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "*להתקשר ללקוח לפני היציאה*\r\n\r\nלהגיע לרחוב סמטת סטודיו נתניה שם יש חניה.\r\n\r\nאחר כך להתקשר ללקוח והוא יעזור לכם להגיע לכתובת. הבניין בכתובת: כיכר העצמאות 13, נתניה.\r\n\r\n\r\nפרטי לקוח:",
+    "categories": [],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": true,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.8,
+    "classificationReasons": [
+      "אירוע מבוטל",
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "מילות מפתח משרד ב-subject: לקוח",
+      "צוות פנימי גדול (5) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "IS_CANCELLED",
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "SUBJECT_OFFICE_KW:לקוח",
+      "LOCATION_SHORT",
+      "MANY_ATTENDEES:5",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc7AAA=",
+    "subject": "בדיקת קרינה מרשת החשמל - עריית רעננה אגף לוגיסטיקה *להתקשר לפני יציאה*",
+    "start": "2026-06-18T10:30:00.0000000",
+    "end": "2026-06-18T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "היצירה 14 רעננה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "בדיקה ב: 223 אגף בינוי רכש ולוגיסטיקה (משרד אחד).\r\n\r\nתתקשר אליו רבע שעה לפני כדי ששלמה יגיע ויראה לך את מקום הבדיקה.\r\n\r\nמזמין ואיש הקשר:",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs0AAA=",
+    "subject": "גיא ויורם -בדיקת קרינה ELF + RF חברת כרטיסי אשראי לישראל בע\"מ- במוקד בבני ברק",
+    "start": "2026-06-21T10:00:00.0000000",
+    "end": "2026-06-21T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מצדה 3 בני ברק",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "ירון חכם- רמ\"ד אחזקה ובינוי\r\nכרטיסי אשראי לישראל בע\"מ\r\nנייד : 052-2857557\r\nמייל: yaron.haham@icc.co.il\r\n\r\n\r\n\r\nהנדון: הצעת מחיר לבדיקת קרינה אלקטרומגנטית\r\n\r\nשלום רב,\r\n\r\nבהתאם לפנייתכם להעריך את פוטנציאל הסיכון של הקרינה, הננו מתכבדים להגיש הצעתנו לבדיקת קר",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc4AAA=",
+    "subject": "בדיקת קרינה - 4 ארונות חשמל + 4 גלאי ראדון ארוכי טווח",
+    "start": "2026-06-21T13:30:00.0000000",
+    "end": "2026-06-21T15:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "התקווה 20 ראשון לציון",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "בוייז לכתוב: התקווה 20 ראשון לציון זה יביא אתכם לחניה שלהם, להתקשר אל אשת הקשר והיא תפתח לכם את השער לחנייה.\r\n\r\nאשת קשר: מיטל 050-5368948\r\n\r\nהעבודה: 4 ארונות חשמל, ו4 גלאי ראדון ארוכי טווח.\r\n\r\n\r\nפרטי לקוח מזמין:",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc6AAA=",
+    "subject": "בדיקת ELF + RF - ללוח חשמל ולוח תקשורת - החברה העירונית ראשון לציון",
+    "start": "2026-06-21T15:30:00.0000000",
+    "end": "2026-06-21T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אושה 18 ראשון לציון",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "עבור מרכז קהילה ק.גנים – אושה 18 ראשון לציון\r\n\r\nאיש קשר: קובי 054-3973846",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcrAAA=",
+    "subject": "סקר אסבסט ",
+    "start": "2026-06-22T11:30:00.0000000",
+    "end": "2026-06-22T14:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הרצל 144 תל אביב",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "סתיו\r\n053 3387070",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcqAAA=",
+    "subject": "איתור ריח - משרדים ביגיע כפיים 24 פתח תקווה *יש להתקשר לפני יציאה*",
+    "start": "2026-06-24T11:00:00.0000000",
+    "end": "2026-06-24T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "יגיע כפיים 24 פתח תקווה",
+    "organizer": {
+      "name": "סשה גליקין",
+      "address": "Sasha@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "optional",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "לקוח:\r\n\r\nהסבר קצר של הבעיה לפי מה שהלקוח סיפר:\r\nכשמפעילים את המערכות מיזוג מתחיל ריח. התעלות יבשות, בדקו את הבריכה בתוך יחידת המיזוג והיא הייתה יבשה, המנוע לא באוור היט הכל שם תקין. ריח כמו של דגים מתים אקווריום או צמח נרקב. (לפי מה שאנשים מתלוננים).\r\nה",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (5) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:5"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcpAAA=",
+    "subject": " איתור ריח - הדובדבן 7 קריית אונו - *יש לבדוק אם יש ריח לפני יציאה*",
+    "start": "2026-06-24T13:00:00.0000000",
+    "end": "2026-06-24T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הדובדבן 7 קריית אונו",
+    "organizer": {
+      "name": "סשה גליקין",
+      "address": "Sasha@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "optional",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "הריח בכמה קומות של המשרדים! (5 קומות).\r\nיש ריח רע בעיקר ב2 קומות. ריח ביוב או ריח בישולים של מרקים.\r\n\r\nהמקום מתחם של משרדים בקומה ראשונה בתי קפה ומסחר.\r\n\r\n\r\n\r\nאיש קשר נוסף שצריך להיות נוכח: אריק דהרי\r\n053-350-4444",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (5) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:5"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs7AAA=",
+    "subject": "בדיקת קרינה ELF + RF בסניף חדש של בנק דיסקונט בבאר יעקב- הסניף מיועד להשכרה ועדין לא מאוייש",
+    "start": "2026-06-29T11:00:00.0000000",
+    "end": "2026-06-29T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "העמק 2 באר יעקב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לכבוד\r\nיזהר ינקו\r\nבנק דיסקונט\r\nיהודה הלוי 27\r\nתל אביב\r\nנייד : 050-2113445\r\nמייל: izhar.yancu@dbank.co.il\r\n\r\nהנדון: הצעת מחיר לבדיקת קרינה אלקטרומגנטית\r\n\r\nשלום רב,\r\n\r\nבהתאם לפנייתכם להעריך את פוטנציאל הסיכון של הקרינה, הננו מתכבדים להגיש הצעתנו לבדיקת קרינ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs8AAA=",
+    "subject": "בדיקת קרינה ELF + RF במשרדי במוקד חברת כרטיסי אשראי לישראל בע\"מ במוקד במודיעין - קומה 6 סמוך לחדר חשמל וקומה 7 בחדר חוגים סמוך לחדר חשמל",
+    "start": "2026-06-30T08:30:00.0000000",
+    "end": "2026-06-30T09:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שדרות יחזקאל 2 מודיעין עילית",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "אלון שילווה אותך- 053-8809771\r\n\r\nלכבוד\r\nירון חכם- רמ\"ד אחזקה ובינוי\r\nכרטיסי אשראי לישראל בע\"מ\r\nנייד : 052-2857557\r\nמייל: yaron.haham@icc.co.il\r\n\r\n\r\n\r\nבהתאם לפנייתכם להעריך את פוטנציאל הסיכון של הקרינה, הננו מתכבדים להגיש הצעתנו לבדיקת קרינה אלקטרומגנטית ב",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs6AAA=",
+    "subject": "בדיקת קרינה ELF בסניף בנק דיסקונט בתל אביב-סניף נווה אביבים-  יזהר ינקו יגיע לסניף",
+    "start": "2026-06-30T11:00:00.0000000",
+    "end": "2026-06-30T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "יהודה הנשיא 34 תל אביב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לכבוד\r\nיזהר ינקו\r\nבנק דיסקונט\r\nיהודה הלוי 27\r\nתל אביב\r\nנייד : 050-2113445\r\n\r\nבדיקת קרינה אלקטרומגנטית בסניף נווה אביבים ברחוב יהודה הנשיא 34 תל אביב.\r\n\r\n1,300 ₪ + מע\"מ.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcuAAA=",
+    "subject": "בדיקת קרינה ראש פינה",
+    "start": "2026-07-01T09:00:00.0000000",
+    "end": "2026-07-01T10:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ראש פינה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לתאם עם טל החשמלאי\r\n\r\n0504677666",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcvAAA=",
+    "subject": "בדיקת מיגון קרית אתא",
+    "start": "2026-07-01T10:20:00.0000000",
+    "end": "2026-07-01T11:50:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון",
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcwAAA=",
+    "subject": "סקר אסבסט ",
+    "start": "2026-07-02T11:00:00.0000000",
+    "end": "2026-07-02T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "הידיד 9 גבעתיים",
+    "organizer": {
+      "name": "אורי לוריא",
+      "address": "uri@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "פנינה\r\n050-5237114",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: סקר",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:סקר",
+      "LOCATION_STREET_NUMBER",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs9AAA=",
+    "subject": "לאסוף שיק בתל אביב אם מסתדר - לקוח של אורי בדיקת רעש שבוצעה לבית כנסת- להתקשר אליו והוא יגיד היכן הוא נמצא",
+    "start": "2026-07-02T12:00:00.0000000",
+    "end": "2026-07-02T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "יהיה ברחוב יצחק גרציאני - היכן שהיה בית מעריב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "דוד קופל-  052-4678508",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת רעש",
+      "מילות מפתח פגישה ב-subject: כנס",
+      "מילות מפתח משרד ב-subject: לקוח"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת רעש",
+      "SUBJECT_MEETING_KW:כנס",
+      "SUBJECT_OFFICE_KW:לקוח",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjchAAA=",
+    "subject": "בדיקות איכות אוויר רעש וקרינה עבור נתיבי איילון",
+    "start": "2026-07-05T11:00:00.0000000",
+    "end": "2026-07-05T12:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "מתנ\"מ סבידור מרכז ",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "optional",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "אלי ענבר 050-5554344",
+    "categories": [],
+    "showAs": "tentative",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.35,
+    "classificationReasons": [
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "LOCATION_SHORT",
+      "MANY_ATTENDEES:4"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAABJtECaDoVKTZnoppLA8oaSAAACKoc8AAA=",
+    "subject": "בדיקת קרינה *משולבת* + התקנת 7 גלאי ראדון - חברת  נטפים- דרך חידוש שירות ",
+    "start": "2026-07-08T10:00:00.0000000",
+    "end": "2026-07-08T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "קיבוץ מגל",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "העבודה:\r\n\r\n\r\n\r\n+ 7 גלאי ראדון ארוכי טווח",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAADsm2FfHXDQ5MyYIulPtx4AAfMBPimAAA=",
+    "subject": "בדיקת קרינה רכבת צפון",
+    "start": "2026-07-08T13:00:00.0000000",
+    "end": "2026-07-08T15:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "בית ספר אלון נוף הגליל ",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "עודד\r\n⁦+972 52-606-9369⁩",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: בדיקת קרינה",
+      "מילות מפתח אישי ב-subject: רכב"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:בדיקת קרינה",
+      "SUBJECT_PERSONAL_KW:רכב",
+      "LOCATION_SHORT",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiPnKl6AAA=",
+    "subject": "תיאום פגישה עם דני סווירי",
+    "start": "2026-07-09T10:00:00.0000000",
+    "end": "2026-07-09T11:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ברנדיס 4 רעננה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "הקוד של האינטרקום 9999",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.4,
+    "classificationReasons": [
+      "מילות מפתח פגישה ב-subject: פגישה",
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "SUBJECT_MEETING_KW:פגישה",
+      "LOCATION_STREET_NUMBER"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjc1AAA=",
+    "subject": "סיור קבלנים מיגון קרינה בית חולים שניידר פתח תקווה",
+    "start": "2026-07-12T12:00:00.0000000",
+    "end": "2026-07-12T13:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "בית חולים שניידר נקודת התכנסות בעמדת המודיעין בבניין האבן. ",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון קרינה, מיגון, סיור"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון קרינה|מיגון|סיור",
+      "FEW_ATTENDEES:2"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEs_AAA=",
+    "subject": "לחזור למיקי זיקרי מחברת לב אפשטיין בע\"מ- מעוניין להתקדם לגבי ההצעה שקיבל למיגון קרינה ",
+    "start": "2026-07-13T10:00:00.0000000",
+    "end": "2026-07-13T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לכבוד\r\nמיקי זיקרי\r\nלב אפשטיין בע\"מ\r\nרחובות\r\nנייד : 052-6612603\r\nמייל: mickey@lev-ap.co.il\r\n\r\nהנדון: הצעת מחיר עבור מיגון נגד קרינה\r\nשלום רב!\r\nבהתאם לפנייתך אלינו להצעת מחיר, הננו מתכבדים להגיש הצעה למיגון קרינה בפרויקט ויצמן 38, רחובות.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: מיגון קרינה, מיגון"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:מיגון קרינה|מיגון",
+      "LOCATION_EMPTY"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjc0AAA=",
+    "subject": "בדיקת צוות מריחים עבור חברת היטאצ'י",
+    "start": "2026-07-16T14:00:00.0000000",
+    "end": "2026-07-16T15:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "שחם 20 קיסריה",
+    "organizer": {
+      "name": "חיים כהן",
+      "address": "Haim@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "עדי 052-3442653",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.9,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "location מכיל דפוס רחוב+מספר+עיר",
+      "צוות פנימי גדול (4) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "LOCATION_STREET_NUMBER",
+      "MANY_ATTENDEES:4"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjc2AAA=",
+    "subject": "צוות מריחים - בניין מגורים נתניה",
+    "start": "2026-07-19T10:00:00.0000000",
+    "end": "2026-07-19T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "קרל פופר 4-6 נתניה",
+    "organizer": {
+      "name": "סשה גליקין",
+      "address": "Sasha@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Sasha@galit.co.il",
+        "name": "סשה גליקין",
+        "type": "required",
+        "response": "none"
+      },
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "Haim@galit.co.il",
+        "name": "חיים כהן",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "uri@galit.co.il",
+        "name": "אורי לוריא",
+        "type": "required",
+        "response": "accepted"
+      },
+      {
+        "email": "avihay@galit.co.il",
+        "name": "דר אביחי מוכתר",
+        "type": "required",
+        "response": "accepted"
+      }
+    ],
+    "bodyPreview": "אורן מנהל אחזקה בשטח – 053-3346464\r\n\r\n\r\n\r\nרקע קצר –\r\nבקומת הקרקע יש שווארמיה, ועוד מסעדות ומעל יש בניין מגורים. בבניין מגורים יש ריח ויש אפילו לפעמים עשן מהמסעדות בעיקר במסדרונות בצורה שקשה לעמוד שם.\r\nהם ניסו להפעיל את המפוחים של הכיבוי אש בכל קומה כדי לנ",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.8,
+    "classificationReasons": [
+      "מילות מפתח שטח ב-subject: צוות מריחים, מריחים",
+      "צוות פנימי גדול (5) — יכול להיות צוות שטח"
+    ],
+    "matchedSignals": [
+      "SUBJECT_FIELD_KW:צוות מריחים|מריחים",
+      "MANY_ATTENDEES:5"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEtAAAA=",
+    "subject": "עדנה רב נוף- תיקון הדברה ",
+    "start": "2026-07-20T10:00:00.0000000",
+    "end": "2026-07-20T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "צאלון 6 אודים",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "052-3863266",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "FIELD_TASK",
+    "confidence": 0.55,
+    "classificationReasons": [
+      "location מכיל דפוס רחוב+מספר+עיר"
+    ],
+    "matchedSignals": [
+      "LOCATION_STREET_NUMBER"
+    ]
+  }
+]

@@ -211,7 +211,10 @@ function tokenEndpoint(tenantId: string): string {
  *
  * The state is verified (HMAC + 10-min TTL) in completeOAuth.
  */
-export function startOAuth(userId: string): { url: string; state: string } {
+export function startOAuth(
+  userId: string,
+  options: { loginHint?: string } = {},
+): { url: string; state: string } {
   const tenantId = getGraphTenantId();
   const clientId = getGraphClientId();
   const redirectUri = getGraphRedirectUri();
@@ -232,8 +235,14 @@ export function startOAuth(userId: string): { url: string; state: string } {
     response_mode: 'query',
     scope: OAUTH_SCOPES,
     state,
-    prompt: 'consent',
   });
+
+  // Do not force prompt=consent here. Once tenant/user consent exists, forcing
+  // another consent operation can be rejected by tenants that disable user
+  // consent. login_hint only selects the intended account; it grants nothing.
+  if (options.loginHint) {
+    params.set('login_hint', options.loginHint);
+  }
 
   const url =
     `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?` +

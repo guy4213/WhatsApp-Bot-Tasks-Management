@@ -1,0 +1,280 @@
+[
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcJAAA=",
+    "subject": "יום עיון רישיון מלגזה",
+    "start": "2026-01-15T08:30:00.0000000",
+    "end": "2026-01-15T16:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אל יוחנן הסנדלר 6: https://waze.com/ul/hsv8z4c3e6",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "UNKNOWN",
+    "confidence": 0,
+    "classificationReasons": [
+      "אין signals מספקים — UNKNOWN"
+    ],
+    "matchedSignals": []
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcKAAA=",
+    "subject": "יום מעשי מלגזה ",
+    "start": "2026-01-16T08:30:00.0000000",
+    "end": "2026-01-16T12:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": " יוחנן הסנדלר 6: https://waze.com/ul/hsv8z4c3e6",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "UNKNOWN",
+    "confidence": 0,
+    "classificationReasons": [
+      "אין signals מספקים — UNKNOWN"
+    ],
+    "matchedSignals": []
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAADsm2FfHXDQ5MyYIulPtx4AAfMBPifAAA=",
+    "subject": "עד מומחה בבית משפט על אסבסט",
+    "start": "2026-01-21T09:00:00.0000000",
+    "end": "2026-01-21T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "יגאל אלון 126, תל אביב",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "יעקב קמחין 054-3976154",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "UNKNOWN",
+    "confidence": 0,
+    "classificationReasons": [
+      "אין signals מספקים — UNKNOWN"
+    ],
+    "matchedSignals": []
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAADsm2FfHXDQ5MyYIulPtx4AAfMBPikAAA=",
+    "subject": "כיול מכשיר רע",
+    "start": "2026-05-11T16:00:00.0000000",
+    "end": "2026-05-11T16:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "בן ציון גליס 9, פתח תקווה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "בניין משרדים שבקומת הקרקע תראה חנות גדולה של מחסני תאורה הם בקומה השנייה.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "UNKNOWN",
+    "confidence": 0,
+    "classificationReasons": [
+      "אין signals מספקים — UNKNOWN"
+    ],
+    "matchedSignals": []
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEsxAAA=",
+    "subject": "בדיקת ELF עבור התעשיה האווירית לישראל באתר בלוד - יש אישור כניסה עם הסיטרואן לבוא עם תעודת זהות",
+    "start": "2026-05-14T11:00:00.0000000",
+    "end": "2026-05-14T12:15:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "להגיע לשער המערבי",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "לכבוד\r\nאודי אלון\r\nהתעשיה האווירית לישראל בע\"מ\r\nלוד נמל תעופה\r\nנייד : 052-8301212\r\nמייל: audi@iai.co.il\r\n\r\n\r\nבדיקת קרינה אלקטרומגנטית במבנה מלתחות הממוקם מעל חדר חשמל בבניין בתעשייה האווירית, לוד.\r\nמבנה 118.\r\n\r\n1,200 ₪ + מע\"מ.",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "UNKNOWN",
+    "confidence": 0,
+    "classificationReasons": [
+      "אין signals מספקים — UNKNOWN"
+    ],
+    "matchedSignals": [
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAACVdW5-hMdER7Q48HgPCYDXAAiGfEszAAA=",
+    "subject": "מסיבת סיום של מיכל",
+    "start": "2026-06-03T18:00:00.0000000",
+    "end": "2026-06-03T21:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "אוסטרובסקי רעננה ",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "UNKNOWN",
+    "confidence": 0,
+    "classificationReasons": [
+      "אין signals מספקים — UNKNOWN"
+    ],
+    "matchedSignals": [
+      "LOCATION_SHORT"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAiLoSqIAAA=",
+    "subject": "תיאום הגעה — יעקב מזרחי",
+    "start": "2026-06-30T10:00:00.0000000",
+    "end": "2026-06-30T11:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "ברנדיס 1",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "Guy@galit.co.il",
+        "name": "גיא גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "UNKNOWN",
+    "confidence": 0,
+    "classificationReasons": [
+      "אין signals מספקים — UNKNOWN"
+    ],
+    "matchedSignals": []
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAC-BKEOoriPR5cnTVgFzSc8AAeEQjcoAAA=",
+    "subject": "עדות בבית משפט אסבסט",
+    "start": "2026-09-24T09:00:00.0000000",
+    "end": "2026-09-24T09:30:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": false,
+    "location": "בית נשפט הרצליה",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [
+      {
+        "email": "yoram@galit.co.il",
+        "name": "יורם גבאי",
+        "type": "required",
+        "response": "none"
+      }
+    ],
+    "bodyPreview": "0544931048\r\n\r\nעו\"ד יובל המלי\r\n\r\n﻿",
+    "categories": [],
+    "showAs": "busy",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "UNKNOWN",
+    "confidence": 0,
+    "classificationReasons": [
+      "אין signals מספקים — UNKNOWN"
+    ],
+    "matchedSignals": [
+      "LOCATION_SHORT"
+    ]
+  }
+]

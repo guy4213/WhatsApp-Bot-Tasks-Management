@@ -1,0 +1,666 @@
+[
+  {
+    "taskId": "qa-tracking-flow-guy-task",
+    "title": "[QA_TEST] בדיקת קרינה פיקטיבית - גיא פרנסס",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": null,
+    "dueDate": null,
+    "createdAt": "2026-07-14T03:15:32.389Z",
+    "updatedAt": "2026-07-14T04:13:01.211Z",
+    "description": "משימת בדיקה פיקטיבית לבחינת תזכורת, עדכון זמן הגעה, פתיחת OwnTracks ושליחת קישור מעקב ללקוח.",
+    "processNotes": "",
+    "owner": {
+      "id": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "name": "גיא פרנסס",
+      "email": "guyf@galit.co.il"
+    },
+    "customer": {
+      "id": "qa-tracking-flow-guy",
+      "name": "[QA_TEST] גיא פרנסס",
+      "city": "רעננה",
+      "address": null,
+      "phone": "0534271418",
+      "type": "TEST",
+      "services": []
+    },
+    "product": {
+      "raw": "9",
+      "inspectionType": {
+        "code": "9",
+        "labelHe": "קרינה – בדיקת קרינה אלקטרומגנטית מרשת החשמל",
+        "family": "radiation",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [
+      {
+        "id": "d32f7ba4-5b81-4fd5-bb22-fec1a5dc81c8",
+        "family": "radiation",
+        "fieldStatus": "FINISHED_FIELD",
+        "scheduledStartAt": "2026-07-14T08:20:00+00:00",
+        "siteCity": "רעננה",
+        "siteAddress": "רחוב אחוזה 100"
+      }
+    ],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.98,
+    "classificationReasons": [
+      "title מכיל סימון בדיקה/דמו — לא ליבוא"
+    ],
+    "matchedSignals": [
+      "TEST_MARKER_IN_TITLE"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "727d8378-2641-4e49-a9c7-a3216cc47a85",
+    "title": "כרטיס לקוח חדש",
+    "status": "CANCELLED",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-13T09:25:52.774Z",
+    "updatedAt": "2026-07-14T06:17:05.502Z",
+    "description": "לא ניתן ליצור קשר",
+    "processNotes": "",
+    "owner": {
+      "id": "3d99d54c-219c-45ff-83b7-9525549f3e4d",
+      "name": "אורי",
+      "email": "uri@galit.co.il"
+    },
+    "customer": {
+      "id": "3c9d1c81-0e5f-4421-8453-8bcac05444ee",
+      "name": "מיקי קורן",
+      "city": "ראשון לציון",
+      "address": null,
+      "phone": "0507797779",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: לא ניתן ליצור קשר"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "ac4ae2bc-21b2-4ea3-9566-48a367042033",
+    "title": "כרטיס לקוח חדש",
+    "status": "CANCELLED",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-13T09:03:55.899Z",
+    "updatedAt": "2026-07-14T06:17:25.480Z",
+    "description": "אי פרטי יצירת קשר",
+    "processNotes": "",
+    "owner": {
+      "id": "3d99d54c-219c-45ff-83b7-9525549f3e4d",
+      "name": "אורי",
+      "email": "uri@galit.co.il"
+    },
+    "customer": {
+      "id": "8021f2be-7ec5-4462-8cf2-71827a65eebc",
+      "name": "ירון",
+      "city": "תל אביב-יפו",
+      "address": "תל אביב",
+      "phone": "0549755012",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: אי פרטי יצירת קשר"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "demo-yoram-task-1783939655645",
+    "title": "🧪 [דמו — יורם] בדיקת הבוט של גיא — התעלמו",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": null,
+    "dueDate": "2026-07-13T11:42:35.645Z",
+    "createdAt": "2026-07-13T07:47:38.614Z",
+    "updatedAt": "2026-07-13T07:47:38.614Z",
+    "description": "משימה פיקטיבית להדגמת הזרימה: תזכורת שעה לפני, כרטיס שיבוץ, ותפריטי מנהל בבוט. אל תסמן כבוצע.",
+    "processNotes": "⚠️ פיקטיבי — עבור הדגמת הבוט ליורם. גיא אחראי לניקוי (2026-07-13).",
+    "owner": {
+      "id": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "name": "יורם",
+      "email": "yoram@galit.co.il"
+    },
+    "customer": {
+      "id": "demo-yoram-cust-1783939655645",
+      "name": "🧪 [דמו — יורם] לקוח לבדיקת הבוט (אל תפנו)",
+      "city": "עיר דמו",
+      "address": "רחוב הדמו 999",
+      "phone": "0534271418",
+      "type": "TEST",
+      "services": []
+    },
+    "product": {
+      "raw": "RF – קרינה – בדיקת קרינה אלקטרומגנטית ממתקני שידור ואנטנות סלולריות",
+      "inspectionType": null
+    },
+    "quote": {},
+    "existingTaskFields": [
+      {
+        "id": "c770a37c-c115-436b-9ff6-bfa601a9a071",
+        "family": "radiation",
+        "fieldStatus": "EN_ROUTE",
+        "scheduledStartAt": "2026-07-13T11:32:35.645+00:00",
+        "siteCity": "עיר דמו",
+        "siteAddress": "רחוב הדמו 999"
+      }
+    ],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.98,
+    "classificationReasons": [
+      "title מכיל סימון בדיקה/דמו — לא ליבוא"
+    ],
+    "matchedSignals": [
+      "TEST_MARKER_IN_TITLE"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "162162a7-3211-4741-92c1-256ee8560400",
+    "title": "פנייה - חיים ג'ון כהן",
+    "status": "CANCELLED",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": null,
+    "createdAt": "2026-07-13T03:28:45.516Z",
+    "updatedAt": "2026-07-14T07:41:24.245Z",
+    "description": "טסט",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "0fba1e7c-c9b0-43ef-b479-48c43dc56fad",
+      "name": "חיים ג'ון כהן",
+      "city": "רעננה",
+      "address": "יצחק שדה 12",
+      "phone": "054-3692295",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "72",
+      "inspectionType": {
+        "code": "72",
+        "labelHe": "אוויר – בדיקת איכות אוויר תוך מבני",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: טסט"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "95b9c159-5bc2-41b8-b42d-84dfdd8b081c",
+    "title": "פנייה - חיים ג'ון כהן",
+    "status": "CANCELLED",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-13T03:06:00.873Z",
+    "updatedAt": "2026-07-13T07:58:30.146Z",
+    "description": "יקר מדי",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "0fba1e7c-c9b0-43ef-b479-48c43dc56fad",
+      "name": "חיים ג'ון כהן",
+      "city": "רעננה",
+      "address": "יצחק שדה 12",
+      "phone": "054-3692295",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "72",
+      "inspectionType": {
+        "code": "72",
+        "labelHe": "אוויר – בדיקת איכות אוויר תוך מבני",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: יקר מדי"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "054333fc-7d88-49d5-9ae1-295c477ceb4f",
+    "title": "כרטיס לקוח חדש",
+    "status": "CANCELLED",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-12T05:50:20.725Z",
+    "updatedAt": "2026-07-13T03:45:39.373Z",
+    "description": "לא מעוניין",
+    "processNotes": "",
+    "owner": {
+      "id": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "name": "גלית",
+      "email": "galit@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: לא מעוניין"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "46ddcdcb-cf9c-4dbf-8347-fadbe0960550",
+    "title": "כרטיס לקוח חדש",
+    "status": "CANCELLED",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-12T05:48:17.076Z",
+    "updatedAt": "2026-07-13T03:45:39.369Z",
+    "description": "לא מעוניין",
+    "processNotes": "",
+    "owner": {
+      "id": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "name": "גלית",
+      "email": "galit@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: לא מעוניין"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "dc50c55f-59ad-47c2-9b3a-c288a5b494e2",
+    "title": "כרטיס לקוח חדש",
+    "status": "CANCELLED",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-12T05:47:25.586Z",
+    "updatedAt": "2026-07-13T03:45:39.354Z",
+    "description": "לא מעוניין",
+    "processNotes": "",
+    "owner": {
+      "id": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "name": "גלית",
+      "email": "galit@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: לא מעוניין"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "cfa7a4c4-1cf1-4601-9341-eee8188ebe79",
+    "title": "פנייה - ליאת",
+    "status": "CANCELLED",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": null,
+    "createdAt": "2026-07-12T05:42:13.835Z",
+    "updatedAt": "2026-07-13T03:45:39.357Z",
+    "description": "לא מעוניין",
+    "processNotes": "",
+    "owner": {
+      "id": "3417dc3a-7e5f-44d8-9266-1a83e358e5bf",
+      "name": "סשה",
+      "email": "sasha@galit.co.il"
+    },
+    "customer": {
+      "id": "cd797c70-8567-4167-8e36-d457ef6f57d1",
+      "name": "ליאת",
+      "city": "אופקים",
+      "address": "אחחר",
+      "phone": "0543094293",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "10088",
+      "inspectionType": {
+        "code": "10088",
+        "labelHe": "קרקע – דיגום נוסף באתר חיידקים בחול תחת ריצוף",
+        "family": "soil",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: לא מעוניין"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "b05d119e-e270-4571-8561-03e86e8af9ad",
+    "title": "פנייה - יעל סבאג",
+    "status": "CANCELLED",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": null,
+    "createdAt": "2026-07-12T05:21:11.802Z",
+    "updatedAt": "2026-07-13T03:45:39.368Z",
+    "description": "זמן לא טוב",
+    "processNotes": "",
+    "owner": {
+      "id": "3d99d54c-219c-45ff-83b7-9525549f3e4d",
+      "name": "אורי",
+      "email": "uri@galit.co.il"
+    },
+    "customer": {
+      "id": "86e5fbde-ae17-4a86-bfb0-48d60d540704",
+      "name": "יעל סבאג",
+      "city": "אור יהודה",
+      "address": "ברנדיס 4",
+      "phone": "0523336669",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "10064",
+      "inspectionType": {
+        "code": "10064",
+        "labelHe": "קרינה – בדיקת קרינה מרכב היברידי / חשמלי",
+        "family": "radiation",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: זמן לא טוב"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "ddb64aeb-0d86-4642-a87e-c5068fc96aa8",
+    "title": "ליד חדש נכנס",
+    "status": "CANCELLED",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-09T08:32:18.884Z",
+    "updatedAt": "2026-07-13T03:45:39.365Z",
+    "description": "אי-התאמה בשירות",
+    "processNotes": "",
+    "owner": {
+      "id": "3d99d54c-219c-45ff-83b7-9525549f3e4d",
+      "name": "אורי",
+      "email": "uri@galit.co.il"
+    },
+    "customer": {
+      "id": "24e51b08-df37-4edd-892a-74206b345edf",
+      "name": "פאיז",
+      "city": "",
+      "address": null,
+      "phone": "0545745719",
+      "type": "COMPANY",
+      "services": [
+        "אחר"
+      ]
+    },
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {
+      "id": "af0fe733-6bd1-4787-bddb-5547d36dd984",
+      "subject": "ליד חדש מדף הנחיתה - גלית אקוסטיקה",
+      "fromName": "Notifications",
+      "bodyPreview": "Form Submission Data from your website. New form has been submitted on your website, please open to see details.\nשלום,\nהתקבלה פנייה חדשה דרך טופס באתר.\nלהלן פרטי הפנייה:\n\ncaptcha\nfalse\n\ntemplate\ntable"
+    },
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: אי-התאמה"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "51fdac1e-53d8-4765-ab37-f1207a3737a7",
+    "title": "[QA_TEST_1338] משימה משרדית — בדיקת תזכורת CRM",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": null,
+    "dueDate": "2026-07-09T07:38:00.000Z",
+    "createdAt": "2026-07-09T06:36:55.345Z",
+    "updatedAt": "2026-07-09T06:36:55.345Z",
+    "description": "משימת QA לבדיקת תזכורת שעה לפני dueDate (CRM due-date reminder). למחיקה בסיום הבדיקות.",
+    "processNotes": "",
+    "owner": {
+      "id": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "name": "גיא פרנסס",
+      "email": "guyf@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.98,
+    "classificationReasons": [
+      "title מכיל סימון בדיקה/דמו — לא ליבוא"
+    ],
+    "matchedSignals": [
+      "TEST_MARKER_IN_TITLE"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "9e211c32-625f-436c-9cc0-1d99a40a0ff4",
+    "title": "ליד חדש נכנס",
+    "status": "CANCELLED",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-09T06:21:08.682Z",
+    "updatedAt": "2026-07-12T07:52:47.985Z",
+    "description": "אי-התאמה בשירות",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "38174700-7428-41e0-963f-6814438b6aee",
+      "name": "משה קבלרו",
+      "city": "",
+      "address": null,
+      "phone": "0527777808",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {
+      "id": "a9eee1b2-fc66-4e10-b0db-05eacfd0a7ad",
+      "subject": "הודעה חדשה מאת \"גלית - דף צור קשר\"",
+      "fromName": "גלית",
+      "bodyPreview": "שם: משה קבלרו\nטלפון: 0527777808\nאימייל: tifulyassur2000@gmail.com\nישוב: יסעור\nחברה: יסעור 2000 אש\"ח\nמתעניין ב: שרות אחר\nהערות: שלום מעוניין בהצעת מחיר לבדיקה סביבתית P2 P10 ובדיקה כללית לאיכות האוויר "
+    },
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: אי-התאמה"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  },
+  {
+    "taskId": "6d6babb5-2a23-425c-9fab-966412c8e1f8",
+    "title": "כרטיס לקוח חדש",
+    "status": "CANCELLED",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": "2026-07-12T03:00:00.000Z",
+    "createdAt": "2026-07-09T04:13:59.881Z",
+    "updatedAt": "2026-07-13T04:46:15.033Z",
+    "description": "לא מעוניין",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "c38a70f2-dc1b-40f0-a28d-8e6151e8e696",
+      "name": "אלכסנדרה פרידמן",
+      "city": "הרצליה",
+      "address": "חנה סנש 27",
+      "phone": "054-4528205",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "69",
+      "inspectionType": {
+        "code": "69",
+        "labelHe": "אוויר – דיגום עובשים באוויר – בדיקה ראשונה",
+        "family": "air",
+        "isFieldInspection": true
+      }
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "EXCLUDED",
+    "confidence": 0.95,
+    "classificationReasons": [
+      "בוטל בגלל: לא מעוניין"
+    ],
+    "matchedSignals": [
+      "STATUS_CANCELLED"
+    ],
+    "missingData": []
+  }
+]

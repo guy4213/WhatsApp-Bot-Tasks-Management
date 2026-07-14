@@ -1,0 +1,138 @@
+[
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAA9uv6E0caSSLd3qVMWDKq8AAAAA5soAAA=",
+    "subject": "יום הזיכרון הבינלאומי לשואה",
+    "start": "2026-01-27T00:00:00.0000000",
+    "end": "2026-01-28T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "ישראל",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "/O=OEXCH024/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=YORAM@GALIT"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [
+      "חג"
+    ],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "CALENDAR_NOISE",
+    "confidence": 0.8,
+    "classificationReasons": [
+      "אירוע יום שלם עם שם חג — CALENDAR_NOISE",
+      "מארגן חיצוני (galit) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "ALL_DAY_HOLIDAY:יום הזיכרון",
+      "LOCATION_SHORT",
+      "EXTERNAL_ORGANIZER:galit",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAA9uv6E0caSSLd3qVMWDKq8AAAAA53BAAA=",
+    "subject": "יום הזיכרון הבינלאומי לשואה",
+    "start": "2026-01-27T00:00:00.0000000",
+    "end": "2026-01-28T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "ישראל",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "/O=OEXCH024/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=YORAM@GALIT"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [
+      "חג"
+    ],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "CALENDAR_NOISE",
+    "confidence": 0.8,
+    "classificationReasons": [
+      "אירוע יום שלם עם שם חג — CALENDAR_NOISE",
+      "מארגן חיצוני (galit) — כנראה פגישה חיצונית"
+    ],
+    "matchedSignals": [
+      "ALL_DAY_HOLIDAY:יום הזיכרון",
+      "LOCATION_SHORT",
+      "EXTERNAL_ORGANIZER:galit",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAA9uv6E0caSSLd3qVMWDKq8AAAAA6BIAAA=",
+    "subject": "יום הזיכרון הבינלאומי לשואה",
+    "start": "2026-01-27T00:00:00.0000000",
+    "end": "2026-01-28T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "ישראל",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [
+      "חג"
+    ],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "CALENDAR_NOISE",
+    "confidence": 0.8,
+    "classificationReasons": [
+      "אירוע יום שלם עם שם חג — CALENDAR_NOISE"
+    ],
+    "matchedSignals": [
+      "ALL_DAY_HOLIDAY:יום הזיכרון",
+      "LOCATION_SHORT",
+      "SHOW_AS_FREE"
+    ]
+  },
+  {
+    "id": "AAMkADg4YjY0Njc2LTNmOTktNDg3My05NzIzLWJmNjA4OTE0MmZkNgBGAAAAAACZcyW6fGWzSbPbRaZDYxJQBwA9uv6E0caSSLd3qVMWDKq8AAAAAAAPAAA9uv6E0caSSLd3qVMWDKq8AAAABbwUAAA=",
+    "subject": "יום הזיכרון הבינלאומי לשואה",
+    "start": "2026-01-27T00:00:00.0000000",
+    "end": "2026-01-28T00:00:00.0000000",
+    "timeZone": "Asia/Jerusalem",
+    "isAllDay": true,
+    "location": "ישראל",
+    "organizer": {
+      "name": "יורם גבאי",
+      "address": "yoram@galit.co.il"
+    },
+    "attendees": [],
+    "bodyPreview": "",
+    "categories": [
+      "חג"
+    ],
+    "showAs": "free",
+    "isOnlineMeeting": false,
+    "isCancelled": false,
+    "type": "singleInstance",
+    "recurrence": null,
+    "classification": "CALENDAR_NOISE",
+    "confidence": 0.8,
+    "classificationReasons": [
+      "אירוע יום שלם עם שם חג — CALENDAR_NOISE"
+    ],
+    "matchedSignals": [
+      "ALL_DAY_HOLIDAY:יום הזיכרון",
+      "LOCATION_SHORT",
+      "SHOW_AS_FREE"
+    ]
+  }
+]

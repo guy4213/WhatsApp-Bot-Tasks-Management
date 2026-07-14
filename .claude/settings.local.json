@@ -73,7 +73,8 @@
       "PowerShell(\\(Get-Content TASKS.md | Measure-Object -Line\\).Lines)",
       "Bash(npm install *)",
       "Bash(npm run *)",
-      "PowerShell([System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId\\([DateTime]::UtcNow, 'Israel Standard Time'\\).ToString\\('yyyy-MM-dd HH:mm:ss'\\))"
+      "PowerShell([System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId\\([DateTime]::UtcNow, 'Israel Standard Time'\\).ToString\\('yyyy-MM-dd HH:mm:ss'\\))",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://whatsapp-bot-tasks-management.onrender.com/health/live\" -TimeoutSec 30 -UseBasicParsing; Write-Output \"HTTP $\\($r.StatusCode\\)\"; Write-Output $r.Content } catch { Write-Output \"ERR: $\\($_.Exception.Message\\)\" })"
     ],
     "additionalDirectories": [
       "C:\\Users\\guy42\\Documents\\WhatsApp-Bot-Tasks-Management"

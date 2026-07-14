@@ -1,0 +1,516 @@
+[
+  {
+    "taskId": "635177e5-dc70-467e-9888-607c7c0c6d10",
+    "title": "ליד חדש נכנס",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-14T07:42:36.332Z",
+    "updatedAt": "2026-07-14T08:26:25.116Z",
+    "description": "Form Submission Data from your website. New form has been submitted on your website, please open to see details.\nשלום,\nהתקבלה פנייה חדשה דרך טופס באתר.\nלהלן פרטי הפנייה:\n\ncaptcha\nfalse\n\ntemplate\ntable\n\nשם מלא\nנקסט טאוור\n\nטלפון\n0525150090\n\nסוג השירות המבוקש\nסקר לאיתור אסבסט במבנה קיים\n\nהודעה\nאין אסבסט - אישור עירייה\n\nאישור פרטיות\non\n\nVisitor IP: 46.19.85.207. Report Spam.\nDon't want these emails anymore? Manage Notifications.\nThis e-mail was sent from https://asbestos.galit.ltd/\nPowered by Web3Forms",
+    "processNotes": "",
+    "owner": {
+      "id": "3d99d54c-219c-45ff-83b7-9525549f3e4d",
+      "name": "אורי",
+      "email": "uri@galit.co.il"
+    },
+    "customer": {
+      "id": "498b1a4f-01e2-4594-8694-771d94b1b272",
+      "name": "נקסט טאוור",
+      "city": "",
+      "address": null,
+      "phone": "0525150090",
+      "type": "COMPANY",
+      "services": [
+        "סקר לאיתור אסבסט במבנה קיים"
+      ]
+    },
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {
+      "id": "674c83ac-68a1-406b-a0f9-a352eb8395b1",
+      "subject": "ליד חדש מדף הנחיתה - גלית תחום אסבסט",
+      "fromName": "Notifications",
+      "bodyPreview": "Form Submission Data from your website. New form has been submitted on your website, please open to see details.\nשלום,\nהתקבלה פנייה חדשה דרך טופס באתר.\nלהלן פרטי הפנייה:\n\ncaptcha\nfalse\n\ntemplate\ntable"
+    },
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.7,
+    "classificationReasons": [
+      "יש לקוח, אין productName — עדיין מוקדם להחליט האם יוליד משימת שטח"
+    ],
+    "matchedSignals": [],
+    "missingData": [
+      "productName",
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "5daee6b7-8948-43c3-98cc-93418858c833",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-14T06:10:38.574Z",
+    "updatedAt": "2026-07-14T07:42:41.725Z",
+    "description": "",
+    "processNotes": "",
+    "owner": {
+      "id": "3417dc3a-7e5f-44d8-9266-1a83e358e5bf",
+      "name": "סשה",
+      "email": "sasha@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.85,
+    "classificationReasons": [
+      "כרטיס ריק — אין productName, אין customer. יידרש context נוסף כדי לסווג"
+    ],
+    "matchedSignals": [],
+    "missingData": [
+      "customerId",
+      "productName",
+      "dueDate",
+      "description",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "1d69e02b-7f6b-48c6-8128-aafd00ae3a63",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-14T03:11:18.276Z",
+    "updatedAt": "2026-07-14T04:19:39.512Z",
+    "description": "",
+    "processNotes": "",
+    "owner": {
+      "id": "3417dc3a-7e5f-44d8-9266-1a83e358e5bf",
+      "name": "סשה",
+      "email": "sasha@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.85,
+    "classificationReasons": [
+      "כרטיס ריק — אין productName, אין customer. יידרש context נוסף כדי לסווג"
+    ],
+    "matchedSignals": [],
+    "missingData": [
+      "customerId",
+      "productName",
+      "dueDate",
+      "description",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "00fa3195-f819-4918-944e-3d72f9a71105",
+    "title": "פנייה - חברת רום גבס",
+    "status": "OPEN",
+    "type": "stepQuote",
+    "currentStage": 99,
+    "dueDate": null,
+    "createdAt": "2026-07-13T09:52:54.510Z",
+    "updatedAt": "2026-07-14T02:31:43.828Z",
+    "description": "סוג לקוח: COMPANY\nפעולה הבאה: שליחת הצעה",
+    "processNotes": "",
+    "owner": {
+      "id": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "name": "גלית",
+      "email": "galit@galit.co.il"
+    },
+    "customer": {
+      "id": "fb5d2ec2-5689-4d78-b074-c17d47525a37",
+      "name": "חברת רום גבס",
+      "city": "גני תקווה",
+      "address": "כרמל 20",
+      "phone": "050-9024731",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "10096",
+      "inspectionType": null
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.5,
+    "classificationReasons": [
+      "productName=\"10096\" לא מופיע ב-InspectionType.code (יתכן שהוסר או שהוא מוצר משני)",
+      "productName קיים אך לא מתחזה ל-InspectionType ואין מילות שטח — לא ברור אם שטח או משרדי"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_UNMAPPED:10096"
+    ],
+    "missingData": [
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "69094307-6e5a-4fab-930f-030f9b92b49b",
+    "title": "ליד חדש נכנס",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-13T07:55:40.916Z",
+    "updatedAt": "2026-07-13T07:58:50.091Z",
+    "description": "Form Submission Data from your website. New form has been submitted on your website, please open to see details.\nשלום,\nהתקבלה פנייה חדשה דרך טופס באתר.\nלהלן פרטי הפנייה:\n\ncaptcha\nfalse\n\ntemplate\ntable\n\nשם מלא\nאדוה צוקרמן\n\nטלפון\n0526272843\n\nסוג לקוח\nלקוח פרטי (דירה / בית)\n\nהודעה\nזקוקים לבדיקת עובש ברחבי הבית\n\nאישור פרטיות\non\n\nVisitor IP: 77.137.23.10. Report Spam.\nDon't want these emails anymore? Manage Notifications.\nThis e-mail was sent from https://mold.galit.ltd/\nPowered by Web3Forms",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {
+      "id": "d70723b9-10f4-4db7-9b06-5dfbeeb925d7",
+      "subject": "ליד חדש מדף הנחיתה - גלית בדיקות עובש",
+      "fromName": "Notifications",
+      "bodyPreview": "Form Submission Data from your website. New form has been submitted on your website, please open to see details.\nשלום,\nהתקבלה פנייה חדשה דרך טופס באתר.\nלהלן פרטי הפנייה:\n\ncaptcha\nfalse\n\ntemplate\ntable"
+    },
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.85,
+    "classificationReasons": [
+      "כרטיס ריק — אין productName, אין customer. יידרש context נוסף כדי לסווג"
+    ],
+    "matchedSignals": [],
+    "missingData": [
+      "customerId",
+      "productName",
+      "dueDate",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "fc970e7e-feff-4322-b03e-04a30d228630",
+    "title": "כרטיס לקוח — יצחק עופר בע\"מ",
+    "status": "OPEN",
+    "type": "stepQuote",
+    "currentStage": 99,
+    "dueDate": "2026-07-16T03:00:00.000Z",
+    "createdAt": "2026-07-13T07:51:39.204Z",
+    "updatedAt": "2026-07-14T04:41:11.363Z",
+    "description": "סוג לקוח: COMPANY",
+    "processNotes": "",
+    "owner": {
+      "id": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "name": "יורם",
+      "email": "yoram@galit.co.il"
+    },
+    "customer": {
+      "id": "3fa53229-8ee2-4be9-a791-aaae53e8c20d",
+      "name": "יצחק עופר בע\"מ",
+      "city": "תל אביב-יפו",
+      "address": "מנחם בגין 144 א'",
+      "phone": "0542080654",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "10096",
+      "inspectionType": null
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.5,
+    "classificationReasons": [
+      "productName=\"10096\" לא מופיע ב-InspectionType.code (יתכן שהוסר או שהוא מוצר משני)",
+      "productName קיים אך לא מתחזה ל-InspectionType ואין מילות שטח — לא ברור אם שטח או משרדי"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_UNMAPPED:10096"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "37e604f8-fc67-4441-94f9-7d4dfa8404d9",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-13T07:25:48.647Z",
+    "updatedAt": "2026-07-14T02:31:43.860Z",
+    "description": "",
+    "processNotes": "",
+    "owner": {
+      "id": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "name": "גלית",
+      "email": "galit@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.85,
+    "classificationReasons": [
+      "כרטיס ריק — אין productName, אין customer. יידרש context נוסף כדי לסווג"
+    ],
+    "matchedSignals": [],
+    "missingData": [
+      "customerId",
+      "productName",
+      "dueDate",
+      "description",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "c621fde0-3364-45e7-a5d0-f800d9da69ca",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-13T03:28:29.347Z",
+    "updatedAt": "2026-07-13T07:58:30.131Z",
+    "description": "",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.85,
+    "classificationReasons": [
+      "כרטיס ריק — אין productName, אין customer. יידרש context נוסף כדי לסווג"
+    ],
+    "matchedSignals": [],
+    "missingData": [
+      "customerId",
+      "productName",
+      "dueDate",
+      "description",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "dcd86029-d3d4-4509-b98c-e05b2072fbab",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step4",
+    "currentStage": 3,
+    "dueDate": "2026-07-16T03:00:00.000Z",
+    "createdAt": "2026-07-12T10:32:44.780Z",
+    "updatedAt": "2026-07-14T07:41:23.553Z",
+    "description": "סוג לקוח: פרטי",
+    "processNotes": "",
+    "owner": {
+      "id": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "name": "חיים",
+      "email": "haim@galit.co.il"
+    },
+    "customer": {
+      "id": "1cf7f7de-da4e-4070-b63c-0d66f44c3219",
+      "name": "עידן כהן",
+      "city": "חיפה",
+      "address": "היינה 19",
+      "phone": "0523208446",
+      "type": "PRIVATE",
+      "services": []
+    },
+    "product": {
+      "raw": "10168",
+      "inspectionType": null
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.5,
+    "classificationReasons": [
+      "productName=\"10168\" לא מופיע ב-InspectionType.code (יתכן שהוסר או שהוא מוצר משני)",
+      "productName קיים אך לא מתחזה ל-InspectionType ואין מילות שטח — לא ברור אם שטח או משרדי"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_UNMAPPED:10168"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "43fa35eb-c985-486e-a65f-916a1434246c",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-12T08:25:58.138Z",
+    "updatedAt": "2026-07-13T04:12:46.910Z",
+    "description": "",
+    "processNotes": "",
+    "owner": {
+      "id": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "name": "גלית",
+      "email": "galit@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.85,
+    "classificationReasons": [
+      "כרטיס ריק — אין productName, אין customer. יידרש context נוסף כדי לסווג"
+    ],
+    "matchedSignals": [],
+    "missingData": [
+      "customerId",
+      "productName",
+      "dueDate",
+      "description",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "ea938e7a-06fa-4edc-8a7a-9a0f598f8192",
+    "title": "כרטיס לקוח — Biopharmax Group",
+    "status": "OPEN",
+    "type": "stepQuote",
+    "currentStage": 99,
+    "dueDate": "2026-07-13T08:28:19.495Z",
+    "createdAt": "2026-07-12T07:30:12.255Z",
+    "updatedAt": "2026-07-14T02:48:35.242Z",
+    "description": "סוג לקוח: PRIVATE\nפעולה הבאה: שליחת הצעה",
+    "processNotes": "",
+    "owner": {
+      "id": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "name": "יורם",
+      "email": "yoram@galit.co.il"
+    },
+    "customer": {
+      "id": "6e4300d8-428f-421d-b860-e7a740356a11",
+      "name": "פארם מקס",
+      "city": "אופקים",
+      "address": "ברנדיס 2",
+      "phone": "0537740988",
+      "type": "COMPANY",
+      "services": []
+    },
+    "product": {
+      "raw": "10098",
+      "inspectionType": null
+    },
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.5,
+    "classificationReasons": [
+      "productName=\"10098\" לא מופיע ב-InspectionType.code (יתכן שהוסר או שהוא מוצר משני)",
+      "productName קיים אך לא מתחזה ל-InspectionType ואין מילות שטח — לא ברור אם שטח או משרדי"
+    ],
+    "matchedSignals": [
+      "PRODUCTNAME_UNMAPPED:10098"
+    ],
+    "missingData": [
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  },
+  {
+    "taskId": "15c06a32-a805-4bf9-83ab-bd2136733f91",
+    "title": "כרטיס לקוח חדש",
+    "status": "OPEN",
+    "type": "step1",
+    "currentStage": 0,
+    "dueDate": null,
+    "createdAt": "2026-07-12T07:28:26.025Z",
+    "updatedAt": "2026-07-13T03:45:39.351Z",
+    "description": "",
+    "processNotes": "",
+    "owner": {
+      "id": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "name": "יורם",
+      "email": "yoram@galit.co.il"
+    },
+    "customer": {},
+    "product": {},
+    "quote": {},
+    "existingTaskFields": [],
+    "incomingLead": {},
+    "leadId": null,
+    "projectId": null,
+    "classification": "NEEDS_CONTEXT",
+    "confidence": 0.85,
+    "classificationReasons": [
+      "כרטיס ריק — אין productName, אין customer. יידרש context נוסף כדי לסווג"
+    ],
+    "matchedSignals": [],
+    "missingData": [
+      "customerId",
+      "productName",
+      "dueDate",
+      "description",
+      "projectId (0/42 in this DB — the linkage is unused)",
+      "leadId (0/42 in this DB — unused)"
+    ]
+  }
+]

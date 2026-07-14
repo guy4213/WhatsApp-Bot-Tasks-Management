@@ -65,6 +65,11 @@ function escapeHtml(str: string): string {
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
+const oauthStartQuerySchema = z.object({
+  userId: z.string().uuid(),
+  loginHint: z.string().email().optional(),
+});
+
 const uuidSchema = z.object({ userId: z.string().uuid() });
 
 const listEventsQuerySchema = z.object({
@@ -143,20 +148,22 @@ export async function microsoftCalendarRoutes(app: FastifyInstance): Promise<voi
       }
     });
 
-    // GET /microsoft/oauth/start?userId=<uuid>
+    // GET /microsoft/oauth/start?userId=<uuid>&loginHint=<email>
     // Builds the Microsoft authorization URL for the given userId.
     // Returns { url } only — state is embedded in the URL and must not be
     // returned separately (it would be redundant noise and expose a signed token).
-    protectedApp.get<{ Querystring: { userId?: string } }>(
+    protectedApp.get<{ Querystring: { userId?: string; loginHint?: string } }>(
       '/microsoft/oauth/start',
       async (req, reply) => {
-        const parsed = uuidSchema.safeParse(req.query);
+        const parsed = oauthStartQuerySchema.safeParse(req.query);
         if (!parsed.success) {
-          return reply.code(400).send({ error: 'Invalid query: userId must be a valid UUID' });
+          return reply.code(400).send({
+            error: 'Invalid query: userId must be a valid UUID and loginHint must be an email',
+          });
         }
 
-        const { userId } = parsed.data;
-        const { url } = startOAuth(userId);
+        const { userId, loginHint } = parsed.data;
+        const { url } = startOAuth(userId, { loginHint });
         return reply.code(200).send({ url });
       },
     );
