@@ -141,3 +141,51 @@ describe('number → command translation (before enqueue)', () => {
     expect((item.payload.text as { body: string }).body).toBe('שלום');
   });
 });
+
+// ── Swipe-reply / long-press → Reply. Green API delivers this as
+//    typeMessage='quotedMessage'; before the fix the extractor returned null
+//    and the whole ETA / messageRefs chain was silently dropped.
+describe('quotedMessage (swipe-reply) — preserves text + stanzaId as context.id', () => {
+  function quotedWebhook(idMessage: string, text: string, stanzaId: string) {
+    return {
+      typeWebhook: 'incomingMessageReceived',
+      idMessage,
+      senderData: { chatId: '972501234567@c.us', sender: '972501234567@c.us' },
+      messageData: {
+        typeMessage: 'quotedMessage',
+        extendedTextMessageData: { text },
+        quotedMessage: { stanzaId, typeMessage: 'extendedTextMessage' },
+      },
+    };
+  }
+
+  it('reply text is extracted and stanzaId is threaded as context.id', async () => {
+    const res = await post(quotedWebhook('QR1', 'חצי שעה', 'BAE5F1ORIGWAMID'));
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(enqueueInbound).toHaveBeenCalledTimes(1);
+    const item = enqueueInbound.mock.calls[0][0] as { payload: Record<string, unknown> };
+    expect(item.payload.type).toBe('text');
+    expect((item.payload.text as { body: string }).body).toBe('חצי שעה');
+    expect((item.payload.context as { id: string }).id).toBe('BAE5F1ORIGWAMID');
+    expect(processInbound).toHaveBeenCalledTimes(1);
+  });
+
+  it('older schema variant (textMessageData.textMessage) still works', async () => {
+    const res = await post({
+      typeWebhook: 'incomingMessageReceived',
+      idMessage: 'QR2',
+      senderData: { chatId: '972501234567@c.us', sender: '972501234567@c.us' },
+      messageData: {
+        typeMessage: 'quotedMessage',
+        textMessageData: { textMessage: '30 דקות' },
+        quotedMessage: { stanzaId: 'ORIG2' },
+      },
+    });
+    await flush();
+    expect(res.statusCode).toBe(200);
+    const item = enqueueInbound.mock.calls[0][0] as { payload: Record<string, unknown> };
+    expect((item.payload.text as { body: string }).body).toBe('30 דקות');
+    expect((item.payload.context as { id: string }).id).toBe('ORIG2');
+  });
+});

@@ -51,6 +51,8 @@ interface Extracted {
   kind: 'text' | 'audio';
   text?: string;
   downloadUrl?: string;
+  /** stanzaId of the message the user swipe-replied to, when present. */
+  quotedStanzaId?: string;
 }
 
 /** Sender phone in digits (no @c.us / @g.us suffix). */
@@ -73,6 +75,21 @@ function extractMessage(body: Record<string, unknown>): Extracted | null {
   if (type === 'extendedTextMessage') {
     const t = (md.extendedTextMessageData as Record<string, unknown> | undefined)?.text;
     return { kind: 'text', text: (t as string) ?? '' };
+  }
+  // A WhatsApp swipe-reply / long-press → Reply arrives with typeMessage='quotedMessage'.
+  // The reply text lives in extendedTextMessageData.text (older schema variants use
+  // textMessageData.textMessage), and the original message's id is in
+  // quotedMessage.stanzaId. Threading stanzaId through as `context.id` restores parity
+  // with Meta (where the same UX arrives as a plain text with context.id) so
+  // messageRefs — and every await/quoted-reply flow built on it (ETA prompt,
+  // finished_followup, active-inspection routing) — keeps working under Green API.
+  if (type === 'quotedMessage') {
+    const t =
+      (md.extendedTextMessageData as Record<string, unknown> | undefined)?.text ??
+      (md.textMessageData as Record<string, unknown> | undefined)?.textMessage;
+    const qm = md.quotedMessage as Record<string, unknown> | undefined;
+    const stanzaId = (qm?.stanzaId as string) || undefined;
+    return { kind: 'text', text: (t as string) ?? '', quotedStanzaId: stanzaId };
   }
   if (type === 'audioMessage' || type === 'voiceMessage') {
     const fd = (md.fileMessageData as Record<string, unknown> | undefined) ?? {};
@@ -126,6 +143,11 @@ export async function greenapiWebhookRoutes(app: FastifyInstance) {
         log.error({ err, from }, 'PendingChoice resolve failed — using raw text');
       }
       payload = { type: 'text', from, text: { body: resolvedText } };
+      // Preserve the quoted-message reference so processInbound can pass
+      // it as `quotedWamid` (same shape Meta uses via `messages[].context.id`).
+      if (extracted.quotedStanzaId) {
+        payload.context = { id: extracted.quotedStanzaId };
+      }
     } else {
       // Audio: Green API gives a direct, pre-authorized downloadUrl. voice.ts uses
       // it (bypassing the Meta two-step) via the additive line in processInbound.

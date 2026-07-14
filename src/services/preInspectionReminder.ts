@@ -23,7 +23,6 @@ import { sendButtonMessage } from '../whatsapp/sender';
 import { recordTaskFieldRef } from './messageRefs';
 import { moduleLogger } from '../utils/logger';
 import { formatShortDateTimeIL } from '../ai/inspectionFormatters';
-import { buildInlineConfigLink } from './owntracksProvisioning';
 
 const log = moduleLogger('preInspectionReminder');
 
@@ -165,18 +164,11 @@ export function formatPreReminderCard(row: DuePreReminderRow): string {
  * Throws on send failure — do NOT stamp (retryable on next tick).
  */
 export async function sendAndStampPreReminder(row: DuePreReminderRow): Promise<void> {
-  let body = formatPreReminderCard(row);
+  const body = formatPreReminderCard(row);
 
-  // Safety net: append the idempotent OwnTracks link so the worker can confirm
-  // tracking is live before they leave. Phrased as optional (the app should already
-  // be running). Omitted silently when the worker has no active provisioning (never
-  // a broken link). Best-effort — must never block the reminder.
-  try {
-    const link = await buildInlineConfigLink(row.workerId);
-    if (link) body += `\n\n📍 המעקב לא פעיל? ${link}`;
-  } catch (err) {
-    log.error({ err, workerId: row.workerId }, 'buildInlineConfigLink (pre-reminder) failed — continuing');
-  }
+  // The OwnTracks link is intentionally NOT included here — the pre-reminder is
+  // an FYI, not a "leave now" trigger. The link belongs on the DEPARTED message,
+  // where opening the app + keeping it running in the background actually matters.
 
   log.info({ taskFieldId: row.taskFieldId }, 'pre-reminder send — attempting');
 

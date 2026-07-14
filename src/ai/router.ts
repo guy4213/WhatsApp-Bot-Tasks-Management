@@ -2434,14 +2434,21 @@ async function performTransition(
     await setActiveInspection(user.phone, taskFieldId, new Date().toISOString(), {
       awaiting: 'status_eta_prompt',
     });
-    // Safety net: append the idempotent OwnTracks link so a worker whose tracking
-    // drifted (app closed, or nudged off Move) can restore it in one tap. Phrased
-    // as optional — the app should already be running. Omitted silently when the
-    // worker has no active provisioning (never a broken link). Best-effort.
+    // Append the idempotent OwnTracks config link — the DEPARTED reply is the
+    // ONLY message that carries it. Tapping the link opens the tracking app on
+    // the worker's phone and applies MOVE mode; the worker MUST keep the app
+    // running in the background during the drive for the location to update.
+    // Omitted silently when the worker has no active provisioning (never a
+    // broken link). Best-effort — must never block the ETA prompt.
     let departedBody = departedEtaPrompt();
     try {
       const link = await buildInlineConfigLink(user.id);
-      if (link) departedBody += `\n\n📍 המעקב לא פעיל? ${link}`;
+      if (link) {
+        departedBody +=
+          '\n\n📍 פתח את אפליקציית המעקב:\n' +
+          link +
+          '\nחשוב: השאר את האפליקציה פועלת ברקע במהלך הנסיעה — כך המיקום שלך מתעדכן ללקוח.';
+      }
     } catch (err) {
       log.error({ err, workerUserId: user.id }, 'buildInlineConfigLink (DEPARTED) failed — continuing');
     }
