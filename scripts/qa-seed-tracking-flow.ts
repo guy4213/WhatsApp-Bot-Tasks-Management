@@ -24,7 +24,7 @@ const INSPECTION_CODE = '9'; // radiation — קרינה אלקטרומגנטי�
 const CUSTOMER_ID = 'qa-tracking-flow-guy';
 const TASK_ID = 'qa-tracking-flow-guy-task';
 
-const SCHEDULED_LOCAL = '2026-07-14 10:30'; // Asia/Jerusalem
+const SCHEDULED_LOCAL = '2026-07-14 11:20'; // Asia/Jerusalem
 const DURATION_MIN = 60;
 
 const CONTACT_NAME = 'גיא פרנסס';
@@ -81,6 +81,13 @@ async function main() {
     console.log(`Customer upserted: ${CUSTOMER_ID}`);
 
     // 3. Remove any prior QA rows for this task id (idempotent re-run).
+    //    Order matters: children (TrackingSession, WhatsappCustomerNotification,
+    //    WorkerLiveLocation is worker-keyed not tf-keyed) → then TaskField.
+    await client.query(
+      `DELETE FROM "TrackingSession"
+        WHERE "taskFieldId" IN (SELECT id FROM "TaskField" WHERE "taskId" = $1)`,
+      [TASK_ID],
+    );
     await client.query(
       `DELETE FROM "WhatsappCustomerNotification"
         WHERE "taskFieldId" IN (SELECT id FROM "TaskField" WHERE "taskId" = $1)`,
@@ -91,7 +98,7 @@ async function main() {
       [TASK_ID],
     );
     if (deletedTf.rowCount) {
-      console.log(`Removed ${deletedTf.rowCount} prior TaskField row(s).`);
+      console.log(`Removed ${deletedTf.rowCount} prior TaskField row(s) (+ its TrackingSession & CustomerNotification rows).`);
     }
 
     // 4. Upsert the Task.
