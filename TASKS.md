@@ -89,6 +89,32 @@ Conventions:
 
 ---
 
+## 4.21 OwnTracks — הפעלה אוטומטית ללא התעסקות של העובד (2026-07-13)
+
+**Status:** DONE (local, committed; PR פתוח ל-main).
+
+**What to do:** לוודא שהעובד תמיד ב-Move בלי שהשרת יזום שינוי מצב (אין ערוץ כזה — לא MQTT, לא Traccar). שני שינויים: (1) `monitoring: 2` ב-`.otrc`; (2) לינק inline idempotent בהודעות רלוונטיות כרשת ביטחון. `monitoring` הוא הגדרה שמורה.
+
+**Definition of Done:** `.otrc` עם `monitoring: 2` (Move); סיסמה דטרמיניסטית (מודל C, HMAC) עם dual-auth שלא שובר עובדים קיימים; `buildInlineConfigLink` (null אם אין provisioning); לינק ב-"יצאתי" + בתזכורת; תזכורת סגירת אפליקציה בבדיקה האחרונה של היום; `preflight` fail-fast ל-`OWNTRACKS_CONFIG_SECRET`; טסטים; docs. **לא** MQTT/Traccar/pending-cmd/כפתור; **לא** נגיעה ב-TrackingSession/WorkerLiveLocation/דף מעקב/ETA.
+
+**Files changed:**
+- `src/routes/owntracksPoc.ts` — `.otrc` דרך `buildOtrc` (**monitoring 1→2**, באג פרודקשן: היה Significant); route חדש `GET /oi?c=<blob>` (302 לסכמת inline; query param כי ה-blob ~375 תווים > maxParamLength).
+- `src/services/owntracksProvisioning.ts` — `deriveOwntracksPassword` (HMAC), `buildOtrc`/`otrcToInlineScheme`/`otrcToHttpsLink`, `buildInlineConfigLink`, `hasActiveProvisioning`; `consumeProvisioning` → סיסמה דטרמיניסטית.
+- `src/services/workerLocation.ts` — `verifyWorkerCredentials` dual-auth (HMAC דטרמיניסטי + bcrypt legacy) → מיגרציה בלי 401.
+- `src/services/inspectionsQueries.ts` — `countOpenInspectionsForWorkerOnDate` (זיהוי בדיקה אחרונה של היום).
+- `src/ai/router.ts` — לינק ב-DEPARTED; תזכורת סגירה ב-FINISHED האחרון (gated ב-provisioning). *(router — QA מוגבר.)*
+- `src/services/preInspectionReminder.ts` — לינק בכרטיס התזכורת.
+- `src/config/preflight.ts` — `OWNTRACKS_CONFIG_SECRET` fail-fast בפרודקשן.
+- `src/scripts/owntracksLink.ts` + `package.json` (`owntracks:link`) — הדפסת לינק אמיתי לבדיקה בפרודקשן.
+- `.env.example` §10 + `docs/OWNTRACKS_PROVISIONING.md` — מפתח קריטי + כל הזרימה.
+- טסטים: `owntracksAutoActivation`, `owntracksInlineRoute`, עדכון `owntracksConfig`/`owntracksProvisioning`.
+
+**Tests run:** `npx tsc --noEmit` נקי. 54 טסטי OwnTracks ירוקים. רגרסיה: `preInspectionReminder` + 5 קבצי router של status-flow (routerActiveInspection/Inspections/PreReminderTap/WorkerFreeText/DaySummary/EnableTracking) עברו בבידוד (149 טסטים) — השינויים ב-router הם no-op כשאין env של OwnTracks (buildInlineConfigLink→null, hasActiveProvisioning→false). CI: נוסף step ייעודי ל-OwnTracks.
+
+**Deviations:** אימות מול התיעוד גילה ש-`monitoring: 1 = Significant`, ו-Move הוא **`2`** — ההנחיה המקורית וגם הקוד הקיים היו שגויים (באג פרודקשן). הלינק ה-inline נשלח כעטיפת HTTPS (`/oi?c=`) ולא כסכמה גולמית, כי WhatsApp לא הופך `owntracks://` ללחיץ ו-Fastify חוסם path param מעל 100 תווים.
+
+**What remains:** להזין `OWNTRACKS_CONFIG_SECRET` בפרודקשן; להריץ `npm run owntracks:link` ולסרוק על הטלפון (Move) לפני/אחרי מיזוג.
+
 ## 4.20 Auto-provisioning OwnTracks לעובדים (2026-07-12)
 
 **סטטוס כללי:** DONE (local, uncommitted). כל PROV-T1..PROV-T7 מומשו. בדיקות: 32 חדשות עברו; `npx tsc --noEmit` נקי; מיגרציה 018 רצה בפרודקשן. תיעוד מלא ב-[docs/OWNTRACKS_PROVISIONING.md](docs/OWNTRACKS_PROVISIONING.md). משתמשים לא נבנו מחדש — הם כבר קיימים ב-`User`. השורה הקיימת מ-`seedWorkerDeviceIdentity.ts` (`workerKey='guy'`) ממשיכה לעבוד דרך fallback ה-ENV — לא נשברה. אין סוד גולמי ב-DB — הסיסמה נוצרת בזיכרון בזמן צריכת ה-token, נשמרת bcrypt hash בלבד, ומוזרקת פעם אחת ל-`.otrc` שחוזר לאפליקציה.

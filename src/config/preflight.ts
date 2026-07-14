@@ -29,6 +29,20 @@ const REQUIRED: Required[] = [
           ? 'is too short (use at least 32 chars / 16 random bytes)'
           : null,
   },
+  {
+    // Master key for deterministic OwnTracks passwords (model C). Critical: a leak
+    // lets anyone forge any worker's location-tracking password, and rotating it
+    // forces every worker to re-provision. Required in production (tracking is a
+    // prod feature); optional in dev.
+    key: 'OWNTRACKS_CONFIG_SECRET',
+    productionOnly: true,
+    validate: (v) =>
+      v === 'your_owntracks_config_secret_here'
+        ? 'is still the placeholder — generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+        : v.length < 32
+          ? 'is too short (use at least 32 chars / 16 random bytes) — it derives every worker\'s OwnTracks password'
+          : null,
+  },
 ];
 
 export function runPreflight(): void {

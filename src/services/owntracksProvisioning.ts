@@ -94,6 +94,139 @@ export function getPublicBaseUrl(): string {
   return base.replace(/\/+$/, '');
 }
 
+// ── Deterministic password (model C) + shared .otrc builder ────────────────────
+
+/** `monitoring` value for OwnTracks MOVE mode (continuous tracking). NOTE: 1 is
+ *  SIGNIFICANT, not Move — a long-standing prod bug fixed here. See booklet
+ *  https://owntracks.org/booklet/features/location/ (quiet -1 / manual 0 /
+ *  significant 1 / move 2). */
+export const OWNTRACKS_MONITORING_MOVE = 2;
+
+/**
+ * The master key for deterministic OwnTracks passwords. CRITICAL:
+ *  - A leak lets anyone forge ANY worker's password (username = workerKey is public).
+ *  - Rotating it invalidates every worker's password → all workers must re-provision.
+ * preflight fails fast when it's missing under NODE_ENV=production.
+ */
+export function getConfigSecret(): string {
+  const s = (process.env.OWNTRACKS_CONFIG_SECRET ?? '').trim();
+  if (!s) throw new Error('OWNTRACKS_CONFIG_SECRET is not set');
+  return s;
+}
+
+/**
+ * Deterministic per-worker OwnTracks password (model C):
+ *   password = base64url(HMAC-SHA256(OWNTRACKS_CONFIG_SECRET, workerKey)).
+ * No random, no plaintext at rest — the bot recomputes it whenever it (re)builds a
+ * config link, and verifyWorkerCredentials recomputes it to authenticate. This is
+ * what makes the inline config link idempotent (the same link, forever).
+ */
+export function deriveOwntracksPassword(workerKey: string): string {
+  return crypto.createHmac('sha256', getConfigSecret()).update(workerKey).digest('base64url');
+}
+
+/**
+ * The canonical OwnTracks `.otrc` (HTTP private, MOVE mode). SINGLE SOURCE OF
+ * TRUTH for BOTH the /owntracks/config/:token endpoint (initial provisioning) and
+ * the inline config link (idempotent safety net), so the two can never drift.
+ */
+export function buildOtrc(cfg: { workerKey: string; trackerId: string; hostUrl: string; password: string }): Record<string, unknown> {
+  return {
+    _type: 'configuration',
+    mode: 3,                                 // HTTP private
+    url: cfg.hostUrl,                        // ${PUBLIC_BASE_URL}/owntracks
+    auth: true,
+    username: cfg.workerKey,
+    password: cfg.password,
+    tid: cfg.trackerId,
+    deviceId: cfg.workerKey,
+    monitoring: OWNTRACKS_MONITORING_MOVE,   // 2 = MOVE (was 1 = SIGNIFICANT — the prod bug)
+    locatorInterval: 15,
+    locatorDisplacement: 50,
+    pubExtendedData: true,
+  };
+}
+
+/** Standard-base64 of the `.otrc` → the raw OwnTracks inline scheme URL (what the
+ *  app actually consumes). openssl-style base64, per the booklet. */
+export function otrcToInlineScheme(otrc: Record<string, unknown>): string {
+  const b64 = Buffer.from(JSON.stringify(otrc), 'utf8').toString('base64');
+  return `owntracks:///config?inline=${b64}`;
+}
+
+/** base64url of the `.otrc` → the CLICKABLE HTTPS wrapper the `GET /oi` route
+ *  302-redirects into the inline scheme. WhatsApp does not linkify custom
+ *  `owntracks://` schemes (same reason `/o/:token` exists), so messages carry this.
+ *  The blob rides in a QUERY param, not a path segment: the real .otrc base64-encodes
+ *  to ~375 chars, well over Fastify's default maxParamLength (100). */
+export function otrcToHttpsLink(publicBaseUrl: string, otrc: Record<string, unknown>): string {
+  const blob = Buffer.from(JSON.stringify(otrc), 'utf8').toString('base64url');
+  return `${publicBaseUrl}/oi?c=${blob}`;
+}
+
+/**
+ * Build the idempotent, WhatsApp-clickable OwnTracks config link for a worker, or
+ * null when the worker has no ACTIVE, provisioned device identity (so callers never
+ * send a broken link — they simply omit it). Safe to call on every relevant message:
+ * the deterministic password means the link is stable and re-applies MOVE mode on
+ * every tap. Returns the HTTPS `/oi/...` wrapper (the raw scheme isn't clickable in
+ * WhatsApp).
+ */
+export async function buildInlineConfigLink(workerUserId: string): Promise<string | null> {
+  let publicBaseUrl: string;
+  let password: string;
+  try {
+    publicBaseUrl = getPublicBaseUrl();          // PUBLIC_BASE_URL unset → no link
+  } catch {
+    return null;
+  }
+
+  const { rows } = await pool.query<{ workerKey: string; trackerId: string | null }>(
+    `SELECT "workerKey", "trackerId"
+       FROM "WorkerDeviceIdentity"
+      WHERE "workerUserId" = $1
+        AND "isActive" = true
+        AND "revokedAt" IS NULL
+        AND "provisionedAt" IS NOT NULL
+      LIMIT 1`,
+    [workerUserId],
+  );
+  const row = rows[0];
+  if (!row || !row.trackerId) return null;       // not provisioned → no link
+
+  try {
+    password = deriveOwntracksPassword(row.workerKey);  // secret unset → no link
+  } catch {
+    return null;
+  }
+
+  const otrc = buildOtrc({
+    workerKey: row.workerKey,
+    trackerId: row.trackerId,
+    hostUrl: `${publicBaseUrl}/owntracks`,
+    password,
+  });
+  return otrcToHttpsLink(publicBaseUrl, otrc);
+}
+
+/**
+ * True when the worker has an ACTIVE, provisioned OwnTracks device identity — i.e.
+ * they are actually being tracked. Used to gate messages (safety-net link,
+ * close-the-app reminder) so we never nudge a worker who isn't set up.
+ */
+export async function hasActiveProvisioning(workerUserId: string): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM "WorkerDeviceIdentity"
+      WHERE "workerUserId" = $1
+        AND "isActive" = true
+        AND "revokedAt" IS NULL
+        AND "provisionedAt" IS NOT NULL
+      LIMIT 1`,
+    [workerUserId],
+  );
+  return rows.length > 0;
+}
+
 // ── createProvisioning ────────────────────────────────────────────────────────
 
 export async function createProvisioning(workerUserId: string): Promise<CreateProvisioningResult> {
@@ -227,8 +360,12 @@ export async function consumeProvisioning(token: string): Promise<OtrcPayload | 
       return null;
     }
 
-    // Generate password in memory; hash it; never persist the plaintext.
-    const plaintext = crypto.randomBytes(18).toString('base64url');
+    // Deterministic password (model C): derived from OWNTRACKS_CONFIG_SECRET +
+    // workerKey, NOT random — so the idempotent inline link rebuilds the exact same
+    // credential later. We still bcrypt-hash + store it: it keeps `passwordHash IS
+    // NOT NULL` (the "provisioned" signal) true and preserves the legacy bcrypt auth
+    // path as a belt-and-suspenders alongside the deterministic recompute path.
+    const plaintext = deriveOwntracksPassword(row.workerKey);
     const passwordHash = await bcrypt.hash(plaintext, 10);
 
     await client.query(

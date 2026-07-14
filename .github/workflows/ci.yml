@@ -65,3 +65,16 @@ jobs:
           src/__tests__/senderTemplateButtons.test.ts
           src/__tests__/voice.test.ts
           src/__tests__/integration.test.ts
+
+      # OwnTracks auto-activation scope — the files this task created or modified.
+      # (Router status-flow tests are verified locally in isolation; they load the
+      # ~300KB router and can't share the same heap here — same pre-existing OOM.)
+      - name: Test (OwnTracks auto-activation scope)
+        run: >-
+          npx vitest run
+          src/__tests__/owntracksAutoActivation.test.ts
+          src/__tests__/owntracksInlineRoute.test.ts
+          src/__tests__/owntracksConfig.test.ts
+          src/services/__tests__/owntracksProvisioning.test.ts
+          src/__tests__/workerLocation.test.ts
+          src/__tests__/preInspectionReminder.test.ts

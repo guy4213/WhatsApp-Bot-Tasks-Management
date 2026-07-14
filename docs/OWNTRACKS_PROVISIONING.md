@@ -164,3 +164,47 @@ PUBLIC_BASE_URL=https://bot.example.com   # ← REQUIRED once auto-provisioning 
 ```
 
 `POC_OWNTRACKS_USERS` נשאר, אבל מסומן deprecated. שורות legacy (כמו `guy` מה-POC) ממשיכות לעבוד דרך fallback עד ל-re-provisioning.
+
+---
+
+## הפעלה אוטומטית ללא התעסקות של העובד (2026-07-13)
+
+> חקרנו את בעיית ההפעלה/כיבוי מרחוק. המסקנה מהתיעוד הרשמי: **אין ערוץ שדרכו השרת יכול לשנות מצב מרחוק** — לא MQTT (ב-iOS מתנתק ברקע) ולא Traccar. **אבל אין צורך:** `monitoring` הוא הגדרה שמורה — נשארת גם אחרי סגירה ופתיחה מחדש. הפתרון: לוודא שהעובד תמיד ב-Move, ולתת לו רשת ביטחון בלחיצה אחת.
+
+### 1. `monitoring: 2` = Move (תיקון באג פרודקשן)
+
+הערכים הרשמיים ([booklet](https://owntracks.org/booklet/features/location/)): `-1` Quiet · `0` Manual · **`1` Significant** · **`2` Move**. הקוד רץ ב-`monitoring: 1` (Significant — עדכונים דלילים, במיוחד ב-iOS) בזמן שההערה אמרה "move". תוקן ל-**`2`** ב-`buildOtrc` (מקור-אמת יחיד ל-`.otrc`, ב-`owntracksProvisioning.ts`). זה מסביר את תלונות "המיקום לא מתעדכן".
+
+### 2. סיסמה דטרמיניסטית (מודל C) — `OWNTRACKS_CONFIG_SECRET`
+
+`password = base64url(HMAC-SHA256(OWNTRACKS_CONFIG_SECRET, workerKey))`. ללא אקראיות → הבוט משחזר את הסיסמה בכל רגע (בלי לשמור סיסמה גולמית), וכך הלינק ה-inline הוא **idempotent**.
+
+⚠️ **`OWNTRACKS_CONFIG_SECRET` הוא מפתח-על קריטי:**
+- **דליפה** = כל אחד מייצר סיסמאות של כל עובד (שמות המשתמש פומביים). לא לשמור ב-git, לא ללוגים.
+- **החלפה** = הסיסמה של **כל** העובדים משתנה → כולם צריכים provisioning מחדש (או לחיצה על לינק inline חדש). לא להחליף סתם.
+- **`preflight` נכשל מיידית** אם חסר תחת `NODE_ENV=production`.
+
+### 3. מיגרציה של עובדים קיימים — dual-auth (בלי downtime)
+
+`verifyWorkerCredentials` מקבל **אחד משניים**: (1) הסיסמה הדטרמיניסטית (חישוב HMAC מחדש, ללא bcrypt) — למכשירים חדשים/שהוגדרו מחדש; (2) ה-bcrypt hash הישן — לעובדים קיימים שעדיין על הסיסמה הישנה. עובד קיים ממשיך לעבוד (נתיב 2, בלי 401) ועובר ל-C + Move ברגע שהוא לוחץ על לינק inline. **אין מיגרציית DB, אין re-provisioning כפוי.**
+
+### 4. לינק inline idempotent — רשת הביטחון
+
+`buildInlineConfigLink(workerUserId)` → `https://<host>/oi?c=<base64url(.otrc)>`, או `null` אם אין provisioning פעיל (לעולם לא לינק שבור). ה-route `GET /oi` עושה 302 ל-`owntracks:///config?inline=<base64>` — פותח את האפליקציה **וגם** מגדיר אותה מחדש ל-Move בכל לחיצה. **הערה:** WhatsApp לא הופך `owntracks://` ללחיץ, ולכן עוטפים ב-HTTPS (כמו `/o/:token`). ה-blob ב-**query param** (`?c=`) ולא path — ה-`.otrc` האמיתי מקודד ל-~375 תווים, מעל `maxParamLength` של Fastify (100).
+
+הלינק מצורף (רק אם provisioning פעיל, בניסוח "רשת ביטחון, לא חובה") ל: **הודעת "יצאתי"** (`router.ts`/`performTransition`) ו-**כרטיס התזכורת** (`preInspectionReminder.ts`).
+
+### 5. תזכורת לסגור את האפליקציה
+
+בסיום ה-`TaskField` **האחרון הפתוח של היום** (`countOpenInspectionsForWorkerOnDate === 0`) — ורק אם ל-עובד provisioning פעיל — נשלחת "סיימת להיום 👏 / אפשר לסגור את אפליקציית המעקב." לא אחרי כל "סיימתי" (זיהוי אמין מונע תזכורת מוקדמת מדי).
+
+### 6. יצירת לינק אמיתי לבדיקה
+
+```bash
+npm run owntracks:link -- <workerUserId | workerKey>
+```
+מריצים **בפרודקשן** (צריך `OWNTRACKS_CONFIG_SECRET` + `PUBLIC_BASE_URL` + DB). מדפיס את הלינק ה-HTTPS + הסכמה הגולמית + ה-`.otrc` (לוודא `monitoring: 2`). המפתח לא עוזב את הפרודקשן.
+
+### מה לא נעשה
+
+לא MQTT/broker, לא Traccar, לא כפתור דפדפן/geolocation, לא `pending-cmd`. לא נגענו ב-`TrackingSession`/`WorkerLiveLocation`/דף המעקב/ETA.

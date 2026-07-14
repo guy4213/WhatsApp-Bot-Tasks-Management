@@ -25,11 +25,21 @@
  * route ALWAYS acks 200 with `[]`, and a failure here must not back up the
  * phone's upload queue. The caller decides whether to log + swallow.
  */
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { pool } from '../db/connection';
 import { moduleLogger } from '../utils/logger';
+import { deriveOwntracksPassword } from './owntracksProvisioning';
 
 const log = moduleLogger('worker-location');
+
+/** Constant-time string compare; false (not throw) on length mismatch. */
+function timingSafeStrEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
 
 // ---------------------------------------------------------------------------
 // Credential cache — keeps bcrypt off the hot OwnTracks ping path.
@@ -162,9 +172,26 @@ export async function verifyWorkerCredentials(
     credentialCache.set(workerKey, cached);
   }
 
+  // Path 1 — deterministic (model C): recompute HMAC(OWNTRACKS_CONFIG_SECRET,
+  // workerKey) and constant-time compare. Cheap (no bcrypt); this is how
+  // inline-reconfigured and newly-provisioned devices authenticate. Skipped when
+  // the secret is unset (dev) → falls through to the legacy bcrypt path.
+  try {
+    if (timingSafeStrEqual(plaintext, deriveOwntracksPassword(workerKey))) {
+      log.debug({ workerKey }, 'verifyWorkerCredentials: success (deterministic)');
+      return { workerUserId: cached.workerUserId };
+    }
+  } catch {
+    /* OWNTRACKS_CONFIG_SECRET not set — skip the deterministic path */
+  }
+
+  // Path 2 — legacy bcrypt hash: pre-model-C devices still run the old random
+  // password whose bcrypt hash is stored. This is what keeps existing workers
+  // authenticating (no 401 gap) until they tap a new inline link and flip to the
+  // deterministic password + MOVE mode.
   const ok = await bcrypt.compare(plaintext, cached.passwordHash);
   if (ok) {
-    log.debug({ workerKey }, 'verifyWorkerCredentials: success');
+    log.debug({ workerKey }, 'verifyWorkerCredentials: success (legacy hash)');
     return { workerUserId: cached.workerUserId };
   }
 
