@@ -8,6 +8,8 @@ import { greenapiWebhookRoutes } from './routes/greenapiWebhook';
 import { owntracksPocRoutes } from './routes/owntracksPoc';
 import { trackingRoutes } from './routes/tracking';
 import { trackingPageRoutes } from './routes/trackingPage';
+import { microsoftCalendarRoutes } from './routes/microsoftCalendar';
+import { microsoftGraphWebhookRoutes } from './routes/microsoftGraphWebhook';
 import { startScheduler } from './scheduler';
 
 declare module 'fastify' {
@@ -49,6 +51,8 @@ export async function buildApp() {
   await app.register(owntracksPocRoutes);
   await app.register(trackingRoutes);
   await app.register(trackingPageRoutes);
+  await app.register(microsoftCalendarRoutes);
+  await app.register(microsoftGraphWebhookRoutes);
 
   // ── Liveness probe ────────────────────────────────────────────────────────
   app.get('/health/live', async () => ({ status: 'ok' }));

@@ -11,6 +11,7 @@ import { runDigestDispatcher }          from './jobs/digestDispatcher';
 import { runAssignmentCardNotifier }    from './jobs/assignmentCardNotifier';
 import { runLeadAssignmentNotifier }    from './jobs/leadAssignmentNotifier';
 import { runPreInspectionReminderJob }  from './jobs/preInspectionReminder';
+import { runGraphSubscriptionRenewalJob } from './jobs/graphSubscriptionRenewal';
 import { recoverInboundQueue }          from '../routes/webhook';
 
 const log = moduleLogger('scheduler');
@@ -32,6 +33,7 @@ const JOB_LOCK_IDS = {
   assignmentCardNotifier:  1009,
   leadAssignmentNotifier:  1010,
   preInspectionReminder:   1011,
+  graphSubscriptionRenewal: 1012,
 } as const;
 
 async function withJobLock(lockId: number, name: string, fn: () => Promise<void>): Promise<void> {
@@ -106,6 +108,11 @@ export function startScheduler(): void {
   // Dedup via WhatsappLeadNotification (migration 010). Advisory lock prevents
   // concurrent double-sends across instances.
   cron.schedule('*/2 * * * *', safe('leadAssignmentNotifier', JOB_LOCK_IDS.leadAssignmentNotifier, runLeadAssignmentNotifier), { timezone: TZ });
+
+  // OUTLOOK-D: every 12 hours, renew Microsoft Graph subscriptions expiring within 48h.
+  // Advisory lock 1012 prevents concurrent double-renewals across instances.
+  // Renew Microsoft Graph subscriptions that expire within 48h. Every 12h.
+  cron.schedule('0 */12 * * *', safe('graphSubscriptionRenewal', JOB_LOCK_IDS.graphSubscriptionRenewal, runGraphSubscriptionRenewalJob), { timezone: TZ });
 
   // D2-T15: every 2 minutes, poll for TaskField rows with scheduledStartAt in
   // the next 60 minutes and preReminderSentAt IS NULL. Send the pre-inspection

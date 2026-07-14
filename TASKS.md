@@ -72,6 +72,64 @@ Conventions:
 
 ---
 
+## 4.22 OUTLOOK-1 — Microsoft Graph + Outlook Calendar: OAuth, subscription, webhook, data-exploration (2026-07-14)
+
+**Status:** DONE (local, uncommitted, migration applied). **חלק 1 בלבד — READ-ONLY + חקר דאטא. אין עדיין יצירת TaskField ואין סינון "משימת שטח" — זה משימת המשך.**
+
+**What to do:** לחבר את הבוט לחשבון Outlook יחיד (יורם — `User.id = c7f229a5-f182-4f85-8be7-2465fb3ca389`, לא קשיח בקוד — מועבר כ-query param בזמן ה-linking), למשוך אירועים מהיומן דרך Microsoft Graph, להירשם ל-Change Notifications, ולשמור כל התראה + snapshot של האירוע לחקר ידני של מבנה הדאטא.
+
+**Definition of Done:** אינטגרציה delegated (`/me/*` בלבד) עם AES-256-GCM על refresh token; OAuth Authorization-Code עם signed-state (HMAC-SHA256 של `INTERNAL_API_SECRET`, TTL 10 דק'); `getAccessToken(userId)` שאינו חושף טוקנים; שירות calendar read-only עם `listEventsAsUser` / `getEventAsUser` / `normalizeEvent`; ניהול Subscription (create/renew/delete/lookup) עם auto-renew כל 12 שעות; ראוטים פנימיים מוגנים ב-`x-internal-secret` (למעט OAuth callback שהוא ציבורי — הפרדת plugin encapsulation ב-Fastify); ראוט ציבורי `POST /webhook/microsoft-graph` שמאמת `clientState` בהשוואה בזמן קבוע, מחזיר 202 מיידית, שומר כל notification ל-`MicrosoftGraphEventLog` ומושך snapshot של האירוע ב-async; endpoint חקר `/microsoft/calendar/debug` שמצרף notifications + upcoming events.
+
+**Files changed:**
+- `src/db/migrations/020_microsoft_graph.sql` (חדש) — 3 טבלאות: `MicrosoftAccount`, `MicrosoftGraphSubscription`, `MicrosoftGraphEventLog`. Idempotent, `gen_random_uuid()`, RLS deny-all (סגנון של 019).
+- `src/services/microsoftAuth.ts` (חדש) — `startOAuth`, `completeOAuth`, `getAccessToken`. AES-256-GCM פרטי (12B IV, 16B tag). State signing/verification. Refresh-token rotation מטופל אוטומטית.
+- `src/services/graphCalendar.ts` (חדש) — `listEventsAsUser` (`/me/calendarView` עם date range או `/me/events`), `getEventAsUser`, `normalizeEvent`. תמיכה ב-`$search` עם `ConsistencyLevel: eventual`. 403/404 → הודעות עברית.
+- `src/services/graphSubscriptions.ts` (חדש) — `createEventsSubscription` (idempotent — מחזיר קיים כשעדיין תקף), `renewSubscription`, `deleteSubscription`, `getSubscriptionByGraphId`. חלון תפוגה 4225 דק' (Graph max - 5 דק').
+- `src/scheduler/jobs/graphSubscriptionRenewal.ts` (חדש) — cron כל 12 שעות, מחדש subscriptions שיפוגו ב-48 שעות הבאות. Per-row try/catch.
+- `src/scheduler/index.ts` (edit — additive-only) — import + lock id `1012` + cron.schedule אחד.
+- `src/routes/microsoftCalendar.ts` (חדש) — plugin עם callback ציבורי + sub-plugin פנימי (`x-internal-secret`) שמכיל 6 endpoints. Fastify encapsulation מבטיח שה-hook חל רק על ה-sub-plugin.
+- `src/routes/microsoftGraphWebhook.ts` (חדש) — `POST /webhook/microsoft-graph`. Validation-token handshake, 202 לפני עיבוד, constant-time `clientState`, INSERT log row לכל notification, fetch snapshot ב-async, per-notification try/catch.
+- `src/app.ts` (edit — additive-only) — imports + 2 שורות `app.register`.
+- `.env.example` (edit) — נוספו `MS_TOKEN_ENCRYPTION_KEY` ו-`MS_WEBHOOK_CLIENT_STATE` כplaceholders.
+
+**Endpoints נוספו:**
+
+| Method | Path | Public/Internal | Guard |
+|---|---|---|---|
+| GET | `/microsoft/oauth/callback` | PUBLIC | none (browser redirect from Microsoft) |
+| POST | `/webhook/microsoft-graph` | PUBLIC | `clientState` echo verified constant-time |
+| GET | `/microsoft/oauth/start` | INTERNAL | `x-internal-secret` |
+| POST | `/microsoft/subscriptions/create` | INTERNAL | `x-internal-secret` |
+| POST | `/microsoft/subscriptions/:id/renew` | INTERNAL | `x-internal-secret` |
+| DELETE | `/microsoft/subscriptions/:id` | INTERNAL | `x-internal-secret` |
+| GET | `/microsoft/calendar/events` | INTERNAL | `x-internal-secret` |
+| GET | `/microsoft/calendar/events/:id` | INTERNAL | `x-internal-secret` |
+| GET | `/microsoft/calendar/debug` | INTERNAL | `x-internal-secret` |
+
+**Tests:** `npx tsc --noEmit` נקי; `npm run build` עבר. יחידות בדיקה תוכנתיות לא נוספו — אינטגרציית API חיצוני בדרך כלל אינה נבדקת mock-free באיטרציה הראשונה, וההתנהגות מאומתת דרך הבדיקה החיה שמופיעה בהוראות ההפעלה. **בדיקה חיה עדיין לא בוצעה — חוסמים על משתני סביבה ב-Entra (ראה מטה).**
+
+**עדכון BOT_CAPABILITIES.md:** אין. עדיין אין קיבולת גלויה למנהל/עובד — האינטגרציה כרגע פנימית (dev-tool בלבד). עדכון יגיע במשימה 4.23 כשאירועים יקושרו ל-`TaskField`.
+
+**Env vars שחסרים ב-`.env` ונחוצים לבדיקה החיה בלבד:**
+- `GRAPH_CLIENT_ID=daa9d05d-797b-4368-b363-f75db8d796a9`
+- `GRAPH_CLIENT_SECRET=<from Entra>`
+- `GRAPH_TENANT_ID=725ea9e6-faad-4df8-8d96-490bb8afaf95`
+- `GRAPH_REDIRECT_URI=<PUBLIC_BASE_URL>/microsoft/oauth/callback` (חייב להיות רשום גם ב-Entra Redirect URIs)
+- `MS_TOKEN_ENCRYPTION_KEY=<64 hex chars>` — הפק ב-`openssl rand -hex 32` או `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+- `MS_WEBHOOK_CLIENT_STATE=<random secret>` — הפק ב-`openssl rand -base64 32`
+
+**מה נותר (משימת המשך — OUTLOOK-2):**
+1. חקר בפועל של הדאטא שיתקבל מיורם דרך `/microsoft/calendar/debug` וזיהוי אילו שדות מבחינים אירוע-שטח (subject / categories / location / attendee).
+2. הגדרת חוקי סינון על בסיס החקר.
+3. שיוך אירוע Graph ל-`TaskField` (יצירת טבלת mapping או שדה חדש ב-`TaskField`).
+4. יצירה/עדכון/מחיקה אוטומטית של `TaskField` על בסיס אירועי יומן, כולל מניעת כפילויות.
+5. יכולות write ב-`graphCalendar.ts` (create/update/delete/respond) אם יידרש.
+6. עדכון `BOT_CAPABILITIES.md` כשקיבולת חדשה תוצג למשתמש קצה.
+
+**Deviations from spec:** אין. בהתאמה ל-CLAUDE.md — `Task.status` לא נכתב, `TaskField` לא נוצר, אין `JWT` / `RolesGuard` / `req.user.id` / `x-user-id`, זהות ה-linking עוברת כ-`?userId=<uuid>` דרך endpoint פנימי, refresh token מוצפן, tokens מעולם לא נחשפים ברשת/לוגים.
+
+---
+
 ## 4.21 FIX-DUE-1: dueDateReminder תופס גם משימות עם lead-time קצר (2026-07-13)
 
 **Status:** DONE (local, uncommitted).
