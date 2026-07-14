@@ -1,5 +1,20 @@
 # Project instructions
 
+## 0. Critical scripts (do NOT rename or move)
+
+- `scripts/RESETTASKFORTEST.ts` — resets a `TaskField` back to `CONFIRMED`
+  (clears every transitional stamp, TrackingSession, WhatsappCustomerNotification,
+  WhatsappMessageRef, ConversationContext, PendingChoice) so the full
+  tracking flow (pre-reminder → יצאתי → customer EN_ROUTE → OwnTracks + ETA →
+  הגעתי → סיימתי) can be re-tested WITHOUT deleting/recreating the row.
+  Usage: `npx tsx scripts/RESETTASKFORTEST.ts <taskFieldId> [--start HH:MM]`.
+  The uppercase name is intentional — it is a signal to humans that the file
+  is critical for QA. **Do not rename or move.**
+- `scripts/qa-seed-tracking-flow.ts` — creates the fictional radiation
+  TaskField used for QA (Task/Customer/TaskField for גיא פרנסס). Idempotent.
+- `scripts/qa-inspect-tracking-flow.ts` — read-only snapshot of the QA
+  TaskField + all reminder gates.
+
 ## 1. Source of truth
 
 `TASKS.md` is the source of truth for the build plan.

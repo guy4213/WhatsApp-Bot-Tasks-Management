@@ -5,9 +5,9 @@
  *   ETA prompt → "הגעתי" → "סיימתי".
  *
  * Usage:
- *   npx tsx scripts/qa-reset-tracking-flow.ts <taskFieldId> [--start '11:20']
+ *   npx tsx scripts/RESETTASKFORTEST.ts <taskFieldId> [--start '11:20']
  * דוגמא:
- *   npx tsx scripts/qa-reset-tracking-flow.ts d32f7ba4-5b81-4fd5-bb22-fec1a5dc81c8 --start 11:45
+ *   npx tsx scripts/RESETTASKFORTEST.ts d32f7ba4-5b81-4fd5-bb22-fec1a5dc81c8 --start 11:45
  * If --start is omitted, scheduledStartAt is left as-is. Time is Asia/Jerusalem,
  * on today's date.
  */
