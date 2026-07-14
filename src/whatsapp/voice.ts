@@ -26,6 +26,11 @@ const REQUEST_TIMEOUT  = 20_000;
 const WHISPER_URL      = 'https://api.openai.com/v1/audio/transcriptions';
 const WHISPER_MODEL    = 'whisper-1';
 const WHISPER_LANG     = 'he';
+// VOICE-7: optional ElevenLabs Scribe STT (stronger Hebrew than Whisper).
+// Active only when STT_PROVIDER=elevenlabs AND ELEVENLABS_API_KEY is set;
+// any Scribe failure falls back to Whisper so voice notes never regress.
+const SCRIBE_URL       = 'https://api.elevenlabs.io/v1/speech-to-text';
+const SCRIBE_MODEL     = 'scribe_v1';
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -91,6 +96,38 @@ export async function transcribeWithWhisper(audio: DownloadedAudio): Promise<str
   return respBody.toString('utf8').trim();
 }
 
+/**
+ * VOICE-7: POST multipart/form-data to ElevenLabs Scribe. Response is JSON
+ * ({ text, language_code, ... }) — returns the trimmed `text`. Non-2xx throws;
+ * the caller falls back to Whisper.
+ */
+export async function transcribeWithScribe(audio: DownloadedAudio): Promise<string> {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    throw new Error('ELEVENLABS_API_KEY is not set');
+  }
+
+  const filename = filenameForMime(audio.mimeType);
+  const { body, contentType } = buildMultipartBody([
+    { name: 'file', filename, contentType: audio.mimeType, value: audio.buffer },
+    { name: 'model_id', value: SCRIBE_MODEL },
+    { name: 'language_code', value: WHISPER_LANG },
+    { name: 'tag_audio_events', value: 'false' },
+  ]);
+
+  const { statusCode, body: respBody } = await httpPostRaw(SCRIBE_URL, body, {
+    'xi-api-key': apiKey,
+    'Content-Type': contentType,
+    'Content-Length': body.length.toString(),
+  });
+
+  if (statusCode < 200 || statusCode >= 300) {
+    throw new Error(`Scribe API error ${statusCode}: ${respBody.toString('utf8').slice(0, 300)}`);
+  }
+  const parsed = JSON.parse(respBody.toString('utf8')) as { text?: string };
+  return (parsed.text ?? '').trim();
+}
+
 export interface VoiceMessage {
   mediaId: string;
   from: string;
@@ -122,8 +159,12 @@ export async function handleVoiceMessage(msg: VoiceMessage): Promise<string | nu
   const { mediaId, from, auditLogId } = msg;
   log.info({ mediaId, from }, 'Voice message received');
 
-  if (!process.env.OPENAI_API_KEY) {
-    log.warn({ mediaId, from }, 'OPENAI_API_KEY not set — voice transcription disabled');
+  const scribeEnabled =
+    (process.env.STT_PROVIDER ?? '').toLowerCase() === 'elevenlabs' &&
+    !!process.env.ELEVENLABS_API_KEY;
+
+  if (!process.env.OPENAI_API_KEY && !scribeEnabled) {
+    log.warn({ mediaId, from }, 'No STT key set (OPENAI_API_KEY / ELEVENLABS) — voice transcription disabled');
     return null;
   }
 
@@ -138,16 +179,30 @@ export async function handleVoiceMessage(msg: VoiceMessage): Promise<string | nu
     return null;
   }
 
-  let transcript: string;
-  try {
-    transcript = await transcribeWithWhisper(audio);
-  } catch (err) {
-    log.error({ err, mediaId, from }, 'Voice transcription failed');
-    return null;
+  let transcript = '';
+  if (scribeEnabled) {
+    try {
+      transcript = await transcribeWithScribe(audio);
+      log.info({ mediaId, from }, 'Scribe transcription used');
+    } catch (err) {
+      log.warn({ err, mediaId, from }, 'Scribe failed — falling back to Whisper');
+    }
+  }
+  if (!transcript) {
+    if (!process.env.OPENAI_API_KEY) {
+      log.error({ mediaId, from }, 'Scribe failed and no OPENAI_API_KEY fallback');
+      return null;
+    }
+    try {
+      transcript = await transcribeWithWhisper(audio);
+    } catch (err) {
+      log.error({ err, mediaId, from }, 'Voice transcription failed');
+      return null;
+    }
   }
 
   if (!transcript) {
-    log.warn({ mediaId, from }, 'Empty transcript from Whisper');
+    log.warn({ mediaId, from }, 'Empty transcript from STT');
     return null;
   }
 

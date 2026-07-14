@@ -347,3 +347,62 @@ export async function getEventAsUser(
   const data = await res.json();
   return normalizeEvent(data);
 }
+
+// ── createEventAsUser ─────────────────────────────────────────────────────────
+
+export interface CreateEventInput {
+  subject: string;
+  /** ISO 8601 local wall time, e.g. "2026-07-15T10:00:00" (no Z). */
+  startIso: string;
+  /** ISO 8601 local wall time. */
+  endIso: string;
+  /** IANA timezone the start/end are expressed in. Default Asia/Jerusalem. */
+  timeZone?: string;
+  location?: string | null;
+  /** Plain-text body/notes. */
+  body?: string | null;
+}
+
+/**
+ * VOICE-3: Create a calendar event on the linked Outlook account of `userId`.
+ * POST /me/events with the same token helper the read paths use — requires the
+ * already-granted Calendars.ReadWrite scope. Returns the normalized event.
+ */
+export async function createEventAsUser(
+  userId: string,
+  input: CreateEventInput,
+): Promise<NormalizedEvent> {
+  const token = await getAccessToken(userId);
+  const tz = input.timeZone ?? 'Asia/Jerusalem';
+
+  const res = await fetch(`${GRAPH_BASE}/me/events`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      subject: input.subject,
+      start: { dateTime: input.startIso, timeZone: tz },
+      end: { dateTime: input.endIso, timeZone: tz },
+      ...(input.location ? { location: { displayName: input.location } } : {}),
+      ...(input.body ? { body: { contentType: 'text', content: input.body } } : {}),
+    }),
+  });
+
+  if (res.status === 403) {
+    logger.error({ status: 403 }, 'Graph calendar create forbidden');
+    throw new Error(
+      'אין הרשאת יומן ל-Outlook — יש להתחבר מחדש כדי לאשר את הרשאת היומן (Calendars.ReadWrite)',
+    );
+  }
+
+  if (!res.ok) {
+    logger.error({ status: res.status }, 'Graph calendar create failed');
+    throw new Error(`Graph API request failed with status ${res.status}`);
+  }
+
+  const data = await res.json();
+  return normalizeEvent(data);
+}

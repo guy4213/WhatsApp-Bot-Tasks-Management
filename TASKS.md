@@ -3890,3 +3890,74 @@ existing tracking suite, not duplicated here.
 ~16 calls/hour per stationary worker to ~1 call per 10 min (the safety
 refresh). If numbers still look high, tune `MIN_ROUTE_RECALC_MOVE_METERS`
 upward (e.g. 100) before promoting the constants to env.
+
+---
+
+## VOICE — עוזרת קולית עברית "גלי" (שיחה חופשית שמפעילה את כל יכולות הבוט) (2026-07-14)
+
+**Status:** DONE (local, uncommitted) — ממתין ל-deploy (migration 021 + env vars ב-Render).
+
+**What to do:** ממשק קולי בעברית — המשתמש מדבר בדפדפן ("מה הבדיקות שלי?", "יצאתי לכהן",
+"תזמני בדיקה מחר בעשר", "מה ביומן?", "תוסיפי משימה") והעוזרת מבצעת דרך אותם services
+של הבוט. כולל: סטטוסים + שליחת "הבודק בדרך"+מעקב חי ללקוח, דיווחים, תזמון, תיקוני אתר,
+תמונת מצב, חריגים, חיפוש, לידים, שיוכים, מעקב מיקום, יומן Outlook (קריאה+יצירה),
+משימות CRM (יצירה/עדכון/רשימה דרך ה-API של ה-CRM), הודעות וואטסאפ, וסיכום יום.
+
+**Definition of Done:** שיחה קולית שוטפת בעברית עם ביצוע בפועל של הפעולות, אכיפת
+הרשאות זהה לבוט (worker=שלו בלבד; manager/elevated לפי הכללים), אודיט מלא, בלי
+כתיבות CRM חדשות מעבר למתועד.
+
+**Architecture decision (מנוע השיחה):** OpenAI Realtime API (WebRTC, speech↔speech)
+עם function calling — עברית native. ElevenLabs Agents נבחן ונפסל בשלב זה: מודלי
+ה-TTS המהירים שלהם (flash/turbo v2.5) לא תומכים בעברית בכלל, ו-eleven_v3 (התומך
+היחיד) חסום לשימוש ב-Agents בתוכנית הנוכחית ("Expressive TTS is not allowed") וגם
+לא מומלץ על-ידם ל-real-time. אומת מול ה-API ב-2026-07-14. שכבת ה-tools נייטרלית
+למנוע — החלפה עתידית נוגעת רק ב-routes/voiceAssistant.ts + template.
+מפתח ה-ElevenLabs כן מנוצל: Scribe STT להודעות קוליות בוואטסאפ (opt-in,
+STT_PROVIDER=elevenlabs, עם fallback אוטומטי ל-Whisper).
+
+**Files changed:**
+- `src/db/migrations/021_voice_assistant.sql` (new) — "VoiceAccessToken" (קישור אישי,
+  hash-at-rest, expiry+revoke) + "VoiceToolCall" (אודיט append-only). RLS deny-all.
+- `src/services/voiceAccess.ts` (new) — mint/resolve/revoke + audit writer.
+- `src/services/voiceTools.ts` (new) — רישום 27 כלים + executor עם role-gates
+  (any/manager/elevated), disambiguation (options), speak-lines בעברית, ואודיט.
+  DEPARTED משכפל את סדר הראוטר: openTrackingSession → advanceFieldStatus (שולח
+  ללקוח) → writeTravelEta; ARRIVED→markArrived; FINISHED→closeSession.
+- `src/services/crmApi.ts` (new) — גשר ל-CRM API (Railway) עם CRM_SERVICE_JWT;
+  יצירת/עדכון/רשימת משימות CRM דרך ה-CRM (ה-CRM נשאר בעל יצירת המשימות).
+- `src/services/graphCalendar.ts` — נוסף `createEventAsUser` (POST /me/events,
+  אותו token helper; Calendars.ReadWrite כבר בהרשאות).
+- `src/routes/voiceAssistant.ts` (new) — GET /voice (דף), POST /voice/session
+  (mint ephemeral OpenAI secret עם פרסונה עברית + הכלים המורשים בלבד),
+  POST /voice/tool (הרצה + re-validation). Kill switch: VOICE_ASSISTANT_ENABLED.
+- `src/routes/voiceAssistant.template.ts` (new) — דף RTL עברי (orb, תמלול חי,
+  chips של פעולות, WebRTC ל-OpenAI, ללא assets חיצוניים).
+- `src/whatsapp/voice.ts` — נוסף `transcribeWithScribe` + שרשרת provider
+  (Scribe→Whisper fallback). ברירת מחדל ללא env: Whisper בלבד (אפס שינוי).
+- `src/scripts/voiceLink.ts` (new) + npm script `voice:link` — הנפקת קישור אישי
+  לפי טלפון/שם/id.
+- `src/app.ts` — רישום `voiceAssistantRoutes`.
+- `.env.example` — סעיף 13 (VOICE_ASSISTANT_ENABLED, VOICE_REALTIME_MODEL/VOICE,
+  VOICE_TRANSCRIBE_MODEL, CRM_API_BASE_URL, CRM_SERVICE_JWT, ELEVENLABS_API_KEY,
+  STT_PROVIDER).
+- CRM repo: `apps/api/scripts/mint-service-jwt.ts` (new) — הנפקת ה-JWT לשירות.
+
+**Tests run:** `npx tsc --noEmit` נקי. Vitest חדשים: `voiceAccess.test.ts` (6),
+`voiceTools.test.ts` (7), `voiceRoutes.test.ts` (9) — 22/22 ירוקים. רגרסיה:
+goLive/owntracksConfig/greenapiWebhook/trackingRoute — 59/59 ירוקים (buildApp
+כולל את ה-routes החדשים).
+
+**Deviations:** אין כתיבת Task.status; יצירת משימות CRM עוברת דרך ה-CRM API
+(לא SQL ישיר) — כתיבה מתועדת חדשה. סעיף 12 ("מה עוד לא בסקופ") עודכן בהתאם
+ב-BOT_CAPABILITIES.
+
+**Remaining / deploy steps:**
+1. להריץ את migration 021 (Supabase SQL Editor או `npm run migrate` עם DATABASE_URL).
+2. Render env: ELEVENLABS_API_KEY (+STT_PROVIDER=elevenlabs אם רוצים Scribe),
+   CRM_API_BASE_URL, CRM_SERVICE_JWT (להנפיק בסקריפט ב-CRM), ולוודא OPENAI_API_KEY
+   עם גישה ל-Realtime.
+3. `npm run voice:link -- <טלפון/שם>` לכל משתמש ולשלוח לו את הקישור.
+4. חיבור Outlook לבוט (חד-פעמי, /microsoft/oauth/start) למי שרוצה כלי יומן.
+5. עתידי: אינטנט "קישור קולי" בוואטסאפ; כפתור בעמוד ה-CRM; TTS-תשובות קוליות
+   בוואטסאפ עם eleven_v3.

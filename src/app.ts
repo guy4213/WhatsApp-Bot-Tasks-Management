@@ -10,6 +10,7 @@ import { trackingRoutes } from './routes/tracking';
 import { trackingPageRoutes } from './routes/trackingPage';
 import { microsoftCalendarRoutes } from './routes/microsoftCalendar';
 import { microsoftGraphWebhookRoutes } from './routes/microsoftGraphWebhook';
+import { voiceAssistantRoutes } from './routes/voiceAssistant';
 import { startScheduler } from './scheduler';
 
 declare module 'fastify' {
@@ -53,6 +54,7 @@ export async function buildApp() {
   await app.register(trackingPageRoutes);
   await app.register(microsoftCalendarRoutes);
   await app.register(microsoftGraphWebhookRoutes);
+  await app.register(voiceAssistantRoutes);
 
   // ── Liveness probe ────────────────────────────────────────────────────────
   app.get('/health/live', async () => ({ status: 'ok' }));

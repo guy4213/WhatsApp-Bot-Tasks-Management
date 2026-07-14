@@ -11,6 +11,7 @@
     "summary:now": "ts-node src/scripts/sendDailySummary.ts",
     "check:recipients": "ts-node src/scripts/checkRecipients.ts",
     "owntracks:link": "ts-node src/scripts/owntracksLink.ts",
+    "voice:link": "ts-node src/scripts/voiceLink.ts",
     "templates:dry-run": "ts-node --transpile-only scripts/create-whatsapp-templates.ts --dry-run",
     "templates:create": "ts-node --transpile-only scripts/create-whatsapp-templates.ts",
     "test": "vitest run",
