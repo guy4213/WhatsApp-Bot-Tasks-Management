@@ -31,6 +31,23 @@ const manager: ResolvedUser = {
   canManagePermissions: true,
 };
 
+// יורם — exceptions-only viewer (isManagerMenuUser=true), NOT in
+// LEADS_VIEWER_NAMES, NOT elevated. Must be blocked from `assign_lead`
+// (canAssignLeads=false) even though he sees the broader manager menu.
+const yoram: ResolvedUser = {
+  id: 'y1', name: 'יורם', phone: '972503333333', role: 'TECHNICIAN',
+  isElevated: false, canViewAllRecords: false, canManageUsers: false,
+  canManagePermissions: false,
+};
+
+// סשה — leads viewer, NOT elevated. Must be allowed on `assign_lead`
+// (canAssignLeads=true via isLeadsViewer).
+const sasha: ResolvedUser = {
+  id: 's1', name: 'סשה', phone: '972504444444', role: 'TECHNICIAN',
+  isElevated: false, canViewAllRecords: false, canManageUsers: false,
+  canManagePermissions: false,
+};
+
 beforeEach(() => {
   query.mockClear();
   delete process.env.CRM_API_BASE_URL;
@@ -58,6 +75,24 @@ describe('role gating', () => {
     expect(names).toContain('assign_lead');
     expect(names).toContain('reassign_task');
     expect(names).toContain('enable_worker_tracking');
+  });
+
+  it('an exceptions-only viewer (Yoram) sees the manager menu but NOT assign_lead', () => {
+    // isManagerMenuUser=true → sees the broader manager surface,
+    // but canAssignLeads=false → assign_lead is hidden.
+    const names = listToolNames(yoram);
+    expect(names).toContain('management_snapshot');
+    expect(names).toContain('list_pending_leads');
+    expect(names).not.toContain('assign_lead');
+    expect(names).not.toContain('reassign_task'); // elevated-only
+  });
+
+  it('a leads viewer (Sasha) sees assign_lead even without elevation', () => {
+    // canAssignLeads=true via isLeadsViewer; not elevated so no reassign_task.
+    const names = listToolNames(sasha);
+    expect(names).toContain('assign_lead');
+    expect(names).toContain('list_pending_leads');
+    expect(names).not.toContain('reassign_task');
   });
 
   it('CRM task tools appear only when the CRM bridge is configured', () => {
@@ -101,6 +136,16 @@ describe('executeVoiceTool — denial paths', () => {
 
   it('worker calling a manager tool → permission denied (server-side gate)', async () => {
     const res = await executeVoiceTool(worker, 'management_snapshot', {});
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('אין לך הרשאה לפעולה הזו');
+  });
+
+  it('Yoram (exceptions-only) calling assign_lead → permission denied even though he sees the manager menu', async () => {
+    // Defense-in-depth: the browser is not trusted. Even if the tool was
+    // somehow surfaced client-side, the server-side gate must block it.
+    const res = await executeVoiceTool(yoram, 'assign_lead', {
+      lead_query: 'anything', worker_name: 'דני',
+    });
     expect(res.ok).toBe(false);
     expect(res.error).toBe('אין לך הרשאה לפעולה הזו');
   });

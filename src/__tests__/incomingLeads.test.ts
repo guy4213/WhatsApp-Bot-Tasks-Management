@@ -25,14 +25,16 @@ const EMPTY = { rowCount: 0, rows: [] };
 // ── findUnassignedInWindow ────────────────────────────────────────────────────
 
 describe('findUnassignedInWindow', () => {
-  it('queries IncomingLead WHERE ownerId IS NULL AND receivedAt in [from,to)', async () => {
+  // Pending = status='NEW' (product truth: status wins over ownerId).
+  it('queries IncomingLead WHERE status=NEW AND receivedAt in [from,to)', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     const from = new Date('2026-06-30T14:00:00Z');
     const to   = new Date('2026-07-01T06:30:00Z');
     await findUnassignedInWindow(from, to);
     const [sql, params] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/"IncomingLead"/);
-    expect(sql).toMatch(/"ownerId"\s+IS\s+NULL/);
+    expect(sql).toMatch(/status\s*=\s*'NEW'/);
+    expect(sql).not.toMatch(/"ownerId"\s+IS\s+NULL/);
     expect(sql).toMatch(/"receivedAt"\s*>=\s*\$1/);
     expect(sql).toMatch(/"receivedAt"\s*<\s*\$2/);
     expect(params).toEqual([from, to]);
@@ -42,12 +44,13 @@ describe('findUnassignedInWindow', () => {
 // ── findOvernightUnassignedLeads ─────────────────────────────────────────────
 
 describe('findOvernightUnassignedLeads', () => {
-  it('queries ownerId IS NULL, receivedAt in overnight window, orders by receivedAt', async () => {
+  it('queries status=NEW, receivedAt in overnight window, orders by receivedAt', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     await findOvernightUnassignedLeads('2026-07-01');
     const [sql, params] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/"IncomingLead"/);
-    expect(sql).toMatch(/"ownerId"\s+IS\s+NULL/);
+    expect(sql).toMatch(/status\s*=\s*'NEW'/);
+    expect(sql).not.toMatch(/"ownerId"\s+IS\s+NULL/);
     expect(sql).toMatch(/AT TIME ZONE 'Asia\/Jerusalem'/);
     expect(sql).toMatch(/17:00/);
     expect(sql).toMatch(/09:30/);

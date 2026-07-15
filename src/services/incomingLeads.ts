@@ -41,7 +41,7 @@ export async function findUnassignedInWindow(from: Date, to: Date): Promise<Inco
   const { rows } = await pool.query<IncomingLeadRow>(
     `SELECT ${SELECT_LEAD_COLS}
      FROM "IncomingLead"
-     WHERE "ownerId" IS NULL
+     WHERE status = 'NEW'
        AND "receivedAt" >= $1
        AND "receivedAt" < $2
      ORDER BY "receivedAt"`,
@@ -59,7 +59,7 @@ export async function findOvernightUnassignedLeads(localDate: string): Promise<I
   const { rows } = await pool.query<IncomingLeadRow>(
     `SELECT ${SELECT_LEAD_COLS}
      FROM "IncomingLead"
-     WHERE "ownerId" IS NULL
+     WHERE status = 'NEW'
        AND "receivedAt" >= (($1::date - 1)::timestamp + time '17:00:00') AT TIME ZONE 'Asia/Jerusalem'
        AND "receivedAt" <  ($1::date::timestamp + time '09:30:00') AT TIME ZONE 'Asia/Jerusalem'
      ORDER BY "receivedAt"`,
@@ -208,7 +208,7 @@ export async function findUnassignedLeadsForAssignment(
     const { rows } = await pool.query<IncomingLeadRow>(
       `SELECT ${SELECT_LEAD_COLS}
        FROM "IncomingLead"
-       WHERE "ownerId" IS NULL
+       WHERE status = 'NEW'
          AND "receivedAt" >= ($2::date) AT TIME ZONE 'Asia/Jerusalem'
          AND "receivedAt" <  ($3::date) AT TIME ZONE 'Asia/Jerusalem'
        ORDER BY "receivedAt" DESC
@@ -220,7 +220,7 @@ export async function findUnassignedLeadsForAssignment(
   const { rows } = await pool.query<IncomingLeadRow>(
     `SELECT ${SELECT_LEAD_COLS}
      FROM "IncomingLead"
-     WHERE "ownerId" IS NULL
+     WHERE status = 'NEW'
      ORDER BY "receivedAt" DESC
      LIMIT $1`,
     [limit],
@@ -229,17 +229,22 @@ export async function findUnassignedLeadsForAssignment(
 }
 
 /**
- * Write ownerId onto an IncomingLead row — the FIRST bot write to a CRM-owned
- * table (SPEC Addendum point 1). Parameterized to prevent injection. Also
- * writes an audit-log entry with actor + lead + target-worker captured.
+ * Assign an IncomingLead to a worker — writes BOTH `ownerId` and `status`.
+ * The pending-lead filter uses `status='NEW'` (product truth: status wins over
+ * ownerId), so the write must flip `status → 'ACTIVE'` to take the row out of
+ * every pending list in one shot. `ownerId` is what the D3-T3 poller
+ * (leadAssignmentNotifier) watches, so it still detects the new assignment and
+ * fires the worker alert — no alert logic here.
  *
- * NOTE: the existing D3-T3 poller (leadAssignmentNotifier) will detect the new
- * ownerId and send the worker alert automatically — no alert logic here.
+ * Race guard: `WHERE ... AND status='NEW'` — if a second manager assigns the
+ * same lead microseconds later, that UPDATE affects 0 rows and we throw
+ * `'הליד כבר שויך'`, which the caller (WhatsApp router / voice tool) surfaces
+ * to the user instead of silently double-writing.
  *
- * @param leadId   UUID of the IncomingLead row to assign.
- * @param workerId UUID of the User to set as ownerId.
- * @param actorId  UUID of the User performing the action (for audit).
- * @param actorPhone  WhatsApp phone of the actor (for audit).
+ * Audit: `oldValues` snapshots the pre-state (`ownerId`, `status`);
+ * `newValues` records what changed. `status='ACTIVE'` is an additional CRM
+ * write beyond the already-documented `ownerId` write — it appears in the
+ * audit trail so ownership + intent stay traceable.
  */
 export async function assignLead(
   leadId: string,
@@ -247,10 +252,21 @@ export async function assignLead(
   actorId: string,
   actorPhone: string,
 ): Promise<void> {
-  await pool.query(
-    `UPDATE "IncomingLead" SET "ownerId" = $1 WHERE id = $2`,
+  const before = await pool.query<{ ownerId: string | null; status: string | null }>(
+    `SELECT "ownerId"::text AS "ownerId", status FROM "IncomingLead" WHERE id = $1`,
+    [leadId],
+  );
+  const prev = before.rows[0] ?? { ownerId: null, status: null };
+
+  const result = await pool.query(
+    `UPDATE "IncomingLead"
+       SET "ownerId" = $1, status = 'ACTIVE'
+     WHERE id = $2 AND status = 'NEW'`,
     [workerId, leadId],
   );
+  if (result.rowCount === 0) {
+    throw new Error('הליד כבר שויך');
+  }
 
   // Import inline to avoid circular dependency with utils/auditLog.
   const { writeAuditLog } = await import('../utils/auditLog');
@@ -263,8 +279,8 @@ export async function assignLead(
     detectedAction: 'ASSIGN_LEAD',
     confidence: null,
     targetTaskId: leadId,
-    oldValues: null,
-    newValues: { leadId, ownerId: workerId },
+    oldValues: { ownerId: prev.ownerId, status: prev.status },
+    newValues: { leadId, ownerId: workerId, status: 'ACTIVE' },
     confirmationStatus: 'CONFIRMED',
     approvalStatus: null,
     approverUserId: null,
