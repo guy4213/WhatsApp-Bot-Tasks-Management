@@ -93,12 +93,13 @@ import { createProvisioning } from './owntracksProvisioning';
 import { findUsersByName } from './tasks';
 import { sendTextMessage } from '../whatsapp/sender';
 import { normalizeIsraeliPhone } from '../auth/phoneNormalizer';
-import { listEventsAsUser, createEventAsUser } from './graphCalendar';
 import {
   createCrmTask,
   updateCrmTask,
   listCrmTasksForOwner,
   crmApiConfigured,
+  listCrmCalendarEvents,
+  createCrmCalendarEvent,
 } from './crmApi';
 import { auditVoiceToolCall } from './voiceAccess';
 
@@ -808,10 +809,11 @@ const TOOLS: VoiceToolDef[] = [
     },
   },
 
-  // ═══════════════ Calendar (Outlook via the bot's Graph link) ═══════════════
+  // ═══════════════ Calendar (Outlook via the CRM's stored connection) ═══════════════
   {
     name: 'get_calendar_events',
     gate: 'any',
+    available: crmApiConfigured,
     description: 'קריאת היומן (Outlook) של המשתמש: הפגישות הקרובות. ברירת מחדל: 7 הימים הקרובים.',
     parameters: {
       type: 'object',
@@ -828,7 +830,7 @@ const TOOLS: VoiceToolDef[] = [
       const endIso =
         str(args.to_iso) ?? new Date(now.getTime() + days * 86_400_000).toISOString();
       try {
-        const events = await listEventsAsUser(user.id, { startIso, endIso, top: 25 });
+        const events = await listCrmCalendarEvents(user.id, { startIso, endIso, top: 25 });
         const { items, more } = cap(events, 12);
         return {
           ok: true,
@@ -838,7 +840,7 @@ const TOOLS: VoiceToolDef[] = [
             id: e.id,
             subject: e.subject,
             start: e.start ? fmtWhen(e.start.dateTime) : null,
-            location: e.location?.displayName ?? null,
+            location: e.location ?? null,
             is_online: e.isOnlineMeeting,
             all_day: e.isAllDay,
           })),
@@ -852,7 +854,7 @@ const TOOLS: VoiceToolDef[] = [
         return {
           ok: false,
           error: msg.includes('מחובר')
-            ? 'חשבון ה-Outlook שלך עדיין לא מחובר לבוט — צריך חיבור חד-פעמי דרך קישור מהמנהל.'
+            ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM (הגדרות → Outlook).'
             : msg,
         };
       }
@@ -861,6 +863,7 @@ const TOOLS: VoiceToolDef[] = [
   {
     name: 'create_calendar_event',
     gate: 'any',
+    available: crmApiConfigured,
     description: 'יצירת אירוע ביומן Outlook של המשתמש. חובה: נושא ומועד התחלה. ברירת מחדל: שעה אחת.',
     parameters: {
       type: 'object',
@@ -886,11 +889,11 @@ const TOOLS: VoiceToolDef[] = [
         endIso = new Date(start.getTime() + mins * 60_000).toISOString().slice(0, 19);
       }
       try {
-        const ev = await createEventAsUser(user.id, {
+        const ev = await createCrmCalendarEvent(user.id, {
           subject,
           // Graph expects wall-clock without offset when timeZone is provided.
-          startIso: startIso.replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)$/, ''),
-          endIso: endIso.replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)$/, ''),
+          start: startIso.replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)$/, ''),
+          end: endIso.replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)$/, ''),
           timeZone: 'Asia/Jerusalem',
           location: str(args.location),
           body: str(args.notes),
@@ -905,7 +908,7 @@ const TOOLS: VoiceToolDef[] = [
         return {
           ok: false,
           error: msg.includes('מחובר')
-            ? 'חשבון ה-Outlook שלך עדיין לא מחובר לבוט — צריך חיבור חד-פעמי.'
+            ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM (הגדרות → Outlook).'
             : msg,
         };
       }

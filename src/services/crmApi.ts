@@ -44,6 +44,7 @@ async function crmFetch<T>(
   method: 'GET' | 'POST' | 'PATCH',
   path: string,
   body?: unknown,
+  opts: { userId?: string } = {},
 ): Promise<T | null> {
   const base = baseUrl();
   const jwt = serviceJwt();
@@ -59,6 +60,9 @@ async function crmFetch<T>(
       method,
       headers: {
         Authorization: `Bearer ${jwt}`,
+        // The CRM's Outlook/calendar routes act "on behalf of" this user (their
+        // stored refresh token). x-user-id names that user.
+        ...(opts.userId ? { 'x-user-id': opts.userId } : {}),
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         Accept: 'application/json',
       },
@@ -138,4 +142,132 @@ export async function listCrmTasksForOwner(
     .filter((t) => t.ownerId === ownerId)
     .filter((t) => (opts.status ? t.status === opts.status : t.status !== 'DONE' && t.status !== 'CANCELLED'))
     .slice(0, limit);
+}
+
+// ── Outlook calendar (via the CRM's stored per-user Outlook connection) ──────
+//
+// The CRM already holds each user's encrypted Outlook refresh token
+// (User.msRefreshToken) and mints Graph access tokens on demand. The bot has no
+// working Outlook link of its own, so calendar reads/writes go THROUGH the CRM,
+// naming the speaking user via x-user-id. This reuses the exact connection the
+// CRM uses for quotes/mail/calendar — no separate consent, no second table.
+//
+// Unlike the task helpers, these throw a Hebrew Error on failure (rather than
+// returning null) so the voice tool can speak the CRM's own message — e.g.
+// "חשבון Outlook אינו מחובר — יש להתחבר תחילה".
+
+export interface CrmCalendarEvent {
+  id: string;
+  subject: string | null;
+  start: { dateTime: string; timeZone: string } | null;
+  end: { dateTime: string; timeZone: string } | null;
+  location: string | null;
+  isOnlineMeeting: boolean;
+  isAllDay: boolean;
+  webLink: string | null;
+}
+
+export interface CrmCreateCalendarEventInput {
+  subject: string;
+  /** ISO 8601 local wall time (no offset), e.g. "2026-07-15T14:00:00". */
+  start: string;
+  end: string;
+  timeZone?: string;
+  location?: string | null;
+  body?: string | null;
+}
+
+export interface CrmCreatedCalendarEvent {
+  id: string;
+  webLink: string | null;
+  joinUrl: string | null;
+  invited: string[];
+}
+
+/**
+ * Low-level call that surfaces the CRM's Hebrew error message on failure.
+ * Throws Error (message = CRM's `error` field when present) instead of the
+ * null-swallowing crmFetch, because calendar UX needs the real reason.
+ */
+async function crmCalendarFetch<T>(
+  method: 'GET' | 'POST',
+  path: string,
+  userId: string,
+  body?: unknown,
+): Promise<T> {
+  const base = baseUrl();
+  const jwt = serviceJwt();
+  if (!base || !jwt) {
+    throw new Error('חיבור ל-CRM אינו מוגדר — לא ניתן לגשת ליומן כרגע');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${base}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        'x-user-id': userId,
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        Accept: 'application/json',
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      let msg = '';
+      try {
+        const parsed = (await res.json()) as { message?: string; error?: string };
+        msg = parsed.message || parsed.error || '';
+      } catch {
+        /* non-JSON body */
+      }
+      logger.warn({ status: res.status, path, method }, 'CRM calendar request failed');
+      // Prefer the CRM's Hebrew message; fall back to a generic one.
+      throw new Error(msg || 'הפעולה מול היומן נכשלה');
+    }
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Read the speaking user's Outlook calendar through the CRM. */
+export async function listCrmCalendarEvents(
+  userId: string,
+  opts: { startIso?: string; endIso?: string; top?: number } = {},
+): Promise<CrmCalendarEvent[]> {
+  const params = new URLSearchParams();
+  if (opts.startIso) params.set('start', opts.startIso);
+  if (opts.endIso) params.set('end', opts.endIso);
+  if (opts.top) params.set('top', String(opts.top));
+  const qs = params.toString();
+  const data = await crmCalendarFetch<{ events: CrmCalendarEvent[]; count: number }>(
+    'GET',
+    `/outlook/calendar/events${qs ? `?${qs}` : ''}`,
+    userId,
+  );
+  return data.events ?? [];
+}
+
+/** Create an event on the speaking user's Outlook calendar through the CRM. */
+export async function createCrmCalendarEvent(
+  userId: string,
+  input: CrmCreateCalendarEventInput,
+): Promise<CrmCreatedCalendarEvent> {
+  return crmCalendarFetch<CrmCreatedCalendarEvent>(
+    'POST',
+    '/outlook/calendar/events',
+    userId,
+    {
+      subject: input.subject,
+      start: input.start,
+      end: input.end,
+      timeZone: input.timeZone ?? 'Asia/Jerusalem',
+      ...(input.location ? { location: input.location } : {}),
+      ...(input.body ? { body: input.body } : {}),
+    },
+  );
 }

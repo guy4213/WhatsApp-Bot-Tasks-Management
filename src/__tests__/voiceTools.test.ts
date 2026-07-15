@@ -43,7 +43,8 @@ describe('role gating', () => {
     expect(names).toContain('get_my_inspections');
     expect(names).toContain('update_inspection_status');
     expect(names).toContain('report_problem');
-    expect(names).toContain('get_calendar_events');
+    // get_calendar_events is CRM-bridge-gated (calendar reads go through the CRM's
+    // stored Outlook connection), so it's covered in the CRM-conditional test below.
     expect(names).not.toContain('management_snapshot');
     expect(names).not.toContain('assign_lead');
     expect(names).not.toContain('reassign_task');
@@ -61,6 +62,9 @@ describe('role gating', () => {
 
   it('CRM task tools appear only when the CRM bridge is configured', () => {
     expect(listToolNames(worker)).not.toContain('create_crm_task');
+    // Calendar tools also go through the CRM bridge (stored Outlook connection).
+    expect(listToolNames(worker)).not.toContain('get_calendar_events');
+    expect(listToolNames(worker)).not.toContain('create_calendar_event');
 
     process.env.CRM_API_BASE_URL = 'https://crm.example.com';
     process.env.CRM_SERVICE_JWT = 'jwt';
@@ -68,6 +72,8 @@ describe('role gating', () => {
     expect(withCrm).toContain('create_crm_task');
     expect(withCrm).toContain('update_crm_task');
     expect(withCrm).toContain('list_my_crm_tasks');
+    expect(withCrm).toContain('get_calendar_events');
+    expect(withCrm).toContain('create_calendar_event');
   });
 });
 
