@@ -9,6 +9,86 @@ Conventions:
 
 ---
 
+## VOICE-DETAILS — list→details closure for leads and CRM tasks (2026-07-15)
+
+**Status:** DONE (local, uncommitted; `get_crm_task_details` awaits `GET /tasks/:id` on the CRM side)
+
+**What to do.** Close the "list → details" gap in the voice assistant "גלי".
+Before: only `get_inspection_details` existed; leads and CRM office tasks had
+no way to fetch full content, AND the list mappers threw away `body` /
+`description` before the model ever saw them. Result: "מה כתוב בליד של כהן"
+had no path to an answer. Four additive parts, all read-only.
+
+**Part 1 — `get_lead_details`** ✅ green immediately (DB-only).
+Exposed `getLeadById` as a manager-gated tool. Accepts `lead_id` (UUID) or
+`hint` (fuzzy over `findUnassignedLeadsForAssignment` — same shape as
+`assign_lead`; multi-match returns `options`). Returns the full row plus
+`owner_name` (small inline `SELECT name FROM "User"`).
+
+**Part 2 — `get_crm_task_details`** ⏳ ships behind `crmApiConfigured`; waits
+for CRM `GET /tasks/:id`. Added `getCrmTaskById(taskId)` in `crmApi.ts` — a
+plain `crmFetch<CrmTask>('GET', '/tasks/:id')`. Until the CRM endpoint
+lands, that call returns null and the tool answers `'לא הצלחתי לקרוא את
+פרטי המשימה מה-CRM'`. Handler enforces the same ownership rule as
+`update_crm_task`: non-elevated users see only their own tasks (return
+`'המשימה הזו לא שלך'` with `detail` omitted). Elevated users see any task.
+
+**Part 3 — list-mapper enrichment** ✅ green immediately. `list_pending_leads`
+now returns `body_snippet` (200 chars) and `status`; `list_my_crm_tasks` now
+returns `description_snippet` (200 chars) and `product_name`. Full bodies stay
+behind the dedicated details tools — snippets keep the model's spoken
+summary honest without dumping the wall of text.
+
+**Part 3b — worker-inspection list enrichment (follow-up).** Same safety-net
+pattern extended to `get_my_inspections`. `trimInspectionRow` now surfaces
+`contact_name`, `contact_phone`, `address` (existing but now uniformly
+present), and `notes_snippet` (200-char truncated `fieldNotes`). The
+underlying `getMyInspectionsInRange` + `getAllMyInspections` were extended to
+SELECT `tf."fieldContactName"`, `tf."fieldContactPhone"`, `tf."fieldNotes"`
+and their `MyInspectionRangeItem` interface widened. `TodayFieldInspectionRow`
+(the manager/org-wide list) intentionally NOT extended — org-wide lists stay
+lean; only the worker's own list gets the contact/notes safety net because
+that's where "answered from memory" hallucinations were most acute.
+
+**Part 4 — persona rewrite** ✅ green immediately. `buildInstructions` in
+`voiceAssistant.ts`: "three worlds" → "four worlds" with leads as world #4
+(list_pending_leads / get_lead_details / assign_lead). Added an explicit
+cross-world rule: "list = summary; if the user asks for details on a specific
+item, call the matching *_details tool — do not answer from memory."
+
+**Files changed.**
+- `src/services/crmApi.ts` — added `getCrmTaskById`.
+- `src/services/voiceTools.ts` — 2 new tools (`get_lead_details`,
+  `get_crm_task_details`); imported `getCrmTaskById`, `IncomingLeadRow`;
+  added `snippet()` and `getUserNameById()` helpers; enriched
+  `list_pending_leads` + `list_my_crm_tasks` mappers; updated the two list
+  tools' descriptions to point at their details tools.
+- `src/routes/voiceAssistant.ts` — persona now enumerates four worlds and
+  teaches the list→details pattern.
+- `src/__tests__/voiceTools.test.ts` — gating tests for both new tools
+  (manager-only for leads, CRM-configured-only for tasks); executor tests for
+  missing-arg validation, cross-user ownership rejection (no detail leak), and
+  a happy-path detail fetch on the worker's own task with a fetch spy.
+
+**Tests run.** `npx tsc --noEmit` — clean. `voiceTools.test.ts`,
+`assignLead.test.ts`, `incomingLeads.test.ts`, `leadAssignmentNotifier.test.ts`
+— 48/48 passing. Regression-adjacent: `voiceRoutes`, `routerAssignLead`,
+`routerLeadsDisplay`, `sashaLeadsDispatcher`, `managerViews` — 88/88 passing.
+Nothing else touches these code paths.
+
+**Ownership defense (verified via test).** `get_crm_task_details` is
+`gate: 'any'` because both workers and managers legitimately need it. The
+security check lives inside the handler — a worker asking about someone
+else's task gets `'המשימה הזו לא שלך'` and no `detail` field. The test spies
+on `fetch` to force a foreign-owner task in the CRM response and asserts the
+rejection + missing detail.
+
+**Deferred until CRM ships `GET /tasks/:id`.** No follow-up needed in this
+repo; the moment the endpoint appears, `get_crm_task_details` starts
+returning full detail with zero code change here.
+
+---
+
 ## VOICE-LEADS — status='NEW' pending filter + voice assign flips to 'ACTIVE' + canAssignLeads gate parity (2026-07-15)
 
 **Status:** DONE (local, uncommitted)

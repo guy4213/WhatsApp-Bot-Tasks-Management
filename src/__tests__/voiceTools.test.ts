@@ -121,6 +121,28 @@ describe('role gating', () => {
     expect(listToolNames(manager)).toContain('list_all_crm_tasks');
     expect(listToolNames(worker)).not.toContain('list_all_crm_tasks');
   });
+
+  it('get_lead_details is manager-gated (same as list_pending_leads)', () => {
+    // Detail tool must not leak lead body to workers even though the underlying
+    // getLeadById is a plain DB read.
+    expect(listToolNames(worker)).not.toContain('get_lead_details');
+    expect(listToolNames(manager)).toContain('get_lead_details');
+    // Sasha (leads viewer via isManagerMenuUser) also sees it — same gate as list_pending_leads.
+    expect(listToolNames(sasha)).toContain('get_lead_details');
+  });
+
+  it('get_crm_task_details appears only when the CRM bridge is configured, for any authenticated user', () => {
+    // Off by default (no CRM env vars).
+    expect(listToolNames(worker)).not.toContain('get_crm_task_details');
+    expect(listToolNames(manager)).not.toContain('get_crm_task_details');
+
+    process.env.CRM_API_BASE_URL = 'https://crm.example.com';
+    process.env.CRM_SERVICE_JWT = 'jwt';
+    // Gate is 'any' — workers and managers alike see it; ownership is enforced
+    // inside the handler (verified in executor test below).
+    expect(listToolNames(worker)).toContain('get_crm_task_details');
+    expect(listToolNames(manager)).toContain('get_crm_task_details');
+  });
 });
 
 describe('buildOpenAiTools', () => {
@@ -159,11 +181,144 @@ describe('executeVoiceTool — denial paths', () => {
     expect(res.error).toBe('אין לך הרשאה לפעולה הזו');
   });
 
+  it('get_lead_details with no lead_id and no hint → Hebrew "צריך..." error, no DB call', async () => {
+    const res = await executeVoiceTool(manager, 'get_lead_details', {});
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('צריך lead_id או רמז לזיהוי הליד');
+  });
+
+  it('get_crm_task_details with no task_id → Hebrew "חסר מזהה משימה" error, no fetch', async () => {
+    process.env.CRM_API_BASE_URL = 'https://crm.example.com';
+    process.env.CRM_SERVICE_JWT = 'jwt';
+    const res = await executeVoiceTool(worker, 'get_crm_task_details', {});
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('חסר מזהה משימה');
+  });
+
+  it('get_crm_task_details enforces ownership — a worker asking about someone else\'s task is rejected', async () => {
+    // Security-critical: gate is 'any' by design, but the handler must reject
+    // a non-elevated user asking about a task owned by a different user.
+    process.env.CRM_API_BASE_URL = 'https://crm.example.com';
+    process.env.CRM_SERVICE_JWT = 'jwt';
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        id: 'task-xyz', title: 'Someone else\'s task', description: 'secret',
+        dueDate: null, priority: 'MEDIUM', status: 'OPEN',
+        ownerId: 'someone-else', customerId: null, productName: null,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_crm_task_details', { task_id: 'task-xyz' });
+      expect(res.ok).toBe(false);
+      expect(res.error).toBe('המשימה הזו לא שלך');
+      // The full task payload must NOT leak into the result (defense-in-depth
+      // read: even the detail key should be absent on rejection).
+      expect(res.detail).toBeUndefined();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('get_crm_task_details returns detail when the task belongs to the worker', async () => {
+    process.env.CRM_API_BASE_URL = 'https://crm.example.com';
+    process.env.CRM_SERVICE_JWT = 'jwt';
+    // The handler also does a small SELECT name for owner_name enrichment.
+    query.mockResolvedValueOnce({ rows: [{ name: 'דני בודק' }], rowCount: 1 });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        id: 'task-mine', title: 'שלי', description: 'התוכן המלא',
+        dueDate: null, priority: 'HIGH', status: 'IN_PROGRESS',
+        ownerId: worker.id, customerId: null, productName: null,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_crm_task_details', { task_id: 'task-mine' });
+      expect(res.ok).toBe(true);
+      // The full description (money field) is exposed on the owner's own task.
+      expect((res.detail as Record<string, unknown>).description).toBe('התוכן המלא');
+      expect((res.detail as Record<string, unknown>).owner_name).toBe('דני בודק');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('every execution is audited — including denials', async () => {
     await executeVoiceTool(worker, 'no_such_tool', {});
     const auditCall = query.mock.calls.find(
       (c) => typeof c[0] === 'string' && (c[0] as string).includes('VoiceToolCall'),
     );
     expect(auditCall).toBeTruthy();
+  });
+
+  it('get_my_inspections includes contact_name / contact_phone / notes_snippet per row (safety net vs the model answering from the list)', async () => {
+    // Mock the getMyInspectionsInRange SELECT: two rows, one with all contact
+    // fields filled, one with them all null. The mapper must include the keys
+    // in both cases (a present null field is deliberate — the model must know
+    // "no phone recorded" rather than assuming it wasn't fetched).
+    query
+      .mockResolvedValueOnce({
+        rowCount: 2,
+        rows: [
+          {
+            taskFieldId: 'tf-a', taskId: 't-a', customerName: 'לקוח א',
+            taskTitle: 'בדיקת רעש', siteAddress: 'הרצל 5', siteCity: 'תל אביב',
+            fieldContactName: 'משה אבו', fieldContactPhone: '972501231234',
+            fieldNotes: 'להתקשר לפני שמגיעים, יש כלב בחצר וקוד לשער 4321',
+            fieldStatus: 'CONFIRMED', family: 'noise', typeLabelHe: 'רעש',
+            scheduledStartAt: new Date('2026-07-15T07:00:00Z'),
+          },
+          {
+            taskFieldId: 'tf-b', taskId: 't-b', customerName: 'לקוח ב',
+            taskTitle: 'בדיקת קרינה', siteAddress: null, siteCity: 'רמת גן',
+            fieldContactName: null, fieldContactPhone: null, fieldNotes: null,
+            fieldStatus: 'ASSIGNED', family: 'rad', typeLabelHe: 'קרינה',
+            scheduledStartAt: new Date('2026-07-15T09:30:00Z'),
+          },
+        ],
+      });
+
+    const res = await executeVoiceTool(worker, 'get_my_inspections', {});
+    expect(res.ok).toBe(true);
+    const inspections = res.inspections as Array<Record<string, unknown>>;
+    expect(inspections).toHaveLength(2);
+
+    // Filled row — full contact info surfaced; long notes truncated to
+    // snippet form (200 chars is far larger than the test string, so no
+    // truncation ellipsis expected here — just the raw text).
+    expect(inspections[0].contact_name).toBe('משה אבו');
+    expect(inspections[0].contact_phone).toBe('972501231234');
+    expect(inspections[0].notes_snippet).toBe(
+      'להתקשר לפני שמגיעים, יש כלב בחצר וקוד לשער 4321',
+    );
+    expect(inspections[0].address).toBe('הרצל 5');
+
+    // Empty row — keys present with explicit null so the model can say "אין
+    // איש קשר רשום" instead of asking to fetch more.
+    expect(inspections[1].contact_name).toBeNull();
+    expect(inspections[1].contact_phone).toBeNull();
+    expect(inspections[1].notes_snippet).toBeNull();
+    expect(inspections[1].address).toBeNull();
+  });
+
+  it('get_my_inspections truncates long fieldNotes to 200 chars with an ellipsis', async () => {
+    const longNote = 'א'.repeat(400);
+    query.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{
+        taskFieldId: 'tf-c', taskId: 't-c', customerName: 'לקוח ג',
+        taskTitle: null, siteAddress: null, siteCity: null,
+        fieldContactName: null, fieldContactPhone: null, fieldNotes: longNote,
+        fieldStatus: 'CONFIRMED', family: 'noise', typeLabelHe: 'רעש',
+        scheduledStartAt: new Date('2026-07-15T07:00:00Z'),
+      }],
+    });
+
+    const res = await executeVoiceTool(worker, 'get_my_inspections', {});
+    expect(res.ok).toBe(true);
+    const snippet = (res.inspections as Array<Record<string, unknown>>)[0].notes_snippet as string;
+    // 200 chars + ellipsis (…, one char). The truncation prevents dumping
+    // 2 KB of notes into a spoken response.
+    expect(snippet).toHaveLength(201);
+    expect(snippet.endsWith('…')).toBe(true);
   });
 });

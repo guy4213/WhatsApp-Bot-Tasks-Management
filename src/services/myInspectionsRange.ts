@@ -34,6 +34,16 @@ export interface MyInspectionRangeItem {
   taskTitle: string | null;
   siteAddress: string | null;
   siteCity: string | null;
+  /**
+   * On-site contact fields + free-text notes on the TaskField — surfaced in
+   * the worker's own list so the voice-assistant `trimInspectionRow` mapper
+   * can hand back a snippet without the model having to follow up with a
+   * separate details fetch for every row. Manager/org-wide list queries
+   * intentionally do NOT carry these to keep the list small.
+   */
+  fieldContactName: string | null;
+  fieldContactPhone: string | null;
+  fieldNotes: string | null;
   fieldStatus: string;
   family: string;
   typeLabelHe: string;
@@ -65,6 +75,9 @@ export async function getMyInspectionsInRange(
     taskTitle: string | null;
     siteAddress: string | null;
     siteCity: string | null;
+    fieldContactName: string | null;
+    fieldContactPhone: string | null;
+    fieldNotes: string | null;
     fieldStatus: string;
     family: string;
     typeLabelHe: string;
@@ -85,6 +98,9 @@ export async function getMyInspectionsInRange(
        t.title                     AS "taskTitle",
        tf."siteAddress"            AS "siteAddress",
        tf."siteCity"               AS "siteCity",
+       tf."fieldContactName"       AS "fieldContactName",
+       tf."fieldContactPhone"      AS "fieldContactPhone",
+       tf."fieldNotes"             AS "fieldNotes",
        tf."fieldStatus"            AS "fieldStatus",
        tf.family                   AS family,
        it."labelHe"                AS "typeLabelHe",
@@ -129,6 +145,9 @@ export async function getAllMyInspections(
     taskTitle: string | null;
     siteAddress: string | null;
     siteCity: string | null;
+    fieldContactName: string | null;
+    fieldContactPhone: string | null;
+    fieldNotes: string | null;
     fieldStatus: string;
     family: string;
     typeLabelHe: string;
@@ -148,6 +167,9 @@ export async function getAllMyInspections(
        t.title                     AS "taskTitle",
        tf."siteAddress"            AS "siteAddress",
        tf."siteCity"               AS "siteCity",
+       tf."fieldContactName"       AS "fieldContactName",
+       tf."fieldContactPhone"      AS "fieldContactPhone",
+       tf."fieldNotes"             AS "fieldNotes",
        tf."fieldStatus"            AS "fieldStatus",
        tf.family                   AS family,
        it."labelHe"                AS "typeLabelHe",

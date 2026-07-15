@@ -73,6 +73,7 @@ import {
   findUnassignedLeadsForAssignment,
   getLeadById,
   assignLead,
+  type IncomingLeadRow,
 } from './incomingLeads';
 import {
   updateSiteMetadata,
@@ -98,6 +99,7 @@ import {
   updateCrmTask,
   listCrmTasksForOwner,
   listAllCrmTasks,
+  getCrmTaskById,
   crmApiConfigured,
   listCrmCalendarEvents,
   createCrmCalendarEvent,
@@ -215,6 +217,26 @@ function fmtWhen(d: Date | string | null): string | null {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+/**
+ * Truncate a possibly-null text to `n` chars for speech-friendly snippets in
+ * list results. Full text stays behind the dedicated `get_*_details` tools.
+ */
+function snippet(text: string | null | undefined, n: number): string | null {
+  if (!text) return null;
+  const t = text.trim();
+  if (t.length === 0) return null;
+  return t.length > n ? `${t.slice(0, n)}…` : t;
+}
+
+/** Name for a bot user by id — used to enrich detail-tool responses. */
+async function getUserNameById(userId: string): Promise<string | null> {
+  const { rows } = await pool.query<{ name: string | null }>(
+    `SELECT name FROM "User" WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  return rows[0]?.name ?? null;
 }
 
 /** Phone for a bot user (findUsersByName returns id+name only). */
@@ -376,17 +398,28 @@ function trimInspectionRow(r: {
   customerName: string | null;
   siteAddress?: string | null;
   siteCity: string | null;
+  fieldContactName?: string | null;
+  fieldContactPhone?: string | null;
+  fieldNotes?: string | null;
   fieldStatus: string;
   typeLabelHe: string;
   scheduledStartAt?: Date;
   timeHm?: string | null;
   workerName?: string | null;
 }): Record<string, unknown> {
+  // Contact + notes are the safety net for "המודל ענה מהרשימה במקום לקרוא
+  // ל-get_inspection_details". Address + contact_name + contact_phone are
+  // short — passed as-is; notes may be long — 200-char snippet. All included
+  // only when the caller's query supplies them (matches the existing
+  // `siteAddress !== undefined` conditional pattern used above).
   return {
     task_field_id: r.taskFieldId,
     customer: r.customerName,
     city: r.siteCity,
     ...(r.siteAddress !== undefined ? { address: r.siteAddress } : {}),
+    ...(r.fieldContactName !== undefined ? { contact_name: r.fieldContactName } : {}),
+    ...(r.fieldContactPhone !== undefined ? { contact_phone: r.fieldContactPhone } : {}),
+    ...(r.fieldNotes !== undefined ? { notes_snippet: snippet(r.fieldNotes, 200) } : {}),
     status: statusHe(r.fieldStatus),
     type: r.typeLabelHe,
     ...(r.scheduledStartAt ? { when: fmtWhen(r.scheduledStartAt) } : {}),
@@ -416,7 +449,7 @@ const TOOLS: VoiceToolDef[] = [
     name: 'get_my_inspections',
     gate: 'any',
     description:
-      'רשימת הבדיקות (ביקורי שטח) של המשתמש. ברירת מחדל: היום. אפשר טווח בעברית ("מחר", "השבוע", "בין 1/7 ל-10/7") או תאריכים מפורשים, או all_time=true להיסטוריה.',
+      'רשימת הבדיקות (ביקורי שטח) של המשתמש. ברירת מחדל: היום. אפשר טווח בעברית ("מחר", "השבוע", "בין 1/7 ל-10/7") או תאריכים מפורשים, או all_time=true להיסטוריה. כל שורה כוללת סיכום קצר (לקוח, כתובת, איש קשר, טלפון, ותקציר הערות 200 תווים); לפרטים מלאים של בדיקה בודדת (הערות מלאות, בעיות, קישור מעקב) — קרא ל-get_inspection_details.',
     parameters: {
       type: 'object',
       properties: {
@@ -1174,7 +1207,7 @@ const TOOLS: VoiceToolDef[] = [
     name: 'list_my_crm_tasks',
     gate: 'any',
     available: crmApiConfigured,
-    description: 'רשימת משימות המשרד הפתוחות של המשתמש מה-CRM (לא בדיקות שטח).',
+    description: 'רשימת משימות המשרד הפתוחות של המשתמש מה-CRM (לא בדיקות שטח). מחזיר סיכום קצר לכל משימה (כולל 200 תווים ראשונים של התיאור); לתוכן מלא של משימה בודדת קרא ל-get_crm_task_details.',
     parameters: {
       type: 'object',
       properties: {
@@ -1194,11 +1227,62 @@ const TOOLS: VoiceToolDef[] = [
         tasks: filtered.map((t) => ({
           task_id: t.id,
           title: t.title,
+          // 200-char snippet so the model can hint at what the task is about;
+          // full description stays behind get_crm_task_details.
+          description_snippet: snippet(t.description, 200),
+          product_name: t.productName,
           due: t.dueDate ? fmtWhen(t.dueDate) : null,
           priority: t.priority,
           status: t.status,
         })),
         speak: filtered.length === 0 ? 'אין לך משימות משרד פתוחות.' : `יש לך ${filtered.length} משימות משרד פתוחות.`,
+      };
+    },
+  },
+  {
+    name: 'get_crm_task_details',
+    gate: 'any',
+    available: crmApiConfigured,
+    description:
+      'פרטים מלאים של משימת CRM בודדת: כותרת, תיאור מלא, תאריך יעד, עדיפות, סטטוס, מוצר, לקוח, ובעל המשימה. עובד — רק על משימות שלו; מנהל — על כל משימה.',
+    parameters: {
+      type: 'object',
+      required: ['task_id'],
+      properties: { task_id: { type: 'string' } },
+    },
+    handler: async (user, args) => {
+      const taskId = str(args.task_id);
+      if (!taskId) return { ok: false, error: 'חסר מזהה משימה' };
+
+      const task = await getCrmTaskById(taskId);
+      if (!task) {
+        // Either the CRM answered non-2xx (missing task / endpoint not yet
+        // deployed) or the network failed. crmFetch already logged the reason;
+        // surface a friendly Hebrew line.
+        return { ok: false, error: 'לא הצלחתי לקרוא את פרטי המשימה מה-CRM' };
+      }
+
+      // Enforce the same ownership rule as update_crm_task: non-elevated users
+      // may only see their own office tasks.
+      if (!user.isElevated && task.ownerId !== user.id) {
+        return { ok: false, error: 'המשימה הזו לא שלך' };
+      }
+
+      const ownerName = await getUserNameById(task.ownerId);
+      return {
+        ok: true,
+        detail: {
+          task_id: task.id,
+          title: task.title,
+          description: task.description,
+          due: task.dueDate ? fmtWhen(task.dueDate) : null,
+          priority: task.priority,
+          status: task.status,
+          product_name: task.productName,
+          customer_id: task.customerId,
+          owner_id: task.ownerId,
+          owner_name: ownerName,
+        },
       };
     },
   },
@@ -1509,7 +1593,7 @@ const TOOLS: VoiceToolDef[] = [
   {
     name: 'list_pending_leads',
     gate: 'manager',
-    description: 'לידים נכנסים שממתינים לשיוך לעובד.',
+    description: 'לידים נכנסים שממתינים לשיוך לעובד. מחזיר סיכום קצר לכל ליד (כולל 200 תווים ראשונים של גוף ההודעה); לתוכן מלא של ליד בודד קרא ל-get_lead_details.',
     parameters: { type: 'object', properties: {} },
     handler: async () => {
       const rows = await findUnassignedLeadsForAssignment(20);
@@ -1522,9 +1606,84 @@ const TOOLS: VoiceToolDef[] = [
           lead_id: l.id,
           from: l.fromName ?? l.fromEmail,
           subject: l.subject,
+          // 200-char snippet so the model can speak roughly what the lead is
+          // about; the full body stays behind get_lead_details.
+          body_snippet: snippet(l.body, 200),
+          status: l.status,
           received: fmtWhen(l.receivedAt),
         })),
         speak: rows.length === 0 ? 'אין לידים שממתינים לשיוך.' : `יש ${rows.length} לידים שממתינים לשיוך.`,
+      };
+    },
+  },
+  {
+    name: 'get_lead_details',
+    gate: 'manager',
+    description:
+      'פרטים מלאים של ליד בודד: נושא, גוף ההודעה המלא, פרטי השולח, סטטוס, קישור למשימה, ובעל טיפול נוכחי. זיהוי לפי lead_id (UUID) או hint (שם השולח / חלק מהנושא — מתוך רשימת הלידים הממתינים).',
+    parameters: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'string', description: 'UUID של הליד' },
+        hint: { type: 'string', description: 'שם השולח או חלק מהנושא — לזיהוי ליד ממתין' },
+      },
+    },
+    handler: async (_user, args) => {
+      const explicitId = str(args.lead_id);
+      const hint = str(args.hint);
+      if (!explicitId && !hint) {
+        return { ok: false, error: 'צריך lead_id או רמז לזיהוי הליד' };
+      }
+
+      // UUID → direct fetch (works even for already-assigned leads).
+      // hint → fuzzy over pending leads (same shape as assign_lead's resolver).
+      let lead: IncomingLeadRow | null = null;
+      if (explicitId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(explicitId)) {
+        lead = await getLeadById(explicitId);
+        if (!lead) return { ok: false, error: 'הליד לא נמצא' };
+      } else if (hint) {
+        const pending = await findUnassignedLeadsForAssignment(50);
+        const q = hint.toLowerCase();
+        const matches = pending.filter(
+          (l) =>
+            (l.fromName ?? '').toLowerCase().includes(q) ||
+            (l.subject ?? '').toLowerCase().includes(q) ||
+            (l.fromEmail ?? '').toLowerCase().includes(q),
+        );
+        if (matches.length === 0) {
+          return { ok: false, error: `לא מצאתי ליד ממתין שמתאים ל"${hint}"` };
+        }
+        if (matches.length > 1) {
+          return {
+            ok: false,
+            error: 'יש כמה לידים מתאימים — לאיזה מהם?',
+            options: matches.slice(0, 8).map((l) => ({
+              lead_id: l.id,
+              from: l.fromName ?? l.fromEmail,
+              subject: l.subject,
+              received: fmtWhen(l.receivedAt),
+            })),
+          };
+        }
+        lead = matches[0];
+      } else {
+        return { ok: false, error: 'מזהה הליד לא בפורמט תקין' };
+      }
+
+      const ownerName = lead.ownerId ? await getUserNameById(lead.ownerId) : null;
+      return {
+        ok: true,
+        detail: {
+          lead_id: lead.id,
+          subject: lead.subject,
+          body: lead.body,
+          from_name: lead.fromName,
+          from_email: lead.fromEmail,
+          status: lead.status,
+          task_id: lead.taskId,
+          owner_name: ownerName,
+          received: fmtWhen(lead.receivedAt),
+        },
       };
     },
   },

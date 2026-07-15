@@ -76,6 +76,19 @@ describe('getMyInspectionsInRange', () => {
     expect(sql).toMatch(/tf\."scheduledStartAt"\s+AS\s+"scheduledStartAt"/);
   });
 
+  it('SQL selects the per-row contact + notes fields (safety net for the voice list mapper)', async () => {
+    // Without these on the row, the voice `trimInspectionRow` mapper would
+    // omit contact_name / contact_phone / notes_snippet — losing the safety
+    // net that stops "גלי" from answering from the shallow list instead of
+    // calling get_inspection_details.
+    poolQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    await getMyInspectionsInRange('u-1', '2026-07-01', '2026-07-02');
+    const [sql] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/tf\."fieldContactName"\s+AS\s+"fieldContactName"/);
+    expect(sql).toMatch(/tf\."fieldContactPhone"\s+AS\s+"fieldContactPhone"/);
+    expect(sql).toMatch(/tf\."fieldNotes"\s+AS\s+"fieldNotes"/);
+  });
+
   it('maps returned rows verbatim to MyInspectionRangeItem', async () => {
     const dbRow = {
       taskFieldId: 'tf-1',

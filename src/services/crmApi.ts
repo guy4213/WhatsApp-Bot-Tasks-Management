@@ -128,6 +128,16 @@ export async function updateCrmTask(
 }
 
 /**
+ * Fetch a single CRM Task by id. Returns null when the CRM answers non-2xx
+ * (missing task, endpoint not yet deployed, network error) — the voice tool
+ * layer turns that into a friendly Hebrew message. Same auth/timeout shape as
+ * the rest of this file; the caller enforces ownership before exposing the row.
+ */
+export async function getCrmTaskById(taskId: string): Promise<CrmTask | null> {
+  return crmFetch<CrmTask>('GET', `/tasks/${encodeURIComponent(taskId)}`);
+}
+
+/**
  * All tasks visible to the service JWT (`scope=all`), filtered here to the
  * given owner. The CRM list endpoint has no owner filter — the voice layer
  * needs "my open office tasks", so we filter + cap client-side.
