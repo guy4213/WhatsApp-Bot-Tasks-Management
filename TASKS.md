@@ -9,66 +9,60 @@ Conventions:
 
 ---
 
-## VOICE-FIELD-TASKS-FROM-OUTLOOK — split field vs. office in the voice agent (2026-07-15)
+## VOICE-MY-TASKS — unified "my tasks today" in the voice agent (2026-07-15)
 
 **Status:** DONE (local, uncommitted)
 
-**What to do.** In the voice agent "גלי", three information sources were bleeding
-into each other: (1) field inspections created by hand in the user's Outlook
-calendar, (2) office/CRM tasks in the DB (`list_my_crm_tasks`), and (3) the full
-Outlook calendar (`get_calendar_events`) which mixes inspections with regular
-meetings. Asking "מה יש לי היום בשטח?" surfaced dentist appointments and personal
-meetings alongside real inspections. Added a new voice tool `get_my_field_tasks`
-that reads Outlook via `listCrmCalendarEvents`, filters to גלית field
-inspections/surveys only, and updated גלי's persona to keep the four worlds
-(field / office / calendar / leads) distinct.
+**What to do.** In the voice agent "גלי", a general "what do I have today?" must
+NOT be split across field/office/calendar — it should be ONE combined answer.
+`get_my_tasks` returns, for today: (1) **all** of the user's Outlook calendar
+events — NO filtering, field inspections and regular meetings alike — together
+with (2) the user's office (CRM `Task`) rows whose **dueDate is today**, and (3)
+the **overdue** tasks (dueDate past, still open) appended at the END. Same
+due-date logic the WhatsApp bot already uses.
+
+**Design note.** This REPLACES an earlier, more complex approach in the same
+session that filtered the calendar down to "field inspections only" via a
+hybrid heuristic + AI classifier. Product direction changed to "bring
+everything from the calendar under one heading — משימות", so that classifier
+(`src/ai/fieldTaskClassifier.ts`), its keyword heuristic, and the standalone
+`get_my_field_tasks` tool + diagnostic script were removed. Simpler is the goal.
 
 **How.**
-- The voice agent "גלי" now separates field inspections, office (CRM) tasks, and
-  the full calendar.
-- 24 real Outlook events from `MicrosoftGraphEventLog` were analyzed (three
-  templates: "בדיקדת קרינה…" incl. Yoram's recurring "בדיקדת" typo, "בדיקת צוות
-  מריחים…", "סקר אסבסט").
-- Filtering is a **hybrid heuristic + AI** pipeline: a fast synchronous heuristic
-  (domain keyword → in; all-day / online meeting → out; no signal → out) decides
-  the clear cases; only genuinely ambiguous events go to ONE batched AI call.
-- The heuristic covers **all 24** analyzed events with **no AI call** — the AI
-  layer fires only for uncertain events (e.g. "ביקור אצל דוד").
-- AI layer is conservative: never throws; no provider / provider error / bad
-  output → `false` for every event (false-negative preferred over false-positive,
-  since a missed event still shows in the full calendar).
+- One tool `get_my_tasks` (gate `any`, **no** CRM gate — office tasks are a
+  direct DB read and always work; the calendar half is added only when
+  `crmApiConfigured()` and degrades gracefully if Outlook isn't connected).
+- Office half mirrors WhatsApp: `listTasks(user, {filter:'today_overdue',
+  dateField:'dueDate', scope:'own'})`, then split by the LOCAL Jerusalem date
+  into due-today vs overdue.
+- Calendar half: `listCrmCalendarEvents` for the local day window, mapped
+  as-is (no filtering).
+- Response merges calendar + office-today into one `tasks` list; `overdue` is a
+  separate bucket so גלי reads it last. `speak` puts the overdue count at the end
+  ("היום יש לך N משימות. בנוסף, X משימות באיחור.").
 
 **Files changed.**
-- NEW `src/ai/fieldTaskClassifier.ts` — `classifyUncertainEventsByAI` (batched,
-  structured output, hallucination guard, conservative fallback, logging, never
-  throws).
-- `src/services/voiceTools.ts` — `FIELD_DOMAIN_KEYWORDS`, `FIELD_ACTION_KEYWORDS`,
-  `HeuristicVerdict`, `classifyByHeuristic`, `filterFieldTaskEvents`, `fmtTime`,
-  and the new `get_my_field_tasks` tool (gate `any`, gated on `crmApiConfigured`).
-- `src/routes/voiceAssistant.ts` — persona `buildInstructions`: rewrote the
-  "four worlds" block (field → `get_my_field_tasks` only; explicitly NOT
-  `get_calendar_events` / `get_my_inspections`).
-- NEW `src/scripts/inspectOutlookEvents.ts` — read-only diagnostic (the file the
-  task references did not yet exist; created it, carrying the required header, so
-  the keyword lists can be re-calibrated in future).
-- NEW `src/__tests__/fieldTaskClassifier.test.ts` (7 tests).
-- `src/__tests__/voiceTools.test.ts` — new `get_my_field_tasks` block (gating,
-  heuristic-only path, hard-no all-day/online, AI true/false, no-signal drop,
-  cap 15 + voice fields + zero/count lines).
+- `src/services/voiceTools.ts` — new `get_my_tasks` tool; added `listTasks`
+  import + kept `fmtTime`; removed the field-task filter block
+  (`FIELD_DOMAIN_KEYWORDS` / `FIELD_ACTION_KEYWORDS` / `classifyByHeuristic` /
+  `filterFieldTaskEvents`) and the `get_my_field_tasks` tool.
+- `src/routes/voiceAssistant.ts` — persona `buildInstructions`: general "מה יש
+  לי היום / המשימות שלי" → `get_my_tasks`; overdue read at the end; focused
+  tools (`get_calendar_events`, `list_my_crm_tasks`, leads) kept for specific asks.
+- `src/__tests__/voiceTools.test.ts` — replaced the field-tasks block with a
+  `get_my_tasks` block (always-available gating, combined calendar+office with
+  overdue at the end, works without CRM, empty state, calendar-failure degradation).
+- REMOVED `src/ai/fieldTaskClassifier.ts`, `src/__tests__/fieldTaskClassifier.test.ts`,
+  `src/scripts/inspectOutlookEvents.ts`.
 
-**Tests.** `npx tsc --noEmit` → clean (0 errors). `npx vitest run
-src/__tests__/voiceTools.test.ts src/__tests__/fieldTaskClassifier.test.ts` →
-36/36 passed. Voice cluster (voice / voiceRoutes / voiceAccess / voiceTools /
-fieldTaskClassifier) → 69/69 passed. Full suite → 1758 passed, 7 skipped, 0
-failed (one worker OOM'd at the tail of 104 files — an env memory limit, not a
-test failure).
+**Tests.** `npx tsc --noEmit` → clean (0 errors). Voice cluster (voice /
+voiceRoutes / voiceAccess / voiceTools) → 58/58 passed.
 
 **Not touched:**
-- TaskField in DB
-- get_my_inspections
+- TaskField in DB / `get_my_inspections` (still the source for the status flow)
 - WhatsApp router
-- CRM API endpoint (`CrmCalendarEvent` shape unchanged; `crmApi.ts` only gained
-  a type re-import in the consumer, no endpoint/field changes)
+- CRM API endpoint / `CrmCalendarEvent` shape (`crmApi.ts` unchanged)
+- `list_my_crm_tasks` (kept for "all my open office tasks, any date")
 
 ---
 

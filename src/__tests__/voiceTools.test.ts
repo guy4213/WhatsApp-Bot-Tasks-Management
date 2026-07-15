@@ -17,7 +17,6 @@ import {
   listToolNames,
   executeVoiceTool,
 } from '../services/voiceTools';
-import { setProvider, type LLMProvider } from '../ai/provider';
 import type { ResolvedUser } from '../types';
 
 const worker: ResolvedUser = {
@@ -53,7 +52,6 @@ beforeEach(() => {
   query.mockClear();
   delete process.env.CRM_API_BASE_URL;
   delete process.env.CRM_SERVICE_JWT;
-  setProvider(undefined); // reset the AI provider seam between tests
 });
 
 describe('role gating', () => {
@@ -345,25 +343,20 @@ describe('executeVoiceTool — denial paths', () => {
   });
 });
 
-// ── get_my_field_tasks: Outlook calendar → filtered גלית field inspections ─────
+// ── get_my_tasks: unified "my tasks today" (all calendar + office due today) ───
 
-const CAL_EVENT_DEFAULTS = {
-  start: { dateTime: '2026-07-15T07:00:00Z', timeZone: 'UTC' },
-  end: { dateTime: '2026-07-15T08:00:00Z', timeZone: 'UTC' },
-  location: null as string | null,
-  isOnlineMeeting: false,
-  isAllDay: false,
-  webLink: null as string | null,
-};
-
-function calEvent(partial: {
-  id: string;
-  subject: string | null;
-  location?: string | null;
-  isAllDay?: boolean;
-  isOnlineMeeting?: boolean;
-}) {
-  return { ...CAL_EVENT_DEFAULTS, ...partial };
+/** An Outlook event at HH:00 local today. `subject` is passed through as-is. */
+function calEvent(partial: { id: string; subject: string | null; location?: string | null; isAllDay?: boolean }) {
+  return {
+    id: partial.id,
+    subject: partial.subject,
+    start: { dateTime: '2026-07-15T07:00:00Z', timeZone: 'UTC' },
+    end: { dateTime: '2026-07-15T08:00:00Z', timeZone: 'UTC' },
+    location: partial.location ?? null,
+    isOnlineMeeting: false,
+    isAllDay: partial.isAllDay ?? false,
+    webLink: null,
+  };
 }
 
 /** A CRM calendar-list HTTP response ({events,count}) for the fetch mock. */
@@ -374,8 +367,16 @@ function calResponse(events: unknown[]): Response {
   });
 }
 
-function mockProvider(emit: LLMProvider['emitStructured']): LLMProvider {
-  return { name: 'mock', emitStructured: emit };
+/** A "Task" row (what listTasks returns) with a dueDate `daysFromToday` away. */
+function taskRow(id: string, title: string, daysFromToday: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromToday);
+  return {
+    id, title, description: null, dueDate: d, priority: 'MEDIUM', status: 'OPEN',
+    type: 'GENERAL', createdAt: d, updatedAt: d, ownerId: 'w1',
+    customerId: null, leadId: null, projectId: null,
+    ownerName: 'דני בודק', customerName: null, leadName: null, projectName: null,
+  };
 }
 
 function enableCrm(): void {
@@ -383,168 +384,89 @@ function enableCrm(): void {
   process.env.CRM_SERVICE_JWT = 'jwt';
 }
 
-describe('get_my_field_tasks', () => {
-  it('appears only when the CRM bridge is configured — same gate as get_calendar_events', () => {
-    expect(listToolNames(worker)).not.toContain('get_my_field_tasks');
+describe('get_my_tasks', () => {
+  it('is available to every user, independent of the CRM bridge (office tasks come from the DB)', () => {
+    // Office half is a direct DB read → the tool shows up even with no CRM env.
+    expect(listToolNames(worker)).toContain('get_my_tasks');
+    expect(listToolNames(manager)).toContain('get_my_tasks');
     enableCrm();
-    expect(listToolNames(worker)).toContain('get_my_field_tasks');
-    expect(listToolNames(manager)).toContain('get_my_field_tasks');
+    expect(listToolNames(worker)).toContain('get_my_tasks');
   });
 
-  it('heuristic path: the 3 real Yoram templates all pass as matched_by=domain, NO AI call', async () => {
+  it('combines ALL of today\'s calendar events (unfiltered) with office tasks due today; overdue at the end', async () => {
     enableCrm();
-    const emit = vi.fn();
-    setProvider(mockProvider(emit));
+    // listTasks(today_overdue) mock: one due today, one overdue (5 days ago).
+    query.mockResolvedValueOnce({
+      rows: [taskRow('t-today', 'להתקשר לספק', 0), taskRow('t-late', 'לשלוח דוח', -5)],
+      rowCount: 2,
+    });
+    // Calendar: a field inspection AND a regular meeting — BOTH must be kept.
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       calResponse([
-        calEvent({ id: 'a', subject: 'בדיקדת קרינה עבור האוניברסיטה הפתוחה', location: 'רעננה' }),
-        calEvent({ id: 'b', subject: "בדיקת צוות מריחים עבור חברת היטאצ'י", location: 'חיפה' }),
-        calEvent({ id: 'c', subject: 'סקר אסבסט', location: 'לוד' }),
+        calEvent({ id: 'c1', subject: 'בדיקת קרינה עבור האוניברסיטה הפתוחה' }),
+        calEvent({ id: 'c2', subject: 'פגישה עם רואה חשבון' }),
       ]),
     );
     try {
-      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      const res = await executeVoiceTool(worker, 'get_my_tasks', {});
       expect(res.ok).toBe(true);
+      // today = 2 calendar (unfiltered) + 1 office due today = 3
       expect(res.count).toBe(3);
-      const tasks = res.field_tasks as Array<Record<string, unknown>>;
+      const tasks = res.tasks as Array<Record<string, unknown>>;
       expect(tasks).toHaveLength(3);
-      for (const t of tasks) expect(t.matched_by).toBe('domain');
-      // domain-only → the AI layer is never consulted
-      expect(emit).not.toHaveBeenCalled();
+      // the regular meeting is NOT filtered out
+      expect(tasks.some((t) => t.title === 'פגישה עם רואה חשבון')).toBe(true);
+      expect(tasks.some((t) => t.title === 'בדיקת קרינה עבור האוניברסיטה הפתוחה')).toBe(true);
+      // overdue is a SEPARATE bucket, read at the end
+      expect(res.overdue_count).toBe(1);
+      const overdue = res.overdue as Array<Record<string, unknown>>;
+      expect(overdue[0].title).toBe('לשלוח דוח');
+      // the spoken line mentions overdue LAST
+      expect(res.speak).toBe('היום יש לך 3 משימות. בנוסף, 1 משימות באיחור.');
     } finally {
       fetchSpy.mockRestore();
     }
   });
 
-  it('hard-no: an all-day event is dropped even with a domain keyword, no AI call', async () => {
-    enableCrm();
-    const emit = vi.fn();
-    setProvider(mockProvider(emit));
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      calResponse([calEvent({ id: 'a', subject: 'בדיקת קרינה', location: 'רעננה', isAllDay: true })]),
-    );
-    try {
-      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
-      expect(res.ok).toBe(true);
-      expect(res.count).toBe(0);
-      expect(emit).not.toHaveBeenCalled();
-    } finally {
-      fetchSpy.mockRestore();
-    }
+  it('works without the CRM bridge — office + overdue only, calendar skipped, no fetch', async () => {
+    // No enableCrm() → crmApiConfigured()=false → the calendar read is skipped.
+    query.mockResolvedValueOnce({ rows: [taskRow('t-today', 'משימת משרד', 0)], rowCount: 1 });
+    const fetchSpy = vi.spyOn(global, 'fetch');
+    const res = await executeVoiceTool(worker, 'get_my_tasks', {});
+    expect(res.ok).toBe(true);
+    expect(res.count).toBe(1); // office only
+    expect(fetchSpy).not.toHaveBeenCalled(); // calendar not attempted
+    fetchSpy.mockRestore();
   });
 
-  it('hard-no: an online meeting is dropped even with a domain keyword, no AI call', async () => {
+  it('no tasks and empty calendar → the "no tasks today" line', async () => {
     enableCrm();
-    const emit = vi.fn();
-    setProvider(mockProvider(emit));
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      calResponse([calEvent({ id: 'a', subject: 'בדיקת קרינה', location: 'רעננה', isOnlineMeeting: true })]),
-    );
-    try {
-      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
-      expect(res.ok).toBe(true);
-      expect(res.count).toBe(0);
-      expect(emit).not.toHaveBeenCalled();
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  it('AI path: an ambiguous event enters as matched_by=ai when the AI returns true', async () => {
-    enableCrm();
-    const emit = vi.fn().mockResolvedValue({
-      classifications: [{ event_id: 'd', is_field_task: true, reason: 'ביקור מקצועי באתר לקוח' }],
-    });
-    setProvider(mockProvider(emit));
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      calResponse([calEvent({ id: 'd', subject: 'ביקור אצל דוד', location: 'רחוב הרצל 5, לוד' })]),
-    );
-    try {
-      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
-      expect(res.ok).toBe(true);
-      expect(emit).toHaveBeenCalledTimes(1);
-      const tasks = res.field_tasks as Array<Record<string, unknown>>;
-      expect(tasks).toHaveLength(1);
-      expect(tasks[0].matched_by).toBe('ai');
-      expect(tasks[0].event_id).toBe('d');
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  it('AI path: an ambiguous event is dropped when the AI returns false', async () => {
-    enableCrm();
-    const emit = vi.fn().mockResolvedValue({
-      classifications: [{ event_id: 'd', is_field_task: false, reason: 'טיפול רפואי אישי' }],
-    });
-    setProvider(mockProvider(emit));
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      calResponse([calEvent({ id: 'd', subject: 'בדיקת שיניים', location: 'מרפאת שיניים, רמת גן' })]),
-    );
-    try {
-      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
-      expect(res.ok).toBe(true);
-      expect(emit).toHaveBeenCalledTimes(1); // it WAS sent to the AI (action word + location)
-      expect(res.count).toBe(0); // …but dropped on a false verdict
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  it('no-signal event (no action word, no location) is dropped WITHOUT an AI call', async () => {
-    enableCrm();
-    const emit = vi.fn();
-    setProvider(mockProvider(emit));
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
-      calResponse([calEvent({ id: 'x', subject: 'עדכון', location: null })]),
-    );
-    try {
-      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
-      expect(res.ok).toBe(true);
-      expect(res.count).toBe(0);
-      expect(emit).not.toHaveBeenCalled();
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  it('output is capped at 15, carries the voice fields, and speaks the zero/count lines', async () => {
-    enableCrm();
-    setProvider(mockProvider(vi.fn()));
-    const many = Array.from({ length: 20 }, (_, i) =>
-      calEvent({ id: `e${i}`, subject: 'בדיקת קרינה', location: 'רעננה' }),
-    );
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(calResponse(many));
-    try {
-      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
-      expect(res.ok).toBe(true);
-      expect(res.count).toBe(20);
-      const tasks = res.field_tasks as Array<Record<string, unknown>>;
-      expect(tasks).toHaveLength(15); // cap()
-      expect(res.more).toBe(5);
-      // voice shape present
-      const t0 = tasks[0];
-      expect(t0).toHaveProperty('event_id');
-      expect(t0).toHaveProperty('subject');
-      expect(t0).toHaveProperty('when');
-      expect(t0).toHaveProperty('time');
-      expect(t0).toHaveProperty('location');
-      expect(t0).toHaveProperty('matched_by');
-      expect(res.speak).toBe('יש לך 20 בדיקות שטח בטווח הזה.');
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  it('empty calendar → zero-count Hebrew line', async () => {
-    enableCrm();
-    setProvider(mockProvider(vi.fn()));
+    query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(calResponse([]));
     try {
-      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      const res = await executeVoiceTool(worker, 'get_my_tasks', {});
       expect(res.ok).toBe(true);
       expect(res.count).toBe(0);
-      expect(res.speak).toBe('אין לך בדיקות שטח בטווח הזה.');
+      expect(res.overdue_count).toBe(0);
+      expect(res.speak).toBe('אין לך משימות להיום.');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('a failed calendar read does not fail the tool — office tasks still return', async () => {
+    enableCrm();
+    query.mockResolvedValueOnce({ rows: [taskRow('t-today', 'משימת משרד', 0)], rowCount: 1 });
+    // Outlook not connected → the CRM calendar endpoint 400s with a Hebrew error.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{"message":"חשבון Outlook אינו מחובר"}', {
+        status: 400, headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_tasks', {});
+      expect(res.ok).toBe(true); // tool still succeeds
+      expect(res.count).toBe(1); // office task survived the calendar failure
     } finally {
       fetchSpy.mockRestore();
     }

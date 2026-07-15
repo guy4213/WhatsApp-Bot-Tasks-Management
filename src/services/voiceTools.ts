@@ -91,7 +91,7 @@ import {
 import { openTrackingSession, markArrived, closeSession } from './tracking';
 import { buildTrackingUrl, getActiveTrackingToken } from './trackingLink';
 import { createProvisioning } from './owntracksProvisioning';
-import { findUsersByName } from './tasks';
+import { findUsersByName, listTasks } from './tasks';
 import { sendTextMessage } from '../whatsapp/sender';
 import { normalizeIsraeliPhone } from '../auth/phoneNormalizer';
 import {
@@ -105,9 +105,7 @@ import {
   createCrmCalendarEvent,
   updateCrmCalendarEvent,
   deleteCrmCalendarEvent,
-  type CrmCalendarEvent,
 } from './crmApi';
-import { classifyUncertainEventsByAI } from '../ai/fieldTaskClassifier';
 import { auditVoiceToolCall } from './voiceAccess';
 import { canAssignLeads } from './specialUsers';
 
@@ -454,107 +452,6 @@ const PROBLEM_TYPES: FieldProblemType[] = [
 
 const customerNotificationsEnabled = () =>
   (process.env.CUSTOMER_NOTIFICATIONS_ENABLED ?? '').toLowerCase() === 'true';
-
-// ── Field-task filter (Outlook calendar → גלית site inspections) ────────────────
-//
-// `get_my_field_tasks` reads the user's Outlook calendar (the SAME source as
-// get_calendar_events) but keeps ONLY events that are actual field
-// inspections/surveys, dropping regular meetings. Two layers:
-//   1. classifyByHeuristic — fast, synchronous. Clear domain keyword → in;
-//      all-day / online meeting → out; no signal at all → out (no AI spend).
-//   2. classifyUncertainEventsByAI — one batched AI call for the leftovers.
-// The keyword lists below were calibrated against 24 real Yoram events (see
-// src/scripts/inspectOutlookEvents.ts) and cover all of them without any AI call.
-
-const FIELD_DOMAIN_KEYWORDS = [
-  'קרינה',
-  'אסבסט',
-  'ראדון',
-  'רעש',
-  'אוויר',
-  'ריח',
-  'עובש',
-  'קרקע',
-  'מריחים',
-  'RF',
-] as const;
-
-const FIELD_ACTION_KEYWORDS = [
-  'בדיק',
-  'בדיקד', // tolerate Yoram's recurring typo "בדיקדת"
-  'ביקור',
-  'מדיד',
-  'דיגום',
-  'סקר',
-] as const;
-
-type HeuristicVerdict =
-  | { decision: 'yes'; matched_by: 'domain' }
-  | { decision: 'no'; reason: 'all_day' | 'online_meeting' }
-  | { decision: 'uncertain'; hasAction: boolean; hasLocation: boolean };
-
-/**
- * Fast, synchronous first pass. Case-insensitive keyword matching (incl. "RF").
- * A `{decision:'uncertain', hasAction:false, hasLocation:false}` verdict means
- * "no signal at all" — the pipeline drops it without an AI call.
- */
-function classifyByHeuristic(ev: CrmCalendarEvent): HeuristicVerdict {
-  if (ev.isAllDay) return { decision: 'no', reason: 'all_day' };
-  if (ev.isOnlineMeeting) return { decision: 'no', reason: 'online_meeting' };
-
-  const subject = (ev.subject ?? '').toLowerCase();
-  const hasDomain = FIELD_DOMAIN_KEYWORDS.some((k) => subject.includes(k.toLowerCase()));
-  if (hasDomain) return { decision: 'yes', matched_by: 'domain' };
-
-  const hasAction = FIELD_ACTION_KEYWORDS.some((k) => subject.includes(k.toLowerCase()));
-  const hasLocation = Boolean(ev.location?.trim());
-  return { decision: 'uncertain', hasAction, hasLocation };
-}
-
-/**
- * Full hybrid pipeline. Domain-matched events pass immediately (matched_by
- * 'domain'); genuinely ambiguous events (≥1 signal) go to ONE batched AI call
- * and pass only when the model returns is_field_task=true (matched_by 'ai');
- * everything else is dropped. Output preserves the original API order.
- */
-async function filterFieldTaskEvents(
-  events: CrmCalendarEvent[],
-): Promise<Array<CrmCalendarEvent & { matched_by: 'domain' | 'ai' }>> {
-  const domainIds = new Set<string>();
-  const uncertain: CrmCalendarEvent[] = [];
-
-  for (const ev of events) {
-    const verdict = classifyByHeuristic(ev);
-    if (verdict.decision === 'yes') {
-      domainIds.add(ev.id);
-    } else if (verdict.decision === 'uncertain' && (verdict.hasAction || verdict.hasLocation)) {
-      uncertain.push(ev);
-    }
-    // 'no' and signal-less 'uncertain' → dropped (no AI call).
-  }
-
-  const aiFieldTaskIds = new Set<string>();
-  if (uncertain.length > 0) {
-    const verdicts = await classifyUncertainEventsByAI(
-      uncertain.map((ev) => ({
-        event_id: ev.id,
-        subject: ev.subject ?? '',
-        location: ev.location ?? '',
-      })),
-    );
-    for (const ev of uncertain) {
-      if (verdicts.get(ev.id)?.is_field_task === true) aiFieldTaskIds.add(ev.id);
-    }
-  }
-
-  // Rebuild in the original chronological order the API returned.
-  const out: Array<CrmCalendarEvent & { matched_by: 'domain' | 'ai' }> = [];
-  for (const ev of events) {
-    if (domainIds.has(ev.id)) out.push({ ...ev, matched_by: 'domain' });
-    else if (aiFieldTaskIds.has(ev.id)) out.push({ ...ev, matched_by: 'ai' });
-  }
-  return out;
-}
 
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
@@ -1081,73 +978,92 @@ const TOOLS: VoiceToolDef[] = [
     },
   },
   {
-    name: 'get_my_field_tasks',
+    name: 'get_my_tasks',
     gate: 'any',
-    available: crmApiConfigured,
     description:
-      'רשימת בדיקות השטח של המשתמש מתוך יומן Outlook. האירועים מסוננים כך שפגישות רגילות אינן נכללות. כדי להציג את היומן המלא, לרבות פגישות שאינן בדיקות, יש להשתמש ב-get_calendar_events.',
-    parameters: {
-      type: 'object',
-      properties: {
-        when: { type: 'string', description: 'ביטוי טווח בעברית: היום/מחר/השבוע/בין X ל-Y' },
-        from_iso: { type: 'string', description: 'התחלה ISO (אופציונלי)' },
-        to_iso: { type: 'string', description: 'סוף ISO (אופציונלי)' },
-        days_ahead: { type: 'number', description: 'כמה ימים קדימה (ברירת מחדל 7)' },
-      },
-    },
-    handler: async (user, args) => {
-      const now = new Date();
-      const days = Math.min(Math.max(num(args.days_ahead) ?? 7, 1), 60);
+      'המשימות של המשתמש להיום — תצוגה משולבת אחת. כוללת את כל אירועי היום מיומן ה-Outlook (בלי סינון — בדיקות שטח וגם פגישות רגילות) יחד עם משימות המשרד (CRM) שתאריך היעד שלהן היום. בסוף מוצגות המשימות שבאיחור (תאריך יעד שעבר ולא הושלמו). זו התשובה לכל שאלה כללית כמו "מה יש לי היום" / "המשימות שלי" / "מה על הפרק".',
+    parameters: { type: 'object', properties: {} },
+    handler: async (user) => {
+      const today = localJerusalemDate();
+      const tomorrow = addDays(today, 1);
 
-      // Range resolution mirrors get_calendar_events (from_iso/to_iso/days_ahead)
-      // and additionally accepts a Hebrew phrase via the SAME parser the
-      // inspection tools use (parseHebrewInspectionRange) — no parallel mechanism.
-      let startIso = str(args.from_iso);
-      let endIso = str(args.to_iso);
-      let label: string | null = null;
-      const phrase = str(args.when);
-      if (phrase && (!startIso || !endIso)) {
-        const parsed = parseHebrewInspectionRange(phrase);
-        if (parsed) {
-          startIso = startIso ?? `${parsed.fromLocalDate}T00:00:00`;
-          endIso = endIso ?? `${parsed.toLocalDate}T00:00:00`;
-          label = parsed.label;
+      // ── Office tasks (CRM "Task" table) — SAME logic as WhatsApp: open tasks
+      // whose dueDate is today or earlier (carry-over). Split into due-today vs
+      // overdue by the LOCAL Jerusalem calendar date. Never fails the whole tool.
+      const officeToday: Array<Record<string, unknown>> = [];
+      const overdue: Array<Record<string, unknown>> = [];
+      try {
+        const { tasks } = await listTasks(user, {
+          filter: 'today_overdue',
+          dateField: 'dueDate',
+          scope: 'own',
+          limit: 50,
+        });
+        for (const t of tasks) {
+          const row = {
+            kind: 'משרד',
+            task_id: t.id,
+            title: t.title,
+            customer: t.customerName,
+            due: t.dueDate ? fmtWhen(t.dueDate) : null,
+            priority: t.priority,
+            status: t.status,
+          };
+          const dueLocal = t.dueDate ? localJerusalemDate(new Date(t.dueDate)) : null;
+          if (dueLocal && dueLocal < today) overdue.push(row);
+          else officeToday.push(row);
+        }
+      } catch (err) {
+        logger.warn({ err, userId: user.id }, 'get_my_tasks: office tasks read failed');
+      }
+
+      // ── Calendar (Outlook) — ALL of today's events, NO filtering. Only when
+      // the CRM bridge is configured; if Outlook is not connected / the read
+      // fails, we just omit the calendar half — the office tasks still return.
+      const calendarToday: Array<Record<string, unknown>> = [];
+      if (crmApiConfigured()) {
+        try {
+          const events = await listCrmCalendarEvents(user.id, {
+            startIso: `${today}T00:00:00`,
+            endIso: `${tomorrow}T00:00:00`,
+            top: 50,
+          });
+          for (const e of events) {
+            calendarToday.push({
+              kind: 'יומן',
+              event_id: e.id,
+              title: e.subject,
+              when: e.start ? fmtWhen(e.start.dateTime) : null,
+              time: e.start ? fmtTime(e.start.dateTime) : null,
+              location: e.location ?? null,
+              all_day: e.isAllDay,
+            });
+          }
+        } catch (err) {
+          logger.warn({ err, userId: user.id }, 'get_my_tasks: calendar read failed — office tasks only');
         }
       }
-      startIso = startIso ?? now.toISOString();
-      endIso = endIso ?? new Date(now.getTime() + days * 86_400_000).toISOString();
 
-      try {
-        const events = await listCrmCalendarEvents(user.id, { startIso, endIso, top: 50 });
-        const fieldEvents = await filterFieldTaskEvents(events);
-        const { items, more } = cap(fieldEvents);
-        return {
-          ok: true,
-          ...(label ? { range: label } : {}),
-          count: fieldEvents.length,
-          more,
-          field_tasks: items.map((e) => ({
-            event_id: e.id,
-            subject: e.subject,
-            when: e.start ? fmtWhen(e.start.dateTime) : null,
-            time: e.start ? fmtTime(e.start.dateTime) : null,
-            location: e.location ?? null,
-            matched_by: e.matched_by,
-          })),
-          speak:
-            fieldEvents.length === 0
-              ? `אין לך בדיקות שטח ${label ?? 'בטווח הזה'}.`
-              : `יש לך ${fieldEvents.length} בדיקות שטח ${label ?? 'בטווח הזה'}.`,
-        };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          ok: false,
-          error: msg.includes('מחובר')
-            ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM (הגדרות → Outlook).'
-            : msg,
-        };
-      }
+      // One unified "tasks" list for today (calendar first, then office);
+      // overdue kept SEPARATE so גלי reads it at the END of the answer.
+      const todayItems = [...calendarToday, ...officeToday];
+      const todayCap = cap(todayItems);
+      const overdueCap = cap(overdue);
+
+      const speak =
+        todayItems.length === 0 && overdue.length === 0
+          ? 'אין לך משימות להיום.'
+          : `היום יש לך ${todayItems.length} משימות${overdue.length ? `. בנוסף, ${overdue.length} משימות באיחור` : ''}.`;
+
+      return {
+        ok: true,
+        count: todayItems.length,
+        more: todayCap.more,
+        tasks: todayCap.items,
+        overdue_count: overdue.length,
+        overdue: overdueCap.items,
+        speak,
+      };
     },
   },
   {
