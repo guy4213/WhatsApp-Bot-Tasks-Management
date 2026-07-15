@@ -1256,10 +1256,11 @@ const TOOLS: VoiceToolDef[] = [
 
       const task = await getCrmTaskById(taskId);
       if (!task) {
-        // Either the CRM answered non-2xx (missing task / endpoint not yet
-        // deployed) or the network failed. crmFetch already logged the reason;
-        // surface a friendly Hebrew line.
-        return { ok: false, error: 'לא הצלחתי לקרוא את פרטי המשימה מה-CRM' };
+        // crmFetch collapses 404 (missing task), 403 (no access), and network
+        // failure into the same null — from the user's perspective those all
+        // read the same way ("that task isn't available to me"). crmFetch
+        // logs the real reason for ops; surface the user-facing framing here.
+        return { ok: false, error: 'המשימה לא נמצאה או שאין לך גישה אליה' };
       }
 
       // Enforce the same ownership rule as update_crm_task: non-elevated users

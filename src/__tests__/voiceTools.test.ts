@@ -195,6 +195,26 @@ describe('executeVoiceTool — denial paths', () => {
     expect(res.error).toBe('חסר מזהה משימה');
   });
 
+  it('get_crm_task_details returns the not-found/no-access Hebrew line when the CRM answers non-2xx (or endpoint missing)', async () => {
+    // crmFetch collapses 404, 403, and network failure into null. All three
+    // read the same way to the user, and the message must NOT be a generic
+    // "לא הצלחתי לקרוא..." — that would confuse a task that simply doesn't
+    // exist / isn't accessible with a real CRM outage.
+    process.env.CRM_API_BASE_URL = 'https://crm.example.com';
+    process.env.CRM_SERVICE_JWT = 'jwt';
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{"error":"not found"}', { status: 404, headers: { 'Content-Type': 'application/json' } }),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_crm_task_details', { task_id: 'task-missing' });
+      expect(res.ok).toBe(false);
+      expect(res.error).toBe('המשימה לא נמצאה או שאין לך גישה אליה');
+      expect(res.detail).toBeUndefined();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('get_crm_task_details enforces ownership — a worker asking about someone else\'s task is rejected', async () => {
     // Security-critical: gate is 'any' by design, but the handler must reject
     // a non-elevated user asking about a task owned by a different user.
