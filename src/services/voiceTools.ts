@@ -100,6 +100,8 @@ import {
   crmApiConfigured,
   listCrmCalendarEvents,
   createCrmCalendarEvent,
+  updateCrmCalendarEvent,
+  deleteCrmCalendarEvent,
 } from './crmApi';
 import { auditVoiceToolCall } from './voiceAccess';
 
@@ -297,6 +299,72 @@ async function resolveUserByName(
     };
   }
   return { ok: true, id: matches[0].id, name: matches[0].name };
+}
+
+/**
+ * Resolve which calendar event an edit/delete targets. Priority: explicit
+ * event_id → fuzzy match over the user's upcoming events by subject. Ambiguity
+ * (or no match) returns options / a friendly error. Looks 60 days ahead + 7 back.
+ */
+async function resolveCalendarEvent(
+  userId: string,
+  args: Record<string, unknown>,
+): Promise<
+  | { ok: true; eventId: string; subject: string }
+  | { ok: false; result: VoiceToolResult }
+> {
+  const explicitId = str(args.event_id);
+  const match = str(args.match);
+
+  let events: Awaited<ReturnType<typeof listCrmCalendarEvents>>;
+  try {
+    const now = new Date();
+    events = await listCrmCalendarEvents(userId, {
+      startIso: new Date(now.getTime() - 7 * 86_400_000).toISOString(),
+      endIso: new Date(now.getTime() + 60 * 86_400_000).toISOString(),
+      top: 50,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        error: msg.includes('מחובר')
+          ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM.'
+          : msg,
+      },
+    };
+  }
+
+  if (explicitId) {
+    const found = events.find((e) => e.id === explicitId);
+    return { ok: true, eventId: explicitId, subject: found?.subject ?? 'האירוע' };
+  }
+
+  if (!match) {
+    return { ok: false, result: { ok: false, error: 'לאיזה אירוע להתייחס? אפשר לומר חלק מהנושא.' } };
+  }
+  const q = match.toLowerCase();
+  const hits = events.filter((e) => (e.subject ?? '').toLowerCase().includes(q));
+  if (hits.length === 0) {
+    return { ok: false, result: { ok: false, error: `לא מצאתי ביומן אירוע שמתאים ל"${match}".` } };
+  }
+  if (hits.length > 1) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        error: `יש כמה אירועים שמתאימים ל"${match}" — לאיזה מהם הכוונה?`,
+        options: hits.slice(0, 6).map((e) => ({
+          event_id: e.id,
+          subject: e.subject,
+          when: e.start ? fmtWhen(e.start.dateTime) : null,
+        })),
+      },
+    };
+  }
+  return { ok: true, eventId: hits[0].id, subject: hits[0].subject ?? 'האירוע' };
 }
 
 function trimInspectionRow(r: {
@@ -909,6 +977,96 @@ const TOOLS: VoiceToolDef[] = [
           ok: false,
           error: msg.includes('מחובר')
             ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM (הגדרות → Outlook).'
+            : msg,
+        };
+      }
+    },
+  },
+  {
+    name: 'update_calendar_event',
+    gate: 'any',
+    available: crmApiConfigured,
+    description:
+      'עדכון אירוע קיים ביומן Outlook: שינוי נושא/מועד/מיקום. זיהוי האירוע לפי event_id, או לפי match (טקסט מנושא האירוע — אם יש כמה תואמים אחזיר רשימה לבחירה).',
+    parameters: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string', description: 'מזהה האירוע (אם ידוע)' },
+        match: { type: 'string', description: 'טקסט לזיהוי האירוע לפי הנושא (למשל "היטאצ\'י")' },
+        subject: { type: 'string', description: 'נושא חדש' },
+        start_iso: { type: 'string', description: 'מועד התחלה חדש, ISO מקומי' },
+        end_iso: { type: 'string' },
+        duration_minutes: { type: 'number', description: 'משך חדש (אם יש start בלי end)' },
+        location: { type: 'string' },
+      },
+    },
+    handler: async (user, args) => {
+      const resolved = await resolveCalendarEvent(user.id, args);
+      if (!resolved.ok) return resolved.result;
+
+      const patch: Record<string, unknown> = {};
+      const subject = str(args.subject);
+      if (subject) patch.subject = subject;
+      const loc = str(args.location);
+      if (loc) patch.location = loc;
+      const startIso = str(args.start_iso);
+      if (startIso) {
+        const s = new Date(startIso);
+        if (Number.isNaN(s.getTime())) return { ok: false, error: 'מועד ההתחלה החדש לא תקין' };
+        patch.start = startIso.replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)$/, '');
+        let endIso = str(args.end_iso);
+        if (!endIso) {
+          const mins = Math.min(Math.max(num(args.duration_minutes) ?? 60, 5), 720);
+          endIso = new Date(s.getTime() + mins * 60_000).toISOString().slice(0, 19);
+        }
+        patch.end = endIso.replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)$/, '');
+      } else if (str(args.end_iso)) {
+        patch.end = str(args.end_iso)!.replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)$/, '');
+      }
+
+      if (Object.keys(patch).length === 0) {
+        return { ok: false, error: 'לא צוין מה לשנות (נושא / מועד / מיקום)' };
+      }
+
+      try {
+        await updateCrmCalendarEvent(user.id, resolved.eventId, patch);
+        return { ok: true, speak: `האירוע "${resolved.subject}" עודכן ביומן.` };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          ok: false,
+          error: msg.includes('מחובר')
+            ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM.'
+            : msg,
+        };
+      }
+    },
+  },
+  {
+    name: 'delete_calendar_event',
+    gate: 'any',
+    available: crmApiConfigured,
+    description:
+      'מחיקת אירוע מהיומן. זיהוי לפי event_id או match (טקסט מהנושא). חשוב: לפני קריאה לכלי הזה — ודאי עם המשתמש שהוא בטוח שברצונו למחוק את האירוע הספציפי.',
+    parameters: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string' },
+        match: { type: 'string', description: 'טקסט לזיהוי האירוע לפי הנושא' },
+      },
+    },
+    handler: async (user, args) => {
+      const resolved = await resolveCalendarEvent(user.id, args);
+      if (!resolved.ok) return resolved.result;
+      try {
+        await deleteCrmCalendarEvent(user.id, resolved.eventId);
+        return { ok: true, speak: `האירוע "${resolved.subject}" נמחק מהיומן.` };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          ok: false,
+          error: msg.includes('מחובר')
+            ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM.'
             : msg,
         };
       }

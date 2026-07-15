@@ -190,7 +190,7 @@ export interface CrmCreatedCalendarEvent {
  * null-swallowing crmFetch, because calendar UX needs the real reason.
  */
 async function crmCalendarFetch<T>(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   path: string,
   userId: string,
   body?: unknown,
@@ -269,5 +269,48 @@ export async function createCrmCalendarEvent(
       ...(input.location ? { location: input.location } : {}),
       ...(input.body ? { body: input.body } : {}),
     },
+  );
+}
+
+export interface CrmUpdateCalendarEventInput {
+  subject?: string;
+  /** ISO 8601 local wall time (no offset). */
+  start?: string;
+  end?: string;
+  timeZone?: string;
+  location?: string | null;
+  body?: string | null;
+}
+
+/** Update an existing event on the speaking user's Outlook calendar (only supplied fields). */
+export async function updateCrmCalendarEvent(
+  userId: string,
+  eventId: string,
+  patch: CrmUpdateCalendarEventInput,
+): Promise<{ id: string; webLink: string | null }> {
+  const payload: Record<string, unknown> = {};
+  if (patch.subject !== undefined) payload.subject = patch.subject;
+  if (patch.start !== undefined) payload.start = patch.start;
+  if (patch.end !== undefined) payload.end = patch.end;
+  if (patch.timeZone !== undefined) payload.timeZone = patch.timeZone;
+  if (patch.location !== undefined && patch.location !== null) payload.location = patch.location;
+  if (patch.body !== undefined && patch.body !== null) payload.body = patch.body;
+  return crmCalendarFetch<{ id: string; webLink: string | null }>(
+    'PATCH',
+    `/outlook/calendar/events/${encodeURIComponent(eventId)}`,
+    userId,
+    payload,
+  );
+}
+
+/** Delete an event from the speaking user's Outlook calendar. */
+export async function deleteCrmCalendarEvent(
+  userId: string,
+  eventId: string,
+): Promise<{ deleted: boolean }> {
+  return crmCalendarFetch<{ deleted: boolean }>(
+    'DELETE',
+    `/outlook/calendar/events/${encodeURIComponent(eventId)}`,
+    userId,
   );
 }
