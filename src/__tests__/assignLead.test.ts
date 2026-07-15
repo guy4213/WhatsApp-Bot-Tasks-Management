@@ -36,12 +36,17 @@ const EMPTY = { rowCount: 0, rows: [] };
 // ── findUnassignedLeadsForAssignment ─────────────────────────────────────────
 
 describe('findUnassignedLeadsForAssignment', () => {
-  it('queries IncomingLead WHERE ownerId IS NULL ordered by receivedAt DESC', async () => {
+  // Pending = status='NEW' (product truth: status wins over ownerId).
+  // Ownerless-but-not-NEW rows (e.g. status=ACTIVE with a stale null) are
+  // deliberately excluded; status is the single source of "still pending".
+  it('queries IncomingLead WHERE status=NEW ordered by receivedAt DESC', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     await findUnassignedLeadsForAssignment();
     const [sql, params] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/"IncomingLead"/);
-    expect(sql).toMatch(/"ownerId"\s+IS\s+NULL/);
+    expect(sql).toMatch(/status\s*=\s*'NEW'/);
+    // No ownerId predicate — status is the whole filter.
+    expect(sql).not.toMatch(/"ownerId"\s+IS\s+NULL/);
     expect(sql).toMatch(/ORDER BY\s+"receivedAt"\s+DESC/);
     expect(sql).toMatch(/LIMIT\s+\$1/);
     // Default limit is 20.
@@ -74,19 +79,32 @@ describe('findUnassignedLeadsForAssignment', () => {
 // ── assignLead ───────────────────────────────────────────────────────────────
 
 describe('assignLead', () => {
-  it('issues a parameterized UPDATE with workerId and leadId in correct order', async () => {
-    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
-    await assignLead('lead-abc', 'worker-xyz', 'actor-id', '972500000001');
-    const [sql, params] = poolQuery.mock.calls[0];
-    expect(sql).toMatch(/UPDATE\s+"IncomingLead"/i);
-    expect(sql).toMatch(/"ownerId"\s*=\s*\$1/);
-    expect(sql).toMatch(/WHERE\s+id\s*=\s*\$2/);
-    // Param order: $1 = workerId, $2 = leadId.
-    expect(params).toEqual(['worker-xyz', 'lead-abc']);
+  // Two pool.query calls now: a SELECT snapshot (for audit oldValues + race
+  // detection) and then the guarded UPDATE. Both must be mocked in order.
+  const SNAPSHOT_ROW = (ownerId: string | null, status: string | null) => ({
+    rowCount: 1,
+    rows: [{ ownerId, status }],
   });
 
-  it('writes audit log with actor, lead, and worker captured in newValues', async () => {
-    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
+  it('issues a guarded UPDATE that sets ownerId AND status=ACTIVE, only when status=NEW', async () => {
+    poolQuery
+      .mockResolvedValueOnce(SNAPSHOT_ROW(null, 'NEW'))   // SELECT snapshot
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] });   // UPDATE
+    await assignLead('lead-abc', 'worker-xyz', 'actor-id', '972500000001');
+    const [updateSql, updateParams] = poolQuery.mock.calls[1];
+    expect(updateSql).toMatch(/UPDATE\s+"IncomingLead"/i);
+    expect(updateSql).toMatch(/"ownerId"\s*=\s*\$1/);
+    expect(updateSql).toMatch(/status\s*=\s*'ACTIVE'/);
+    expect(updateSql).toMatch(/WHERE\s+id\s*=\s*\$2\s+AND\s+status\s*=\s*'NEW'/);
+    // Param order: $1 = workerId, $2 = leadId (unchanged from the
+    // ownerId-only version).
+    expect(updateParams).toEqual(['worker-xyz', 'lead-abc']);
+  });
+
+  it('writes audit log with old status/ownerId snapshotted and new status=ACTIVE captured', async () => {
+    poolQuery
+      .mockResolvedValueOnce(SNAPSHOT_ROW(null, 'NEW'))
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] });
     await assignLead('lead-abc', 'worker-xyz', 'actor-id', '972500000001');
 
     expect(writeAuditLog).toHaveBeenCalledTimes(1);
@@ -95,14 +113,29 @@ describe('assignLead', () => {
     expect(entry.whatsappNumber).toBe('972500000001');
     expect(entry.detectedIntent).toBe('assign_lead');
     expect(entry.targetTaskId).toBe('lead-abc');
-    expect(entry.newValues).toMatchObject({ leadId: 'lead-abc', ownerId: 'worker-xyz' });
+    expect(entry.oldValues).toEqual({ ownerId: null, status: 'NEW' });
+    expect(entry.newValues).toMatchObject({
+      leadId: 'lead-abc',
+      ownerId: 'worker-xyz',
+      status: 'ACTIVE',
+    });
     expect(entry.executionStatus).toBe('SUCCESS');
     expect(entry.confirmationStatus).toBe('CONFIRMED');
   });
 
-  it('calls writeAuditLog even if it is the second call (not skipped)', async () => {
-    poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] });
-    await assignLead('lead-x', 'worker-y', 'actor-z', '972509999');
-    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+  it('throws "הליד כבר שויך" and does NOT audit when the guarded UPDATE affects 0 rows (race)', async () => {
+    // A parallel manager assigned this lead microseconds earlier — status is
+    // already ACTIVE, so the WHERE status='NEW' guard filters us out.
+    poolQuery
+      .mockResolvedValueOnce(SNAPSHOT_ROW('previous-worker', 'ACTIVE'))
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] });
+
+    await expect(
+      assignLead('lead-abc', 'worker-xyz', 'actor-id', '972500000001'),
+    ).rejects.toThrow('הליד כבר שויך');
+
+    // Audit is intentionally skipped for the losing side of a race — we did
+    // not actually write anything, so nothing to record.
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,78 @@ Conventions:
 
 ---
 
+## VOICE-LEADS — status='NEW' pending filter + voice assign flips to 'ACTIVE' + canAssignLeads gate parity (2026-07-15)
+
+**Status:** DONE (local, uncommitted)
+
+**What to do.** Two extensions to the voice assistant "גלי" only —
+`src/services/voiceTools.ts` + `src/services/incomingLeads.ts`. WhatsApp lead
+flow untouched. (1) Pending-leads reads switch from `"ownerId" IS NULL` to
+`status='NEW'` in three functions (`findUnassignedInWindow`,
+`findOvernightUnassignedLeads`, `findUnassignedLeadsForAssignment` × 2 query
+bodies) so that status (the product-truth field) wins over ownerId — a lead
+with `status='ACTIVE'` never appears in a pending list even if its ownerId
+was somehow nulled. `findNewlyAssignedLeads` (poller trigger, ownerId-based),
+`findEscalationCandidates`, and `getYoramLeadCounts` intentionally left
+alone per spec. (2) `assignLead()` now writes BOTH `ownerId` AND
+`status='ACTIVE'` in the same `UPDATE`, guarded by `WHERE id=$2 AND
+status='NEW'` to prevent two-manager races (0 rows affected → throws
+`'הליד כבר שויך'`, which the voice `assign_lead` handler turns into
+`'הליד כבר שויך למישהו אחר לפניך.'`). Audit now snapshots pre-state via a
+SELECT and records `oldValues={ownerId, status}` + `newValues={leadId,
+ownerId, status:'ACTIVE'}` — the new `status` write is fully traceable.
+(3) Permission alignment: the voice `assign_lead` tool moved from
+`gate:'manager'` (isManagerMenuUser — included exceptions-only viewers like
+Yoram) to a new `gate:'leadAssign'` = `canAssignLeads` (leads viewers OR
+elevated), matching the WhatsApp router's gate exactly. Yoram is now
+correctly blocked from voice lead assignment; Sasha, Guy Franses, Yair,
+ADMIN, and MANAGER continue to succeed. `list_pending_leads` stays on
+`gate:'manager'` (viewing is fine; only the write is restricted).
+
+**Files changed.**
+- `src/services/incomingLeads.ts` — 4 query bodies switched to `status='NEW'`;
+  `assignLead` rewritten with SELECT snapshot + guarded UPDATE + expanded audit.
+- `src/services/voiceTools.ts` — new gate case `'leadAssign'`, `canAssignLeads`
+  imported, `assign_lead` tool retagged + race error mapped to a Hebrew user line.
+- `src/__tests__/assignLead.test.ts` — pending-list assertion swapped to
+  `status='NEW'`; UPDATE test now asserts the compound `SET`, the `AND
+  status='NEW'` guard, and the two-call pool.query shape; audit test asserts
+  the new `oldValues`/`newValues` shape; new race test covers 0-row throw +
+  audit skip.
+- `src/__tests__/incomingLeads.test.ts` — `findUnassignedInWindow` +
+  `findOvernightUnassignedLeads` assertions swapped to `status='NEW'`.
+- `src/__tests__/voiceTools.test.ts` — new users (Yoram, Sasha); asserts Yoram
+  cannot see or execute `assign_lead`; asserts Sasha can see it.
+- `BOT_CAPABILITIES.md` — dated line + call-out that Yoram cannot voice-assign
+  and that voice-assigned leads move to "בטיפול" automatically.
+
+**Tests run.** `npx tsc --noEmit` — clean. Vitest suites run:
+`assignLead`, `incomingLeads`, `voiceTools`, `leadAssignmentNotifier`,
+`routerAssignLead`, `routerLeadsDisplay`, `routerManagerIntents`,
+`sashaLeadsDispatcher`, `galitManagerDispatcher`, `managerViews`,
+`interactiveButtons`, `detailViewAIContext`, `managerDateRange`,
+`managerSearchExpansion`, `managerRichness`, `routerFreeTextAwait`,
+`routerBareDigitGuard`, `inspectorMorningDispatcher`,
+`equipmentReminderDispatcher` — 380/380 passing. `routerManagerMenu.test.ts`
+worker-OOMs on this box, but the crash reproduces on a clean `main` (verified
+via `git stash`) — pre-existing, not introduced here.
+
+**Notifier compatibility (verified).** `findNewlyAssignedLeads` in
+`leadAssignmentNotifier.ts` selects on `il."ownerId" IS NOT NULL` + WLN dedup
+(`ASSIGNED_TO_WORKER`), not status. Writing `status='ACTIVE'` therefore does
+not affect the worker alert — it still fires exactly once, still dedups
+correctly.
+
+**Known remaining risk (intentional, per spec scope).**
+`findEscalationCandidates` and `getYoramLeadCounts` still use
+`"ownerId" IS NULL`, not `status='NEW'`. The task list explicitly excluded
+them, so behavior is unchanged there. If an ACTIVE-but-ownerless lead ever
+exists (should not, given the compound UPDATE), it would still be counted as
+pending by the Sasha escalation + Yoram CEO digest. Flag for a follow-up if
+the spec later says status should win globally.
+
+---
+
 ## TRANSPORT — החלפת שכבת ה-transport ל-Green API (זמני) (2026-07-12)
 
 **סטטוס כללי:** IN PROGRESS. מפוצל לשני PRs. **PR#1 (אבסטרקציית ספק) — DONE (merged, `d7465c5`).** **PR#2 (מימוש Green API) — DONE (local, committed; PR פתוח ל-main).**

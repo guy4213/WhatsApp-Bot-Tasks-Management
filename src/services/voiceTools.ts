@@ -102,6 +102,7 @@ import {
   createCrmCalendarEvent,
 } from './crmApi';
 import { auditVoiceToolCall } from './voiceAccess';
+import { canAssignLeads } from './specialUsers';
 
 const logger = moduleLogger('voice-tools');
 
@@ -125,8 +126,10 @@ interface VoiceToolDef {
   description: string;
   parameters: JsonSchema;
   /** 'any' — every authenticated user; 'manager' — isManagerMenuUser;
-   *  'elevated' — MANAGER/ADMIN only. */
-  gate: 'any' | 'manager' | 'elevated';
+   *  'elevated' — MANAGER/ADMIN only; 'leadAssign' — canAssignLeads (leads
+   *  viewers OR elevated; matches the WhatsApp router's lead-assign gate so
+   *  exceptions-only viewers like Yoram cannot assign leads via voice). */
+  gate: 'any' | 'manager' | 'elevated' | 'leadAssign';
   /** Hidden from the session when a required env integration is missing. */
   available?: () => boolean;
   handler: (user: ResolvedUser, args: Record<string, unknown>) => Promise<VoiceToolResult>;
@@ -1318,7 +1321,10 @@ const TOOLS: VoiceToolDef[] = [
   },
   {
     name: 'assign_lead',
-    gate: 'manager',
+    // canAssignLeads (leads viewers OR ADMIN/MANAGER) — mirrors the WhatsApp
+    // router's gate. Exceptions-only viewers (e.g. Yoram) are intentionally
+    // blocked here even though they see the broader manager menu.
+    gate: 'leadAssign',
     description: 'שיוך ליד נכנס לעובד. lead_query = שם השולח / נושא / מזהה ליד. worker_name = שם העובד. העובד יקבל התראה בוואטסאפ.',
     parameters: {
       type: 'object',
@@ -1372,7 +1378,16 @@ const TOOLS: VoiceToolDef[] = [
       const worker = await resolveUserByName(workerName);
       if (!worker.ok) return worker.result;
 
-      await assignLead(leadId, worker.id, user.id, user.phone);
+      try {
+        await assignLead(leadId, worker.id, user.id, user.phone);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Race with a parallel manager — the guarded UPDATE hit 0 rows.
+        if (msg === 'הליד כבר שויך') {
+          return { ok: false, error: 'הליד כבר שויך למישהו אחר לפניך.' };
+        }
+        throw err;
+      }
       return {
         ok: true,
         speak: `הליד של ${leadLabel} שויך ל${worker.name} — הוא יקבל התראה בוואטסאפ.`,
@@ -1474,6 +1489,7 @@ function isToolAllowed(user: ResolvedUser, tool: VoiceToolDef): boolean {
     case 'any': return true;
     case 'manager': return isManagerMenuUser(user);
     case 'elevated': return user.isElevated;
+    case 'leadAssign': return canAssignLeads(user);
   }
 }
 
