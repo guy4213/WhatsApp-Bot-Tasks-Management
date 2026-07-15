@@ -9,11 +9,23 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 const resolveVoiceToken = vi.fn();
 const auditVoiceToolCall = vi.fn();
+const createVoiceToken = vi.fn();
 vi.mock('../services/voiceAccess', () => ({
   resolveVoiceToken: (...a: unknown[]) => resolveVoiceToken(...a),
   auditVoiceToolCall: (...a: unknown[]) => auditVoiceToolCall(...a),
-  createVoiceToken: vi.fn(),
+  createVoiceToken: (...a: unknown[]) => createVoiceToken(...a),
   revokeVoiceTokens: vi.fn(),
+}));
+
+const poolQuery = vi.fn();
+vi.mock('../db/connection', () => ({
+  pool: { query: (...a: unknown[]) => poolQuery(...a) },
+  supabaseAdmin: {},
+}));
+
+vi.mock('../services/owntracksProvisioning', () => ({
+  getPublicBaseUrl: () => 'https://bot.example.com',
+  createProvisioning: vi.fn(),
 }));
 
 const executeVoiceTool = vi.fn();
@@ -37,7 +49,10 @@ let app: FastifyInstance;
 beforeEach(async () => {
   resolveVoiceToken.mockReset();
   executeVoiceTool.mockReset();
+  createVoiceToken.mockReset();
+  poolQuery.mockReset();
   delete process.env.VOICE_ASSISTANT_ENABLED;
+  delete process.env.VOICE_LINK_SECRET;
   process.env.OPENAI_API_KEY = 'sk-test';
   app = Fastify();
   await app.register(voiceAssistantRoutes);
@@ -66,6 +81,33 @@ describe('GET /voice', () => {
     expect(res.headers['cache-control']).toBe('no-store');
     expect(res.body).toContain('dir="rtl"');
     expect(res.body).toContain('גלי');
+    // PWA wiring: manifest link + theme color + apple title
+    expect(res.body).toContain('rel="manifest"');
+    expect(res.body).toContain('#6aa84f');
+    expect(res.body).toContain('apple-mobile-web-app-title');
+  });
+});
+
+describe('GET /voice/manifest.webmanifest', () => {
+  it('returns an installable standalone PWA manifest that keeps the token in start_url', async () => {
+    const res = await app.inject({
+      method: 'GET', url: '/voice/manifest.webmanifest?u=SECRETTOKEN',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('application/manifest+json');
+    const m = res.json();
+    expect(m.short_name).toBe('גלי');
+    expect(m.display).toBe('standalone');
+    expect(m.start_url).toBe('/voice?u=SECRETTOKEN');
+    expect(m.theme_color).toBe('#6aa84f');
+    expect(m.icons.length).toBeGreaterThanOrEqual(2);
+    expect(m.icons.some((i: { purpose?: string }) => i.purpose === 'maskable')).toBe(true);
+  });
+
+  it('404s under the kill switch', async () => {
+    process.env.VOICE_ASSISTANT_ENABLED = 'false';
+    const res = await app.inject({ method: 'GET', url: '/voice/manifest.webmanifest' });
+    expect(res.statusCode).toBe(404);
   });
 });
 
@@ -151,5 +193,75 @@ describe('POST /voice/tool', () => {
     expect(executeVoiceTool).toHaveBeenCalledWith(
       workerUser, 'get_my_inspections', { when: 'היום' },
     );
+  });
+});
+
+describe('POST /voice/link (server-to-server, CRM button)', () => {
+  const SECRET = 'shared-secret-abc';
+
+  it('503 when VOICE_LINK_SECRET is not configured', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/voice/link', payload: { userId: 'u1' },
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('401 when the shared secret header is missing or wrong', async () => {
+    process.env.VOICE_LINK_SECRET = SECRET;
+    const noHeader = await app.inject({
+      method: 'POST', url: '/voice/link', payload: { userId: 'u1' },
+    });
+    expect(noHeader.statusCode).toBe(401);
+
+    const wrong = await app.inject({
+      method: 'POST', url: '/voice/link',
+      headers: { 'x-voice-link-secret': 'nope-wrong-length' },
+      payload: { userId: 'u1' },
+    });
+    expect(wrong.statusCode).toBe(401);
+    expect(createVoiceToken).not.toHaveBeenCalled();
+  });
+
+  it('404 for an unknown user (no token minted)', async () => {
+    process.env.VOICE_LINK_SECRET = SECRET;
+    poolQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 }); // User lookup
+    const res = await app.inject({
+      method: 'POST', url: '/voice/link',
+      headers: { 'x-voice-link-secret': SECRET },
+      payload: { userId: 'ghost' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(createVoiceToken).not.toHaveBeenCalled();
+  });
+
+  it('mints a link for a valid user and returns a ready /voice URL', async () => {
+    process.env.VOICE_LINK_SECRET = SECRET;
+    poolQuery
+      .mockResolvedValueOnce({ rows: [{ id: 'u1', name: 'אורי', status: 'ACTIVE' }], rowCount: 1 }) // User
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }); // revoke prior CRM tokens
+    createVoiceToken.mockResolvedValueOnce({ token: 'FRESHTOKEN', expiresAt: new Date() });
+
+    const res = await app.inject({
+      method: 'POST', url: '/voice/link',
+      headers: { 'x-voice-link-secret': SECRET },
+      payload: { userId: 'u1' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.url).toBe('https://bot.example.com/voice?u=FRESHTOKEN');
+    expect(body.name).toBe('אורי');
+    expect(createVoiceToken).toHaveBeenCalledWith('u1', { label: 'CRM' });
+  });
+
+  it('403 for an inactive user', async () => {
+    process.env.VOICE_LINK_SECRET = SECRET;
+    poolQuery.mockResolvedValueOnce({ rows: [{ id: 'u1', name: 'אורי', status: 'INACTIVE' }], rowCount: 1 });
+    const res = await app.inject({
+      method: 'POST', url: '/voice/link',
+      headers: { 'x-voice-link-secret': SECRET },
+      payload: { userId: 'u1' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(createVoiceToken).not.toHaveBeenCalled();
   });
 });

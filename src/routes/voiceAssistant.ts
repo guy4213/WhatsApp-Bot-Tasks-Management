@@ -24,9 +24,12 @@
  *   - Kill switch: VOICE_ASSISTANT_ENABLED=false disables all three routes.
  */
 
+import crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import { moduleLogger } from '../utils/logger';
-import { resolveVoiceToken } from '../services/voiceAccess';
+import { resolveVoiceToken, createVoiceToken } from '../services/voiceAccess';
+import { pool } from '../db/connection';
+import { getPublicBaseUrl } from '../services/owntracksProvisioning';
 import {
   buildOpenAiTools,
   listToolNames,
@@ -36,6 +39,7 @@ import { localJerusalemDate } from '../ai/dateRangeParser';
 import { isManagerMenuUser } from '../ai/menu';
 import type { ResolvedUser } from '../types';
 import { renderVoicePage } from './voiceAssistant.template';
+import { ROBOT_DATA_URI, hasRobotImage } from './voiceAssets';
 
 const logger = moduleLogger('voice-assistant');
 
@@ -162,6 +166,55 @@ export async function voiceAssistantRoutes(app: FastifyInstance): Promise<void> 
       .send(renderVoicePage());
   });
 
+  // PWA manifest — makes "Add to Home Screen" install גלי as a standalone app
+  // with the branded icon + green splash. Served from the same host so the
+  // page's relative /voice/manifest.webmanifest resolves without CORS.
+  app.get('/voice/manifest.webmanifest', async (_req, reply) => {
+    if (!voiceAssistantEnabled()) return reply.code(404).send({ error: 'not found' });
+
+    // Icon: the branded robot when embedded, else a generated green SVG so the
+    // installed app still shows *something* on-brand rather than a blank tile.
+    const icon = hasRobotImage()
+      ? { src: ROBOT_DATA_URI as string, type: 'image/png' }
+      : {
+          src:
+            'data:image/svg+xml,' +
+            encodeURIComponent(
+              '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+                '<rect width="512" height="512" rx="112" fill="#6aa84f"/>' +
+                '<text x="50%" y="55%" font-size="300" text-anchor="middle" dominant-baseline="middle">🤖</text>' +
+              '</svg>',
+            ),
+          type: 'image/svg+xml',
+        };
+
+    const manifest = {
+      name: 'גלי — העוזרת הקולית של גלית',
+      short_name: 'גלי',
+      description: 'עוזרת קולית בעברית לניהול משימות, בדיקות שטח, יומן ולקוחות.',
+      lang: 'he',
+      dir: 'rtl',
+      start_url: '/voice' + (typeof (_req.query as { u?: string })?.u === 'string'
+        ? '?u=' + encodeURIComponent((_req.query as { u: string }).u)
+        : ''),
+      scope: '/voice',
+      display: 'standalone',
+      orientation: 'portrait',
+      background_color: '#f4faf3',
+      theme_color: '#6aa84f',
+      icons: [
+        { ...icon, sizes: '192x192', purpose: 'any' },
+        { ...icon, sizes: '512x512', purpose: 'any' },
+        { ...icon, sizes: '512x512', purpose: 'maskable' },
+      ],
+    };
+
+    return reply
+      .header('Cache-Control', 'no-store')
+      .type('application/manifest+json; charset=utf-8')
+      .send(JSON.stringify(manifest));
+  });
+
   // Session mint: personal token → ephemeral OpenAI client secret.
   app.post<{ Body: { token?: string } }>('/voice/session', async (req, reply) => {
     if (!voiceAssistantEnabled()) return reply.code(404).send({ error: 'not found' });
@@ -190,6 +243,64 @@ export async function voiceAssistantRoutes(app: FastifyInstance): Promise<void> 
       logger.error({ err }, 'voice session mint failed');
       return reply.code(502).send({ error: 'לא הצלחתי לפתוח שיחה קולית כרגע — נסו שוב בעוד רגע' });
     }
+  });
+
+  // ── Machine-to-machine: mint/return a personal link for a CRM user ─────────
+  // The CRM's "עוזרת קולית" button calls this server-to-server with a shared
+  // secret (VOICE_LINK_SECRET) + the logged-in user's CRM id. Returns a ready
+  // /voice?u=<token> URL so the browser opens already identified. Never exposed
+  // to the browser — the secret stays server-side in the CRM API.
+  app.post<{ Body: { userId?: string; label?: string } }>('/voice/link', async (req, reply) => {
+    if (!voiceAssistantEnabled()) return reply.code(404).send({ error: 'not found' });
+
+    const expected = (process.env.VOICE_LINK_SECRET ?? '').trim();
+    if (!expected) {
+      logger.error('VOICE_LINK_SECRET not configured — /voice/link disabled');
+      return reply.code(503).send({ error: 'link minting not configured' });
+    }
+    const provided = (req.headers['x-voice-link-secret'] as string) ?? '';
+    // Timing-safe compare; length guard first (timingSafeEqual throws on mismatch).
+    const ok =
+      provided.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+    if (!ok) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+    if (!userId) return reply.code(400).send({ error: 'userId required' });
+
+    // The user must exist and be ACTIVE in the shared DB.
+    const { rows } = await pool.query<{ id: string; name: string; status: string }>(
+      `SELECT id, name, status FROM "User" WHERE id = $1 LIMIT 1`,
+      [userId],
+    );
+    if (rows.length === 0) return reply.code(404).send({ error: 'user not found' });
+    if (rows[0].status !== 'ACTIVE' && rows[0].status !== 'active') {
+      return reply.code(403).send({ error: 'user inactive' });
+    }
+
+    // Mint a fresh token each click. The raw value can't be recovered from the
+    // stored hash, so we can't "return the existing one"; instead old CRM
+    // tokens simply coexist (all valid until they expire). To cap churn we
+    // revoke this user's prior CRM-labelled tokens first, so at most one CRM
+    // link is live per user at a time.
+    await pool.query(
+      `UPDATE "VoiceAccessToken"
+          SET "revokedAt" = now()
+        WHERE "userId" = $1 AND "revokedAt" IS NULL AND label = 'CRM'`,
+      [userId],
+    );
+    const minted = await createVoiceToken(userId, { label: 'CRM' });
+    const token = minted.token;
+
+    let base: string;
+    try {
+      base = getPublicBaseUrl();
+    } catch {
+      return reply.code(503).send({ error: 'PUBLIC_BASE_URL not configured' });
+    }
+    return reply.send({ url: `${base}/voice?u=${token}`, name: rows[0].name });
   });
 
   // Tool execution on behalf of the authenticated user.

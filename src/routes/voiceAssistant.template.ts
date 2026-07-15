@@ -13,27 +13,86 @@
  * POST /voice/tool and the results are pushed back over the data channel.
  */
 
+import { ROBOT_DATA_URI, hasRobotImage } from './voiceAssets';
+
+const BRAND_GREEN = '#6aa84f';
+
+/**
+ * Robot avatar markup: the branded image when embedded, else an emoji
+ * placeholder. `#robotPh` exists only in the placeholder path (the page JS
+ * guards on it).
+ */
+function robotAvatarInner(): string {
+  return hasRobotImage()
+    ? `<img src="${ROBOT_DATA_URI}" alt="גלי" />`
+    : `<span class="ph" id="robotPh">🤖</span>`;
+}
+
+/** Favicon / apple-touch-icon link tags — branded image when available. */
+function iconLinks(): string {
+  if (!hasRobotImage()) {
+    // A tiny inline SVG robot keeps the tab from showing a blank/broken icon.
+    const svg =
+      `data:image/svg+xml,` +
+      encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
+          `<rect width="64" height="64" rx="14" fill="${BRAND_GREEN}"/>` +
+          `<text x="50%" y="54%" font-size="38" text-anchor="middle" dominant-baseline="middle">🤖</text>` +
+        `</svg>`,
+      );
+    return `<link rel="icon" href="${svg}">`;
+  }
+  return (
+    `<link rel="icon" type="image/png" href="${ROBOT_DATA_URI}">` +
+    `<link rel="apple-touch-icon" href="${ROBOT_DATA_URI}">`
+  );
+}
+
+/**
+ * The PWA page. When installed ("Add to Home Screen") it launches standalone
+ * with the גלי icon + splash — driven by /voice/manifest.webmanifest.
+ */
 export function renderVoicePage(): string {
   return `<!doctype html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="robots" content="noindex, nofollow">
 <title>גלי — העוזרת הקולית</title>
+<!-- manifest href gets the personal token appended at runtime so the installed
+     app launches already identified (see the inline script at the top of body). -->
+<link rel="manifest" id="pwaManifest" href="/voice/manifest.webmanifest">
+<script>
+  (function () {
+    var u = new URLSearchParams(location.search).get('u');
+    if (u) {
+      var l = document.getElementById('pwaManifest');
+      if (l) l.setAttribute('href', '/voice/manifest.webmanifest?u=' + encodeURIComponent(u));
+    }
+  })();
+</script>
+<meta name="theme-color" content="${BRAND_GREEN}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="גלי">
+${iconLinks()}
 <style>
   :root {
-    --bg1: #0b1026; --bg2: #101936; --card: rgba(255,255,255,.055);
-    --line: rgba(255,255,255,.09); --text: #eef2ff; --dim: #93a0c4;
-    --accent: #7c9cff; --accent2: #34d399; --danger: #f87171; --amber: #fbbf24;
+    --bg1: #f4faf3; --bg2: #eaf5e8; --card: #ffffff;
+    --line: #e2ece0; --text: #1f2937; --dim: #6b7f6a;
+    --brand: #6aa84f; --brand-dark: #4e7d38; --brand-soft: #eef7ea;
+    --accent2: #6aa84f; --danger: #dc2626;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
     font-family: -apple-system, "Segoe UI", Roboto, "Heebo", Arial, sans-serif;
-    background: radial-gradient(1200px 700px at 80% -10%, #1b2a5e 0%, transparent 60%),
-                radial-gradient(900px 600px at -10% 110%, #14224d 0%, transparent 55%),
-                linear-gradient(160deg, var(--bg1), var(--bg2));
+    background:
+      radial-gradient(900px 500px at 82% -8%, #dcefd6 0%, transparent 60%),
+      radial-gradient(760px 480px at -8% 108%, #e4f2df 0%, transparent 55%),
+      linear-gradient(165deg, var(--bg1), var(--bg2));
     color: var(--text);
     display: flex; flex-direction: column; align-items: center;
     min-height: 100dvh; padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
@@ -41,80 +100,80 @@ export function renderVoicePage(): string {
   .shell { width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px; }
   .brand { display: flex; align-items: center; gap: 10px; }
-  .brand .logo {
-    width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
-    background: linear-gradient(135deg, #6366f1, #22d3ee); font-size: 19px;
-    box-shadow: 0 6px 18px rgba(99,102,241,.35);
-  }
-  .brand h1 { font-size: 17px; font-weight: 700; letter-spacing: .2px; }
+  .brand h1 { font-size: 18px; font-weight: 800; letter-spacing: .2px; color: var(--brand-dark); }
   .brand small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; }
   .status { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--dim); }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #64748b; transition: background .25s; }
-  .dot.live { background: var(--accent2); box-shadow: 0 0 10px rgba(52,211,153,.8); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #b8c6b5; transition: background .25s; }
+  .dot.live { background: var(--brand); box-shadow: 0 0 10px rgba(106,168,79,.7); }
   .dot.err { background: var(--danger); }
 
-  .stage {
-    position: relative; display: grid; place-items: center; padding: 18px 0 6px;
-  }
-  .orb {
-    position: relative; width: 148px; height: 148px; border-radius: 50%;
-    border: none; cursor: pointer; outline: none;
-    background: radial-gradient(circle at 32% 28%, #8ea6ff, #4f46e5 58%, #2a2f8f);
-    box-shadow: 0 14px 44px rgba(79,70,229,.45), inset 0 -8px 22px rgba(0,0,0,.28);
-    display: grid; place-items: center; transition: transform .18s ease, box-shadow .3s;
+  /* ── Robot avatar (center of the page) ── */
+  .stage { position: relative; display: grid; place-items: center; padding: 20px 0 8px; }
+  .avatar {
+    position: relative; width: 188px; height: 188px; border-radius: 50%;
+    border: none; cursor: pointer; outline: none; padding: 0;
+    background: #fff; overflow: hidden;
+    box-shadow: 0 12px 34px rgba(78,125,56,.22), 0 0 0 4px #fff, 0 0 0 7px var(--brand);
+    transition: transform .18s ease, box-shadow .3s;
     -webkit-tap-highlight-color: transparent;
   }
-  .orb:active { transform: scale(.97); }
-  .orb .ic { font-size: 46px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.35)); }
-  .orb .label {
-    position: absolute; bottom: -34px; right: 50%; transform: translateX(50%);
-    font-size: 13.5px; color: var(--dim); white-space: nowrap;
+  .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .avatar:active { transform: scale(.97); }
+  /* Placeholder shown until the real robot image is embedded */
+  .avatar .ph {
+    width: 100%; height: 100%; display: grid; place-items: center; font-size: 74px;
+    background: radial-gradient(circle at 50% 38%, #f2f9ef, #e6f2e0);
   }
-  .ring { position: absolute; width: 148px; height: 148px; border-radius: 50%; pointer-events: none; opacity: 0; }
-  .listening .ring { opacity: 1; animation: pulse 1.9s ease-out infinite; border: 2px solid rgba(52,211,153,.8); }
-  .speaking  .ring { opacity: 1; animation: pulse 1.15s ease-out infinite; border: 2px solid rgba(124,156,255,.9); }
-  @keyframes pulse { 0% { transform: scale(1); opacity: .85; } 100% { transform: scale(1.55); opacity: 0; } }
-  .listening .orb { background: radial-gradient(circle at 32% 28%, #7ef0c3, #059669 58%, #064e3b); box-shadow: 0 14px 44px rgba(16,185,129,.4), inset 0 -8px 22px rgba(0,0,0,.28); }
-  .speaking .orb  { background: radial-gradient(circle at 32% 28%, #9db4ff, #4338ca 58%, #1e1b6e); }
-  .connecting .orb { animation: breathe 1.2s ease-in-out infinite alternate; }
-  @keyframes breathe { from { filter: brightness(.85); } to { filter: brightness(1.15); } }
+  .avatar .label {
+    position: absolute; bottom: -32px; right: 50%; transform: translateX(50%);
+    font-size: 13.5px; color: var(--dim); white-space: nowrap; font-weight: 500;
+  }
+  .ring { position: absolute; width: 188px; height: 188px; border-radius: 50%; pointer-events: none; opacity: 0; }
+  .listening .ring { opacity: 1; animation: pulse 1.9s ease-out infinite; border: 3px solid rgba(106,168,79,.75); }
+  .speaking  .ring { opacity: 1; animation: pulse 1.15s ease-out infinite; border: 3px solid rgba(106,168,79,.95); }
+  @keyframes pulse { 0% { transform: scale(1); opacity: .85; } 100% { transform: scale(1.42); opacity: 0; } }
+  .listening .avatar { box-shadow: 0 12px 34px rgba(106,168,79,.34), 0 0 0 4px #fff, 0 0 0 7px var(--brand); }
+  .speaking  .avatar { animation: nod .9s ease-in-out infinite alternate; }
+  @keyframes nod { from { transform: translateY(0); } to { transform: translateY(-4px); } }
+  .connecting .avatar { animation: breathe 1.2s ease-in-out infinite alternate; }
+  @keyframes breathe { from { filter: brightness(.94); } to { filter: brightness(1.06); } }
 
-  .hint { text-align: center; color: var(--dim); font-size: 13px; min-height: 20px; padding: 26px 8px 0; }
-  .hint b { color: #c7d2fe; font-weight: 600; }
+  .hint { text-align: center; color: var(--dim); font-size: 13px; min-height: 20px; padding: 24px 8px 0; }
+  .hint b { color: var(--brand-dark); font-weight: 700; }
 
   .panel {
-    flex: 1; min-height: 180px; background: var(--card); border: 1px solid var(--line);
+    flex: 1; min-height: 170px; background: var(--card); border: 1px solid var(--line);
     border-radius: 18px; padding: 14px; overflow-y: auto; display: flex;
-    flex-direction: column; gap: 9px; backdrop-filter: blur(8px);
+    flex-direction: column; gap: 9px; box-shadow: 0 4px 18px rgba(78,125,56,.06);
   }
   .empty { color: var(--dim); font-size: 13.5px; text-align: center; margin: auto; line-height: 1.9; }
   .msg { max-width: 86%; padding: 9px 13px; border-radius: 15px; font-size: 14.5px; line-height: 1.55; word-break: break-word; }
-  .msg.user { align-self: flex-start; background: rgba(124,156,255,.16); border: 1px solid rgba(124,156,255,.22); border-bottom-right-radius: 5px; }
-  .msg.bot  { align-self: flex-end;   background: rgba(255,255,255,.07);  border: 1px solid var(--line); border-bottom-left-radius: 5px; }
+  .msg.user { align-self: flex-start; background: #eef2ff; border: 1px solid #dbe3ff; color: #27324d; border-bottom-right-radius: 5px; }
+  .msg.bot  { align-self: flex-end;   background: var(--brand-soft); border: 1px solid #d8ead0; color: #24421a; border-bottom-left-radius: 5px; }
   .chip {
     align-self: flex-end; display: inline-flex; align-items: center; gap: 7px;
-    font-size: 12.5px; color: #c4b5fd; background: rgba(139,92,246,.12);
-    border: 1px solid rgba(139,92,246,.28); border-radius: 999px; padding: 5px 12px;
+    font-size: 12.5px; color: var(--brand-dark); background: var(--brand-soft);
+    border: 1px solid #d3e6ca; border-radius: 999px; padding: 5px 12px;
   }
-  .chip.ok  { color: #86efac; background: rgba(52,211,153,.1);  border-color: rgba(52,211,153,.3); }
-  .chip.err { color: #fca5a5; background: rgba(248,113,113,.1); border-color: rgba(248,113,113,.3); }
-  .spin { width: 11px; height: 11px; border: 2px solid rgba(196,181,253,.35); border-top-color: #c4b5fd; border-radius: 50%; animation: rot .8s linear infinite; }
+  .chip.ok  { color: #2f7d1e; background: #e9f6e3; border-color: #c3e3b6; }
+  .chip.err { color: #b91c1c; background: #fdeaea; border-color: #f4c9c9; }
+  .spin { width: 11px; height: 11px; border: 2px solid rgba(106,168,79,.3); border-top-color: var(--brand); border-radius: 50%; animation: rot .8s linear infinite; }
   @keyframes rot { to { transform: rotate(360deg); } }
 
   .banner {
-    display: none; background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.35);
-    color: #fecaca; border-radius: 14px; padding: 11px 14px; font-size: 13.5px; line-height: 1.6;
+    display: none; background: #fdeaea; border: 1px solid #f4c9c9;
+    color: #b91c1c; border-radius: 14px; padding: 11px 14px; font-size: 13.5px; line-height: 1.6;
   }
   .banner.show { display: block; }
 
   .foot { display: flex; justify-content: center; gap: 10px; }
   .btn {
-    border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--text);
+    border: 1px solid var(--line); background: #fff; color: var(--text);
     padding: 9px 22px; border-radius: 999px; font-size: 13.5px; cursor: pointer;
-    font-family: inherit; transition: background .2s;
+    font-family: inherit; transition: background .2s; box-shadow: 0 2px 8px rgba(78,125,56,.06);
   }
-  .btn:hover { background: rgba(255,255,255,.11); }
-  .btn.end { color: #fecaca; border-color: rgba(248,113,113,.4); display: none; }
+  .btn:hover { background: #f3f8f1; }
+  .btn.end { color: #b91c1c; border-color: #f0cccc; display: none; }
   .btn.end.show { display: inline-block; }
 </style>
 </head>
@@ -122,8 +181,7 @@ export function renderVoicePage(): string {
 <div class="shell">
   <header>
     <div class="brand">
-      <div class="logo">🎙️</div>
-      <h1>גלי <small id="subtitle">העוזרת הקולית של המערכת</small></h1>
+      <h1>גלי <small id="subtitle">העוזרת הקולית של גלית</small></h1>
     </div>
     <div class="status"><span id="statusText">מנותקת</span><span class="dot" id="dot"></span></div>
   </header>
@@ -132,8 +190,8 @@ export function renderVoicePage(): string {
 
   <div class="stage" id="stage">
     <div class="ring"></div>
-    <button class="orb" id="orb" aria-label="התחלת שיחה">
-      <span class="ic" id="orbIcon">🎤</span>
+    <button class="avatar" id="orb" aria-label="התחלת שיחה">
+      ${robotAvatarInner()}
       <span class="label" id="orbLabel">לחצו כדי לדבר איתי</span>
     </button>
   </div>
@@ -191,7 +249,7 @@ export function renderVoicePage(): string {
 
   var stage = document.getElementById('stage');
   var orb = document.getElementById('orb');
-  var orbIcon = document.getElementById('orbIcon');
+  var robotPh = document.getElementById('robotPh'); // placeholder emoji (null once real image is embedded)
   var orbLabel = document.getElementById('orbLabel');
   var statusText = document.getElementById('statusText');
   var dot = document.getElementById('dot');
@@ -212,10 +270,12 @@ export function renderVoicePage(): string {
     stage.className = 'stage ' + (s === 'listening' ? 'listening' : s === 'speaking' ? 'speaking' : s === 'connecting' ? 'connecting' : '');
     statusText.textContent = label;
     dot.className = 'dot' + (s === 'listening' || s === 'speaking' ? ' live' : s === 'error' ? ' err' : '');
-    if (s === 'idle') { orbIcon.textContent = '🎤'; orbLabel.textContent = 'לחצו כדי לדבר איתי'; }
-    if (s === 'connecting') { orbIcon.textContent = '⏳'; orbLabel.textContent = 'מתחברת…'; }
-    if (s === 'listening') { orbIcon.textContent = '🎧'; orbLabel.textContent = 'מקשיבה — דברו חופשי'; }
-    if (s === 'speaking') { orbIcon.textContent = '💬'; orbLabel.textContent = 'גלי מדברת (אפשר לקטוע)'; }
+    // The robot image carries the personality now; only swap the placeholder
+    // emoji when the real image hasn't been embedded yet.
+    if (s === 'idle')       { if (robotPh) robotPh.textContent = '🤖'; orbLabel.textContent = 'לחצו כדי לדבר איתי'; }
+    if (s === 'connecting') { if (robotPh) robotPh.textContent = '⏳'; orbLabel.textContent = 'מתחברת…'; }
+    if (s === 'listening')  { if (robotPh) robotPh.textContent = '🎧'; orbLabel.textContent = 'מקשיבה — דברו חופשי'; }
+    if (s === 'speaking')   { if (robotPh) robotPh.textContent = '💬'; orbLabel.textContent = 'גלי מדברת (אפשר לקטוע)'; }
     endBtn.className = 'btn end' + (s === 'idle' || s === 'error' ? '' : ' show');
   }
 
