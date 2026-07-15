@@ -981,55 +981,86 @@ const TOOLS: VoiceToolDef[] = [
     name: 'get_my_tasks',
     gate: 'any',
     description:
-      'המשימות של המשתמש להיום — תצוגה משולבת אחת. כוללת את כל אירועי היום מיומן ה-Outlook (בלי סינון — בדיקות שטח וגם פגישות רגילות) יחד עם משימות המשרד (CRM) שתאריך היעד שלהן היום. בסוף מוצגות המשימות שבאיחור (תאריך יעד שעבר ולא הושלמו). זו התשובה לכל שאלה כללית כמו "מה יש לי היום" / "המשימות שלי" / "מה על הפרק".',
-    parameters: { type: 'object', properties: {} },
-    handler: async (user) => {
+      'המשימות של המשתמש — תצוגה משולבת אחת. ברירת מחדל: היום. אפשר גם יום/טווח אחר בעברית דרך when ("מחר", "השבוע", "בין X ל-Y"). כוללת את כל אירועי היומן (Outlook, בלי סינון — בדיקות שטח וגם פגישות רגילות) יחד עם משימות המשרד (CRM) שתאריך היעד שלהן בטווח. בסוף מוצגות המשימות שבאיחור (תאריך יעד שעבר ולא הושלמו). זו התשובה לכל שאלה כללית כמו "מה יש לי היום" / "מה יש לי מחר" / "המשימות שלי".',
+    parameters: {
+      type: 'object',
+      properties: {
+        when: {
+          type: 'string',
+          description: 'ביטוי תאריך בעברית: היום (ברירת מחדל) / מחר / השבוע / שבוע הבא / בין X ל-Y',
+        },
+      },
+    },
+    handler: async (user, args) => {
       const today = localJerusalemDate();
-      const tomorrow = addDays(today, 1);
 
-      // ── Office tasks (CRM "Task" table) — SAME logic as WhatsApp: open tasks
-      // whose dueDate is today or earlier (carry-over). Split into due-today vs
-      // overdue by the LOCAL Jerusalem calendar date. Never fails the whole tool.
-      const officeToday: Array<Record<string, unknown>> = [];
+      // Requested window (half-open [from, to)); default = today. Reuses the SAME
+      // Hebrew parser the inspection tools use — no parallel date mechanism.
+      let from = today;
+      let to = addDays(today, 1);
+      let label: string | null = null;
+      const phrase = str(args.when);
+      if (phrase) {
+        const parsed = parseHebrewInspectionRange(phrase);
+        if (parsed) {
+          from = parsed.fromLocalDate;
+          to = parsed.toLocalDate;
+          label = parsed.label;
+        }
+      }
+      // "In range" office tasks start no earlier than today — anything with a
+      // dueDate before today belongs in the OVERDUE bucket, never both.
+      const effectiveFrom = from > today ? from : today;
+      const rangeToInclusive = addDays(to, -1);
+      const yesterday = addDays(today, -1);
+
+      const mapOffice = (t: {
+        id: string; title: string; customerName: string | null;
+        dueDate: Date | null; priority: string | null; status: string;
+      }) => ({
+        kind: 'משרד',
+        task_id: t.id,
+        title: t.title,
+        customer: t.customerName,
+        due: t.dueDate ? fmtWhen(t.dueDate) : null,
+        priority: t.priority,
+        status: t.status,
+      });
+
+      // ── Office tasks (CRM "Task" table) — same due-date logic as WhatsApp.
+      // Two disjoint date-range reads: due-in-window (today→) and overdue
+      // (< today). Never fails the whole tool.
+      const inRange: Array<Record<string, unknown>> = [];
       const overdue: Array<Record<string, unknown>> = [];
       try {
-        const { tasks } = await listTasks(user, {
-          filter: 'today_overdue',
-          dateField: 'dueDate',
-          scope: 'own',
-          limit: 50,
-        });
-        for (const t of tasks) {
-          const row = {
-            kind: 'משרד',
-            task_id: t.id,
-            title: t.title,
-            customer: t.customerName,
-            due: t.dueDate ? fmtWhen(t.dueDate) : null,
-            priority: t.priority,
-            status: t.status,
-          };
-          const dueLocal = t.dueDate ? localJerusalemDate(new Date(t.dueDate)) : null;
-          if (dueLocal && dueLocal < today) overdue.push(row);
-          else officeToday.push(row);
+        if (effectiveFrom <= rangeToInclusive) {
+          const r = await listTasks(user, {
+            dateField: 'dueDate', dateFrom: effectiveFrom, dateTo: rangeToInclusive,
+            filter: 'open', scope: 'own', limit: 50,
+          });
+          for (const t of r.tasks) inRange.push(mapOffice(t));
         }
+        const o = await listTasks(user, {
+          dateField: 'dueDate', dateTo: yesterday, filter: 'open', scope: 'own', limit: 50,
+        });
+        for (const t of o.tasks) overdue.push(mapOffice(t));
       } catch (err) {
         logger.warn({ err, userId: user.id }, 'get_my_tasks: office tasks read failed');
       }
 
-      // ── Calendar (Outlook) — ALL of today's events, NO filtering. Only when
+      // ── Calendar (Outlook) — ALL events in the window, NO filtering. Only when
       // the CRM bridge is configured; if Outlook is not connected / the read
       // fails, we just omit the calendar half — the office tasks still return.
-      const calendarToday: Array<Record<string, unknown>> = [];
+      const calendar: Array<Record<string, unknown>> = [];
       if (crmApiConfigured()) {
         try {
           const events = await listCrmCalendarEvents(user.id, {
-            startIso: `${today}T00:00:00`,
-            endIso: `${tomorrow}T00:00:00`,
+            startIso: `${from}T00:00:00`,
+            endIso: `${to}T00:00:00`,
             top: 50,
           });
           for (const e of events) {
-            calendarToday.push({
+            calendar.push({
               kind: 'יומן',
               event_id: e.id,
               title: e.subject,
@@ -1044,22 +1075,24 @@ const TOOLS: VoiceToolDef[] = [
         }
       }
 
-      // One unified "tasks" list for today (calendar first, then office);
+      // One unified "tasks" list for the window (calendar first, then office);
       // overdue kept SEPARATE so גלי reads it at the END of the answer.
-      const todayItems = [...calendarToday, ...officeToday];
-      const todayCap = cap(todayItems);
+      const windowItems = [...calendar, ...inRange];
+      const windowCap = cap(windowItems);
       const overdueCap = cap(overdue);
+      const whenHe = label ?? 'היום';
 
       const speak =
-        todayItems.length === 0 && overdue.length === 0
-          ? 'אין לך משימות להיום.'
-          : `היום יש לך ${todayItems.length} משימות${overdue.length ? `. בנוסף, ${overdue.length} משימות באיחור` : ''}.`;
+        windowItems.length === 0 && overdue.length === 0
+          ? `אין לך משימות ${label ? whenHe : 'להיום'}.`
+          : `${whenHe} יש לך ${windowItems.length} משימות${overdue.length ? `. בנוסף, ${overdue.length} משימות באיחור` : ''}.`;
 
       return {
         ok: true,
-        count: todayItems.length,
-        more: todayCap.more,
-        tasks: todayCap.items,
+        ...(label ? { range: label } : {}),
+        count: windowItems.length,
+        more: windowCap.more,
+        tasks: windowCap.items,
         overdue_count: overdue.length,
         overdue: overdueCap.items,
         speak,

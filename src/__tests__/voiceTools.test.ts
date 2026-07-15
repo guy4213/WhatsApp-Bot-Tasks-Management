@@ -17,6 +17,7 @@ import {
   listToolNames,
   executeVoiceTool,
 } from '../services/voiceTools';
+import { parseHebrewInspectionRange } from '../ai/dateRangeParser';
 import type { ResolvedUser } from '../types';
 
 const worker: ResolvedUser = {
@@ -395,11 +396,10 @@ describe('get_my_tasks', () => {
 
   it('combines ALL of today\'s calendar events (unfiltered) with office tasks due today; overdue at the end', async () => {
     enableCrm();
-    // listTasks(today_overdue) mock: one due today, one overdue (5 days ago).
-    query.mockResolvedValueOnce({
-      rows: [taskRow('t-today', 'להתקשר לספק', 0), taskRow('t-late', 'לשלוח דוח', -5)],
-      rowCount: 2,
-    });
+    // Two office reads: #1 due-in-window (today), #2 overdue (< today).
+    query
+      .mockResolvedValueOnce({ rows: [taskRow('t-today', 'להתקשר לספק', 0)], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [taskRow('t-late', 'לשלוח דוח', -5)], rowCount: 1 });
     // Calendar: a field inspection AND a regular meeting — BOTH must be kept.
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       calResponse([
@@ -428,9 +428,37 @@ describe('get_my_tasks', () => {
     }
   });
 
+  it('when="מחר" shifts the calendar window to tomorrow and shows tomorrow\'s due tasks; overdue still at the end', async () => {
+    enableCrm();
+    const tomorrow = parseHebrewInspectionRange('מחר')!.fromLocalDate; // YYYY-MM-DD
+    query
+      .mockResolvedValueOnce({ rows: [taskRow('t-tom', 'לשלם לספק מחר', 1)], rowCount: 1 }) // due-in-window
+      .mockResolvedValueOnce({ rows: [taskRow('t-old', 'דוח באיחור', -3)], rowCount: 1 });  // overdue
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      calResponse([calEvent({ id: 'c1', subject: 'פגישה מחר' })]),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_tasks', { when: 'מחר' });
+      expect(res.ok).toBe(true);
+      // the calendar window actually moved to tomorrow
+      const url = fetchSpy.mock.calls[0][0] as string;
+      expect(url).toContain(tomorrow);
+      // 1 calendar + 1 office due tomorrow = 2; overdue (as of now) still surfaces
+      expect(res.count).toBe(2);
+      expect(res.overdue_count).toBe(1);
+      expect(typeof res.range).toBe('string');
+      expect(res.range as string).toContain('מחר');
+      expect(res.speak as string).toContain('באיחור');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('works without the CRM bridge — office + overdue only, calendar skipped, no fetch', async () => {
     // No enableCrm() → crmApiConfigured()=false → the calendar read is skipped.
-    query.mockResolvedValueOnce({ rows: [taskRow('t-today', 'משימת משרד', 0)], rowCount: 1 });
+    query
+      .mockResolvedValueOnce({ rows: [taskRow('t-today', 'משימת משרד', 0)], rowCount: 1 }) // due today
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });                                    // overdue
     const fetchSpy = vi.spyOn(global, 'fetch');
     const res = await executeVoiceTool(worker, 'get_my_tasks', {});
     expect(res.ok).toBe(true);
@@ -441,7 +469,9 @@ describe('get_my_tasks', () => {
 
   it('no tasks and empty calendar → the "no tasks today" line', async () => {
     enableCrm();
-    query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    query
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })  // due today
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }); // overdue
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(calResponse([]));
     try {
       const res = await executeVoiceTool(worker, 'get_my_tasks', {});
@@ -456,7 +486,9 @@ describe('get_my_tasks', () => {
 
   it('a failed calendar read does not fail the tool — office tasks still return', async () => {
     enableCrm();
-    query.mockResolvedValueOnce({ rows: [taskRow('t-today', 'משימת משרד', 0)], rowCount: 1 });
+    query
+      .mockResolvedValueOnce({ rows: [taskRow('t-today', 'משימת משרד', 0)], rowCount: 1 }) // due today
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });                                    // overdue
     // Outlook not connected → the CRM calendar endpoint 400s with a Hebrew error.
     const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('{"message":"חשבון Outlook אינו מחובר"}', {

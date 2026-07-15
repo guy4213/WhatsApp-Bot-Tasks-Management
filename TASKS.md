@@ -32,14 +32,19 @@ everything from the calendar under one heading — משימות", so that classi
 - One tool `get_my_tasks` (gate `any`, **no** CRM gate — office tasks are a
   direct DB read and always work; the calendar half is added only when
   `crmApiConfigured()` and degrades gracefully if Outlook isn't connected).
-- Office half mirrors WhatsApp: `listTasks(user, {filter:'today_overdue',
-  dateField:'dueDate', scope:'own'})`, then split by the LOCAL Jerusalem date
-  into due-today vs overdue.
-- Calendar half: `listCrmCalendarEvents` for the local day window, mapped
+- Default window is **today**; an optional Hebrew `when` ("מחר", "השבוע", "בין X
+  ל-Y") shifts the whole view via the same `parseHebrewInspectionRange` the
+  inspection tools use — no parallel date mechanism.
+- Office half mirrors WhatsApp's due-date logic with two DISJOINT date-range
+  reads on `listTasks(..., dateField:'dueDate', filter:'open', scope:'own')`:
+  due-in-window (clamped to start no earlier than today) and overdue
+  (dueDate < today). The clamp guarantees a past-due task never appears in both
+  buckets even for windows that straddle today (e.g. "השבוע").
+- Calendar half: `listCrmCalendarEvents` for the requested window, mapped
   as-is (no filtering).
-- Response merges calendar + office-today into one `tasks` list; `overdue` is a
-  separate bucket so גלי reads it last. `speak` puts the overdue count at the end
-  ("היום יש לך N משימות. בנוסף, X משימות באיחור.").
+- Response merges calendar + in-window office into one `tasks` list; `overdue`
+  is a separate bucket so גלי reads it last. `speak` puts the overdue count at
+  the end ("היום יש לך N משימות. בנוסף, X משימות באיחור.").
 
 **Files changed.**
 - `src/services/voiceTools.ts` — new `get_my_tasks` tool; added `listTasks`
