@@ -17,6 +17,7 @@ import {
   listToolNames,
   executeVoiceTool,
 } from '../services/voiceTools';
+import { setProvider, type LLMProvider } from '../ai/provider';
 import type { ResolvedUser } from '../types';
 
 const worker: ResolvedUser = {
@@ -52,6 +53,7 @@ beforeEach(() => {
   query.mockClear();
   delete process.env.CRM_API_BASE_URL;
   delete process.env.CRM_SERVICE_JWT;
+  setProvider(undefined); // reset the AI provider seam between tests
 });
 
 describe('role gating', () => {
@@ -340,5 +342,211 @@ describe('executeVoiceTool — denial paths', () => {
     // 2 KB of notes into a spoken response.
     expect(snippet).toHaveLength(201);
     expect(snippet.endsWith('…')).toBe(true);
+  });
+});
+
+// ── get_my_field_tasks: Outlook calendar → filtered גלית field inspections ─────
+
+const CAL_EVENT_DEFAULTS = {
+  start: { dateTime: '2026-07-15T07:00:00Z', timeZone: 'UTC' },
+  end: { dateTime: '2026-07-15T08:00:00Z', timeZone: 'UTC' },
+  location: null as string | null,
+  isOnlineMeeting: false,
+  isAllDay: false,
+  webLink: null as string | null,
+};
+
+function calEvent(partial: {
+  id: string;
+  subject: string | null;
+  location?: string | null;
+  isAllDay?: boolean;
+  isOnlineMeeting?: boolean;
+}) {
+  return { ...CAL_EVENT_DEFAULTS, ...partial };
+}
+
+/** A CRM calendar-list HTTP response ({events,count}) for the fetch mock. */
+function calResponse(events: unknown[]): Response {
+  return new Response(JSON.stringify({ events, count: events.length }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function mockProvider(emit: LLMProvider['emitStructured']): LLMProvider {
+  return { name: 'mock', emitStructured: emit };
+}
+
+function enableCrm(): void {
+  process.env.CRM_API_BASE_URL = 'https://crm.example.com';
+  process.env.CRM_SERVICE_JWT = 'jwt';
+}
+
+describe('get_my_field_tasks', () => {
+  it('appears only when the CRM bridge is configured — same gate as get_calendar_events', () => {
+    expect(listToolNames(worker)).not.toContain('get_my_field_tasks');
+    enableCrm();
+    expect(listToolNames(worker)).toContain('get_my_field_tasks');
+    expect(listToolNames(manager)).toContain('get_my_field_tasks');
+  });
+
+  it('heuristic path: the 3 real Yoram templates all pass as matched_by=domain, NO AI call', async () => {
+    enableCrm();
+    const emit = vi.fn();
+    setProvider(mockProvider(emit));
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      calResponse([
+        calEvent({ id: 'a', subject: 'בדיקדת קרינה עבור האוניברסיטה הפתוחה', location: 'רעננה' }),
+        calEvent({ id: 'b', subject: "בדיקת צוות מריחים עבור חברת היטאצ'י", location: 'חיפה' }),
+        calEvent({ id: 'c', subject: 'סקר אסבסט', location: 'לוד' }),
+      ]),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      expect(res.ok).toBe(true);
+      expect(res.count).toBe(3);
+      const tasks = res.field_tasks as Array<Record<string, unknown>>;
+      expect(tasks).toHaveLength(3);
+      for (const t of tasks) expect(t.matched_by).toBe('domain');
+      // domain-only → the AI layer is never consulted
+      expect(emit).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('hard-no: an all-day event is dropped even with a domain keyword, no AI call', async () => {
+    enableCrm();
+    const emit = vi.fn();
+    setProvider(mockProvider(emit));
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      calResponse([calEvent({ id: 'a', subject: 'בדיקת קרינה', location: 'רעננה', isAllDay: true })]),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      expect(res.ok).toBe(true);
+      expect(res.count).toBe(0);
+      expect(emit).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('hard-no: an online meeting is dropped even with a domain keyword, no AI call', async () => {
+    enableCrm();
+    const emit = vi.fn();
+    setProvider(mockProvider(emit));
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      calResponse([calEvent({ id: 'a', subject: 'בדיקת קרינה', location: 'רעננה', isOnlineMeeting: true })]),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      expect(res.ok).toBe(true);
+      expect(res.count).toBe(0);
+      expect(emit).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('AI path: an ambiguous event enters as matched_by=ai when the AI returns true', async () => {
+    enableCrm();
+    const emit = vi.fn().mockResolvedValue({
+      classifications: [{ event_id: 'd', is_field_task: true, reason: 'ביקור מקצועי באתר לקוח' }],
+    });
+    setProvider(mockProvider(emit));
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      calResponse([calEvent({ id: 'd', subject: 'ביקור אצל דוד', location: 'רחוב הרצל 5, לוד' })]),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      expect(res.ok).toBe(true);
+      expect(emit).toHaveBeenCalledTimes(1);
+      const tasks = res.field_tasks as Array<Record<string, unknown>>;
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].matched_by).toBe('ai');
+      expect(tasks[0].event_id).toBe('d');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('AI path: an ambiguous event is dropped when the AI returns false', async () => {
+    enableCrm();
+    const emit = vi.fn().mockResolvedValue({
+      classifications: [{ event_id: 'd', is_field_task: false, reason: 'טיפול רפואי אישי' }],
+    });
+    setProvider(mockProvider(emit));
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      calResponse([calEvent({ id: 'd', subject: 'בדיקת שיניים', location: 'מרפאת שיניים, רמת גן' })]),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      expect(res.ok).toBe(true);
+      expect(emit).toHaveBeenCalledTimes(1); // it WAS sent to the AI (action word + location)
+      expect(res.count).toBe(0); // …but dropped on a false verdict
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('no-signal event (no action word, no location) is dropped WITHOUT an AI call', async () => {
+    enableCrm();
+    const emit = vi.fn();
+    setProvider(mockProvider(emit));
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      calResponse([calEvent({ id: 'x', subject: 'עדכון', location: null })]),
+    );
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      expect(res.ok).toBe(true);
+      expect(res.count).toBe(0);
+      expect(emit).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('output is capped at 15, carries the voice fields, and speaks the zero/count lines', async () => {
+    enableCrm();
+    setProvider(mockProvider(vi.fn()));
+    const many = Array.from({ length: 20 }, (_, i) =>
+      calEvent({ id: `e${i}`, subject: 'בדיקת קרינה', location: 'רעננה' }),
+    );
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(calResponse(many));
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      expect(res.ok).toBe(true);
+      expect(res.count).toBe(20);
+      const tasks = res.field_tasks as Array<Record<string, unknown>>;
+      expect(tasks).toHaveLength(15); // cap()
+      expect(res.more).toBe(5);
+      // voice shape present
+      const t0 = tasks[0];
+      expect(t0).toHaveProperty('event_id');
+      expect(t0).toHaveProperty('subject');
+      expect(t0).toHaveProperty('when');
+      expect(t0).toHaveProperty('time');
+      expect(t0).toHaveProperty('location');
+      expect(t0).toHaveProperty('matched_by');
+      expect(res.speak).toBe('יש לך 20 בדיקות שטח בטווח הזה.');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('empty calendar → zero-count Hebrew line', async () => {
+    enableCrm();
+    setProvider(mockProvider(vi.fn()));
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(calResponse([]));
+    try {
+      const res = await executeVoiceTool(worker, 'get_my_field_tasks', {});
+      expect(res.ok).toBe(true);
+      expect(res.count).toBe(0);
+      expect(res.speak).toBe('אין לך בדיקות שטח בטווח הזה.');
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

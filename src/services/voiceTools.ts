@@ -105,7 +105,9 @@ import {
   createCrmCalendarEvent,
   updateCrmCalendarEvent,
   deleteCrmCalendarEvent,
+  type CrmCalendarEvent,
 } from './crmApi';
+import { classifyUncertainEventsByAI } from '../ai/fieldTaskClassifier';
 import { auditVoiceToolCall } from './voiceAccess';
 import { canAssignLeads } from './specialUsers';
 
@@ -214,6 +216,18 @@ function fmtWhen(d: Date | string | null): string | null {
     timeZone: 'Asia/Jerusalem',
     day: '2-digit',
     month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+/** HH:MM (Asia/Jerusalem) — the time-of-day companion to fmtWhen. */
+function fmtTime(d: Date | string | null): string | null {
+  if (!d) return null;
+  const date = typeof d === 'string' ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('he-IL', {
+    timeZone: 'Asia/Jerusalem',
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
@@ -440,6 +454,107 @@ const PROBLEM_TYPES: FieldProblemType[] = [
 
 const customerNotificationsEnabled = () =>
   (process.env.CUSTOMER_NOTIFICATIONS_ENABLED ?? '').toLowerCase() === 'true';
+
+// ── Field-task filter (Outlook calendar → גלית site inspections) ────────────────
+//
+// `get_my_field_tasks` reads the user's Outlook calendar (the SAME source as
+// get_calendar_events) but keeps ONLY events that are actual field
+// inspections/surveys, dropping regular meetings. Two layers:
+//   1. classifyByHeuristic — fast, synchronous. Clear domain keyword → in;
+//      all-day / online meeting → out; no signal at all → out (no AI spend).
+//   2. classifyUncertainEventsByAI — one batched AI call for the leftovers.
+// The keyword lists below were calibrated against 24 real Yoram events (see
+// src/scripts/inspectOutlookEvents.ts) and cover all of them without any AI call.
+
+const FIELD_DOMAIN_KEYWORDS = [
+  'קרינה',
+  'אסבסט',
+  'ראדון',
+  'רעש',
+  'אוויר',
+  'ריח',
+  'עובש',
+  'קרקע',
+  'מריחים',
+  'RF',
+] as const;
+
+const FIELD_ACTION_KEYWORDS = [
+  'בדיק',
+  'בדיקד', // tolerate Yoram's recurring typo "בדיקדת"
+  'ביקור',
+  'מדיד',
+  'דיגום',
+  'סקר',
+] as const;
+
+type HeuristicVerdict =
+  | { decision: 'yes'; matched_by: 'domain' }
+  | { decision: 'no'; reason: 'all_day' | 'online_meeting' }
+  | { decision: 'uncertain'; hasAction: boolean; hasLocation: boolean };
+
+/**
+ * Fast, synchronous first pass. Case-insensitive keyword matching (incl. "RF").
+ * A `{decision:'uncertain', hasAction:false, hasLocation:false}` verdict means
+ * "no signal at all" — the pipeline drops it without an AI call.
+ */
+function classifyByHeuristic(ev: CrmCalendarEvent): HeuristicVerdict {
+  if (ev.isAllDay) return { decision: 'no', reason: 'all_day' };
+  if (ev.isOnlineMeeting) return { decision: 'no', reason: 'online_meeting' };
+
+  const subject = (ev.subject ?? '').toLowerCase();
+  const hasDomain = FIELD_DOMAIN_KEYWORDS.some((k) => subject.includes(k.toLowerCase()));
+  if (hasDomain) return { decision: 'yes', matched_by: 'domain' };
+
+  const hasAction = FIELD_ACTION_KEYWORDS.some((k) => subject.includes(k.toLowerCase()));
+  const hasLocation = Boolean(ev.location?.trim());
+  return { decision: 'uncertain', hasAction, hasLocation };
+}
+
+/**
+ * Full hybrid pipeline. Domain-matched events pass immediately (matched_by
+ * 'domain'); genuinely ambiguous events (≥1 signal) go to ONE batched AI call
+ * and pass only when the model returns is_field_task=true (matched_by 'ai');
+ * everything else is dropped. Output preserves the original API order.
+ */
+async function filterFieldTaskEvents(
+  events: CrmCalendarEvent[],
+): Promise<Array<CrmCalendarEvent & { matched_by: 'domain' | 'ai' }>> {
+  const domainIds = new Set<string>();
+  const uncertain: CrmCalendarEvent[] = [];
+
+  for (const ev of events) {
+    const verdict = classifyByHeuristic(ev);
+    if (verdict.decision === 'yes') {
+      domainIds.add(ev.id);
+    } else if (verdict.decision === 'uncertain' && (verdict.hasAction || verdict.hasLocation)) {
+      uncertain.push(ev);
+    }
+    // 'no' and signal-less 'uncertain' → dropped (no AI call).
+  }
+
+  const aiFieldTaskIds = new Set<string>();
+  if (uncertain.length > 0) {
+    const verdicts = await classifyUncertainEventsByAI(
+      uncertain.map((ev) => ({
+        event_id: ev.id,
+        subject: ev.subject ?? '',
+        location: ev.location ?? '',
+      })),
+    );
+    for (const ev of uncertain) {
+      if (verdicts.get(ev.id)?.is_field_task === true) aiFieldTaskIds.add(ev.id);
+    }
+  }
+
+  // Rebuild in the original chronological order the API returned.
+  const out: Array<CrmCalendarEvent & { matched_by: 'domain' | 'ai' }> = [];
+  for (const ev of events) {
+    if (domainIds.has(ev.id)) out.push({ ...ev, matched_by: 'domain' });
+    else if (aiFieldTaskIds.has(ev.id)) out.push({ ...ev, matched_by: 'ai' });
+  }
+  return out;
+}
 
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
@@ -953,6 +1068,76 @@ const TOOLS: VoiceToolDef[] = [
             events.length === 0
               ? 'היומן פנוי בתקופה הזו.'
               : `יש ${events.length} אירועים ביומן.`,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          ok: false,
+          error: msg.includes('מחובר')
+            ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM (הגדרות → Outlook).'
+            : msg,
+        };
+      }
+    },
+  },
+  {
+    name: 'get_my_field_tasks',
+    gate: 'any',
+    available: crmApiConfigured,
+    description:
+      'רשימת בדיקות השטח של המשתמש מתוך יומן Outlook. האירועים מסוננים כך שפגישות רגילות אינן נכללות. כדי להציג את היומן המלא, לרבות פגישות שאינן בדיקות, יש להשתמש ב-get_calendar_events.',
+    parameters: {
+      type: 'object',
+      properties: {
+        when: { type: 'string', description: 'ביטוי טווח בעברית: היום/מחר/השבוע/בין X ל-Y' },
+        from_iso: { type: 'string', description: 'התחלה ISO (אופציונלי)' },
+        to_iso: { type: 'string', description: 'סוף ISO (אופציונלי)' },
+        days_ahead: { type: 'number', description: 'כמה ימים קדימה (ברירת מחדל 7)' },
+      },
+    },
+    handler: async (user, args) => {
+      const now = new Date();
+      const days = Math.min(Math.max(num(args.days_ahead) ?? 7, 1), 60);
+
+      // Range resolution mirrors get_calendar_events (from_iso/to_iso/days_ahead)
+      // and additionally accepts a Hebrew phrase via the SAME parser the
+      // inspection tools use (parseHebrewInspectionRange) — no parallel mechanism.
+      let startIso = str(args.from_iso);
+      let endIso = str(args.to_iso);
+      let label: string | null = null;
+      const phrase = str(args.when);
+      if (phrase && (!startIso || !endIso)) {
+        const parsed = parseHebrewInspectionRange(phrase);
+        if (parsed) {
+          startIso = startIso ?? `${parsed.fromLocalDate}T00:00:00`;
+          endIso = endIso ?? `${parsed.toLocalDate}T00:00:00`;
+          label = parsed.label;
+        }
+      }
+      startIso = startIso ?? now.toISOString();
+      endIso = endIso ?? new Date(now.getTime() + days * 86_400_000).toISOString();
+
+      try {
+        const events = await listCrmCalendarEvents(user.id, { startIso, endIso, top: 50 });
+        const fieldEvents = await filterFieldTaskEvents(events);
+        const { items, more } = cap(fieldEvents);
+        return {
+          ok: true,
+          ...(label ? { range: label } : {}),
+          count: fieldEvents.length,
+          more,
+          field_tasks: items.map((e) => ({
+            event_id: e.id,
+            subject: e.subject,
+            when: e.start ? fmtWhen(e.start.dateTime) : null,
+            time: e.start ? fmtTime(e.start.dateTime) : null,
+            location: e.location ?? null,
+            matched_by: e.matched_by,
+          })),
+          speak:
+            fieldEvents.length === 0
+              ? `אין לך בדיקות שטח ${label ?? 'בטווח הזה'}.`
+              : `יש לך ${fieldEvents.length} בדיקות שטח ${label ?? 'בטווח הזה'}.`,
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

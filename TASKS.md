@@ -9,6 +9,69 @@ Conventions:
 
 ---
 
+## VOICE-FIELD-TASKS-FROM-OUTLOOK — split field vs. office in the voice agent (2026-07-15)
+
+**Status:** DONE (local, uncommitted)
+
+**What to do.** In the voice agent "גלי", three information sources were bleeding
+into each other: (1) field inspections created by hand in the user's Outlook
+calendar, (2) office/CRM tasks in the DB (`list_my_crm_tasks`), and (3) the full
+Outlook calendar (`get_calendar_events`) which mixes inspections with regular
+meetings. Asking "מה יש לי היום בשטח?" surfaced dentist appointments and personal
+meetings alongside real inspections. Added a new voice tool `get_my_field_tasks`
+that reads Outlook via `listCrmCalendarEvents`, filters to גלית field
+inspections/surveys only, and updated גלי's persona to keep the four worlds
+(field / office / calendar / leads) distinct.
+
+**How.**
+- The voice agent "גלי" now separates field inspections, office (CRM) tasks, and
+  the full calendar.
+- 24 real Outlook events from `MicrosoftGraphEventLog` were analyzed (three
+  templates: "בדיקדת קרינה…" incl. Yoram's recurring "בדיקדת" typo, "בדיקת צוות
+  מריחים…", "סקר אסבסט").
+- Filtering is a **hybrid heuristic + AI** pipeline: a fast synchronous heuristic
+  (domain keyword → in; all-day / online meeting → out; no signal → out) decides
+  the clear cases; only genuinely ambiguous events go to ONE batched AI call.
+- The heuristic covers **all 24** analyzed events with **no AI call** — the AI
+  layer fires only for uncertain events (e.g. "ביקור אצל דוד").
+- AI layer is conservative: never throws; no provider / provider error / bad
+  output → `false` for every event (false-negative preferred over false-positive,
+  since a missed event still shows in the full calendar).
+
+**Files changed.**
+- NEW `src/ai/fieldTaskClassifier.ts` — `classifyUncertainEventsByAI` (batched,
+  structured output, hallucination guard, conservative fallback, logging, never
+  throws).
+- `src/services/voiceTools.ts` — `FIELD_DOMAIN_KEYWORDS`, `FIELD_ACTION_KEYWORDS`,
+  `HeuristicVerdict`, `classifyByHeuristic`, `filterFieldTaskEvents`, `fmtTime`,
+  and the new `get_my_field_tasks` tool (gate `any`, gated on `crmApiConfigured`).
+- `src/routes/voiceAssistant.ts` — persona `buildInstructions`: rewrote the
+  "four worlds" block (field → `get_my_field_tasks` only; explicitly NOT
+  `get_calendar_events` / `get_my_inspections`).
+- NEW `src/scripts/inspectOutlookEvents.ts` — read-only diagnostic (the file the
+  task references did not yet exist; created it, carrying the required header, so
+  the keyword lists can be re-calibrated in future).
+- NEW `src/__tests__/fieldTaskClassifier.test.ts` (7 tests).
+- `src/__tests__/voiceTools.test.ts` — new `get_my_field_tasks` block (gating,
+  heuristic-only path, hard-no all-day/online, AI true/false, no-signal drop,
+  cap 15 + voice fields + zero/count lines).
+
+**Tests.** `npx tsc --noEmit` → clean (0 errors). `npx vitest run
+src/__tests__/voiceTools.test.ts src/__tests__/fieldTaskClassifier.test.ts` →
+36/36 passed. Voice cluster (voice / voiceRoutes / voiceAccess / voiceTools /
+fieldTaskClassifier) → 69/69 passed. Full suite → 1758 passed, 7 skipped, 0
+failed (one worker OOM'd at the tail of 104 files — an env memory limit, not a
+test failure).
+
+**Not touched:**
+- TaskField in DB
+- get_my_inspections
+- WhatsApp router
+- CRM API endpoint (`CrmCalendarEvent` shape unchanged; `crmApi.ts` only gained
+  a type re-import in the consumer, no endpoint/field changes)
+
+---
+
 ## VOICE-DETAILS — list→details closure for leads and CRM tasks (2026-07-15)
 
 **Status:** DONE (local, uncommitted; `get_crm_task_details` awaits `GET /tasks/:id` on the CRM side)
