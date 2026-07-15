@@ -61,12 +61,23 @@ function dayOfWeekHe(): string {
   }).format(new Date());
 }
 
-function buildInstructions(user: ResolvedUser): string {
+function buildInstructions(user: ResolvedUser, toolNames: string[]): string {
   const manager = isManagerMenuUser(user);
+  const has = (n: string) => toolNames.includes(n);
+
+  // Name the capabilities that are OFF this session (CRM bridge / calendar not
+  // configured) so גלי states it plainly instead of firing a "near" tool.
+  const unavailable: string[] = [];
+  if (!has('list_my_crm_tasks')) unavailable.push('משימות משרד (CRM) — יצירה/עדכון/רשימה');
+  if (!has('get_calendar_events')) unavailable.push('יומן Outlook — צפייה וקביעת פגישות');
+
   return [
     `את "גלי" — עוזרת אישית קולית של מערכת ניהול המשימות ובדיקות השטח.`,
     `המשתמש/ת בשיחה: ${user.name} (תפקיד: ${user.role}${manager ? ', עם הרשאות ניהול' : ''}).`,
     `היום ${dayOfWeekHe()}, ${localJerusalemDate()} (שעון ישראל).`,
+    unavailable.length
+      ? `שים לב — היכולות הבאות אינן זמינות בשיחה כרגע (לא הוגדרו בשרת): ${unavailable.join('; ')}. אם יבקשו אותן, אמרי בכנות שהן עדיין לא זמינות בקול והצעי לפנות ל-CRM. אל תשתמשי בכלי אחר במקומן.`
+      : ``,
     ``,
     `כללי שיחה:`,
     `- דברי עברית בלבד, בטון חם, טבעי ותכליתי. משפטים קצרים — זו שיחה קולית.`,
@@ -76,8 +87,16 @@ function buildInstructions(user: ResolvedUser): string {
     `- לפני פעולה משמעותית שאינה הפיכה בקלות (סיום בדיקה, דחייה, שיוך ליד, שיוך משימה מחדש, שליחת הודעה) — אשרי בקצרה מה עומדת לעשות אם יש אי-ודאות כלשהי.`,
     `- תאריכים: חשבי יחסית להיום. "מחר ב-10" = מחר בשעה 10:00 בשעון ישראל, בפורמט ISO מקומי (בלי Z).`,
     `- מספרים, שעות ותאריכים — אמרי בעברית טבעית (למשל "עשר וחצי", "שלוש בדיקות").`,
-    `- אם מבקשים משהו שאין לו כלי — אמרי בכנות שהפעולה עדיין לא נתמכת בקול, והפנה לוואטסאפ של הבוט או ל-CRM.`,
     `- בתחילת שיחה: ברכי קצר ("שלום ${user.name.split(' ')[0]}, מה נעשה היום?") — בלי נאומים.`,
+    ``,
+    `שלושה עולמות נפרדים — אל תבלבלי ביניהם:`,
+    `1. "בדיקות" / "ביקורים" / "הלוז בשטח" = ביקורי שטח (TaskField). כלים: get_my_inspections, get_inspection_details, update_inspection_status.`,
+    `2. "משימות" / "משימות משרד" / "מטלות" / "מה יש לי לעשות" = משימות CRM. כלי: list_my_crm_tasks (ליצירה: create_crm_task).`,
+    `3. "יומן" / "פגישות" / "אירועים" / "מה קבוע לי" = יומן Outlook. כלים: get_calendar_events, create_calendar_event.`,
+    `- שלושתם שונים לחלוטין: "בדיקות" זה לא "יומן" וזה לא "משימות". אם המשתמש אומר "יומן" — לעולם אל תקראי ל-get_my_inspections. אם אומר "משימות" — אל תקראי ל-management_snapshot.`,
+    ``,
+    `כשאין כלי מתאים:`,
+    `- אם המשתמש מבקש נתונים שאין להם כלי זמין ברשימת הכלים שלך (למשל אין כלי יומן או אין כלי משימות) — אל תריצי כלי אחר "קרוב" במקום. אמרי בכנות שהפעולה הזו אינה זמינה כרגע בשיחה הקולית, והצעי לפנות ל-CRM. אסור להחליף פעולה אחת באחרת.`,
     ``,
     `דגשים חשובים:`,
     `- "יצאתי" / "אני בדרך" → update_inspection_status עם DEPARTED (זה שולח ללקוח הודעה + מעקב חי אוטומטית — ספרי למשתמש שזה קרה).`,
@@ -106,6 +125,11 @@ async function mintEphemeralSecret(user: ResolvedUser): Promise<MintResult> {
   const voice = (process.env.VOICE_REALTIME_VOICE ?? 'marin').trim();
   const transcribeModel = (process.env.VOICE_TRANSCRIBE_MODEL ?? 'whisper-1').trim();
 
+  // Compute tools + persona ONCE — the persona names which capabilities are off
+  // so the model won't substitute a "near" tool when one is missing.
+  const tools = buildOpenAiTools(user);
+  const instructions = buildInstructions(user, listToolNames(user));
+
   let lastError = '';
   for (const model of [...new Set(modelsToTry)]) {
     const res = await fetch(`${OPENAI_BASE}/realtime/client_secrets`, {
@@ -119,8 +143,8 @@ async function mintEphemeralSecret(user: ResolvedUser): Promise<MintResult> {
         session: {
           type: 'realtime',
           model,
-          instructions: buildInstructions(user),
-          tools: buildOpenAiTools(user),
+          instructions,
+          tools,
           tool_choice: 'auto',
           audio: {
             input: {
