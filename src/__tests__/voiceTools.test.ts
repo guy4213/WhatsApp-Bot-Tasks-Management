@@ -111,6 +111,15 @@ describe('role gating', () => {
     expect(withCrm).toContain('create_calendar_event');
     expect(withCrm).toContain('update_calendar_event');
     expect(withCrm).toContain('delete_calendar_event');
+    // org-wide CRM tasks is manager-gated → a worker never sees it
+    expect(withCrm).not.toContain('list_all_crm_tasks');
+  });
+
+  it('managers get list_all_crm_tasks (org-wide office tasks) when CRM is configured', () => {
+    process.env.CRM_API_BASE_URL = 'https://crm.example.com';
+    process.env.CRM_SERVICE_JWT = 'jwt';
+    expect(listToolNames(manager)).toContain('list_all_crm_tasks');
+    expect(listToolNames(worker)).not.toContain('list_all_crm_tasks');
   });
 });
 

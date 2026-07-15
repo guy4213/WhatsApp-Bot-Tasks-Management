@@ -97,6 +97,7 @@ import {
   createCrmTask,
   updateCrmTask,
   listCrmTasksForOwner,
+  listAllCrmTasks,
   crmApiConfigured,
   listCrmCalendarEvents,
   createCrmCalendarEvent,
@@ -1198,6 +1199,56 @@ const TOOLS: VoiceToolDef[] = [
           status: t.status,
         })),
         speak: filtered.length === 0 ? 'אין לך משימות משרד פתוחות.' : `יש לך ${filtered.length} משימות משרד פתוחות.`,
+      };
+    },
+  },
+  {
+    name: 'list_all_crm_tasks',
+    gate: 'manager',
+    available: crmApiConfigured,
+    description:
+      'רשימת משימות המשרד (CRM) של כל העובדים בארגון — למנהלים. אפשר לסנן לעובד ספציפי (worker_name) או להביא גם משימות שהסתיימו (include_done).',
+    parameters: {
+      type: 'object',
+      properties: {
+        worker_name: { type: 'string', description: 'סינון לעובד ספציפי (אופציונלי)' },
+        include_done: { type: 'boolean', description: 'לכלול גם משימות שהסתיימו/בוטלו' },
+      },
+    },
+    handler: async (_user, args) => {
+      let ownerId: string | undefined;
+      let workerLabel = '';
+      const workerName = str(args.worker_name);
+      if (workerName) {
+        const resolved = await resolveUserByName(workerName);
+        if (!resolved.ok) return resolved.result;
+        ownerId = resolved.id;
+        workerLabel = resolved.name;
+      }
+      const rows = await listAllCrmTasks({
+        ownerId,
+        status: args.include_done === true ? undefined : undefined,
+        limit: 40,
+      });
+      if (!rows) return { ok: false, error: 'לא הצלחתי לקרוא את המשימות מה-CRM' };
+      const { items, more } = cap(rows, 20);
+      const scope = workerLabel ? `של ${workerLabel}` : 'בארגון';
+      return {
+        ok: true,
+        count: rows.length,
+        more,
+        tasks: items.map((t) => ({
+          task_id: t.id,
+          title: t.title,
+          worker: t.ownerName,
+          due: t.dueDate ? fmtWhen(t.dueDate) : null,
+          priority: t.priority,
+          status: t.status,
+        })),
+        speak:
+          rows.length === 0
+            ? `אין משימות משרד פתוחות ${scope}.`
+            : `יש ${rows.length} משימות משרד פתוחות ${scope}.`,
       };
     },
   },

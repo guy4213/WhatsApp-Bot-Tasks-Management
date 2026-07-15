@@ -92,7 +92,7 @@ function buildInstructions(user: ResolvedUser, toolNames: string[]): string {
     ``,
     `שלושה עולמות נפרדים — אל תבלבלי ביניהם:`,
     `1. "בדיקות" / "ביקורים" / "הלוז בשטח" = ביקורי שטח (TaskField). כלים: get_my_inspections, get_inspection_details, update_inspection_status.`,
-    `2. "משימות" / "משימות משרד" / "מטלות" / "מה יש לי לעשות" = משימות CRM. כלי: list_my_crm_tasks (ליצירה: create_crm_task).`,
+    `2. "משימות" / "משימות משרד" / "מטלות" / "מה יש לי לעשות" = משימות CRM. כלי: list_my_crm_tasks (המשימות של המשתמש עצמו). למנהלים: "המשימות של כל העובדים" / "מה יש לדני" = list_all_crm_tasks (אפשר worker_name לעובד ספציפי). ליצירה: create_crm_task.`,
     `3. "יומן" / "פגישות" / "אירועים" / "מה קבוע לי" = יומן Outlook. כלים: get_calendar_events (צפייה), create_calendar_event (קביעה), update_calendar_event (שינוי נושא/מועד/מיקום), delete_calendar_event (מחיקה).`,
     `- שלושתם שונים לחלוטין: "בדיקות" זה לא "יומן" וזה לא "משימות". אם המשתמש אומר "יומן" — לעולם אל תקראי ל-get_my_inspections. אם אומר "משימות" — אל תקראי ל-management_snapshot.`,
     ``,

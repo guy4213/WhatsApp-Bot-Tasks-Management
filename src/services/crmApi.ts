@@ -19,6 +19,7 @@
  */
 
 import { moduleLogger } from '../utils/logger';
+import { pool } from '../db/connection';
 
 const logger = moduleLogger('crm-api');
 
@@ -142,6 +143,46 @@ export async function listCrmTasksForOwner(
     .filter((t) => t.ownerId === ownerId)
     .filter((t) => (opts.status ? t.status === opts.status : t.status !== 'DONE' && t.status !== 'CANCELLED'))
     .slice(0, limit);
+}
+
+/** CrmTask enriched with the owner's display name (for manager org-wide views). */
+export interface CrmTaskWithOwner extends CrmTask {
+  ownerName: string | null;
+}
+
+/**
+ * ALL office (CRM) tasks org-wide — for managers who need to see everyone's
+ * tasks, not just their own. Optionally filter to one owner id. Enriches each
+ * task with the owner's Hebrew name (looked up in the shared DB, since the CRM
+ * task payload carries only ownerId). Managers-only — the caller gates this.
+ */
+export async function listAllCrmTasks(
+  opts: { ownerId?: string; status?: string; limit?: number } = {},
+): Promise<CrmTaskWithOwner[] | null> {
+  const all = await crmFetch<CrmTask[]>('GET', '/tasks?scope=all');
+  if (!all) return null;
+
+  const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
+  const filtered = all
+    .filter((t) => (opts.ownerId ? t.ownerId === opts.ownerId : true))
+    .filter((t) => (opts.status ? t.status === opts.status : t.status !== 'DONE' && t.status !== 'CANCELLED'))
+    .slice(0, limit);
+
+  // Enrich with owner names in a single DB round-trip.
+  const ownerIds = [...new Set(filtered.map((t) => t.ownerId).filter(Boolean))];
+  const names = new Map<string, string>();
+  if (ownerIds.length) {
+    try {
+      const { rows } = await pool.query<{ id: string; name: string }>(
+        `SELECT id, name FROM "User" WHERE id = ANY($1)`,
+        [ownerIds],
+      );
+      rows.forEach((r) => names.set(r.id, r.name));
+    } catch (err) {
+      logger.warn({ err }, 'owner-name enrichment failed — returning without names');
+    }
+  }
+  return filtered.map((t) => ({ ...t, ownerName: names.get(t.ownerId) ?? null }));
 }
 
 // ── Outlook calendar (via the CRM's stored per-user Outlook connection) ──────
