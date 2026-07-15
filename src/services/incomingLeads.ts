@@ -1,6 +1,11 @@
 /**
- * D3-T1 — Read-only queries against the CRM-owned `IncomingLead` table.
- * The bot NEVER writes to this table — assignment and handling are done in the CRM.
+ * D3-T1 — Queries against the CRM-owned `IncomingLead` table.
+ *
+ * Mostly read-only. The bot writes to this table ONLY through `assignLead`,
+ * which mirrors the CRM's own `createTaskForClaimedLead` transaction: it flips
+ * ownerId + status=ACTIVE, creates the process Task (`title='ליד חדש נכנס'`,
+ * `type='step1'`), and links the new taskId back to the lead — all in one
+ * transaction. Any other write path is forbidden by spec.
  *
  * B2 columns: id, subject, body, fromName, fromEmail, receivedAt,
  *             status, ownerId (UUID FK → User), taskId, notifiedAt.
@@ -229,22 +234,27 @@ export async function findUnassignedLeadsForAssignment(
 }
 
 /**
- * Assign an IncomingLead to a worker — writes BOTH `ownerId` and `status`.
- * The pending-lead filter uses `status='NEW'` (product truth: status wins over
- * ownerId), so the write must flip `status → 'ACTIVE'` to take the row out of
- * every pending list in one shot. `ownerId` is what the D3-T3 poller
- * (leadAssignmentNotifier) watches, so it still detects the new assignment and
- * fires the worker alert — no alert logic here.
+ * Assign an IncomingLead to a worker — mirrors the CRM's `createTaskForClaimedLead`
+ * transaction. Three writes in one transaction:
+ *   1. `IncomingLead.ownerId=workerId`, `status='ACTIVE'` (race-guarded on `status='NEW'`).
+ *   2. `INSERT INTO Task` with the canonical process-task fields
+ *      (`title='ליד חדש נכנס'`, `type='step1'`, `status='OPEN'`, `priority='HIGH'`,
+ *      `currentStage=0`, `incomingLeadId`, `ownerId`, `description=lead.body`).
+ *   3. `IncomingLead.taskId = <new task id>`.
  *
- * Race guard: `WHERE ... AND status='NEW'` — if a second manager assigns the
- * same lead microseconds later, that UPDATE affects 0 rows and we throw
- * `'הליד כבר שויך'`, which the caller (WhatsApp router / voice tool) surfaces
- * to the user instead of silently double-writing.
+ * The CRM creates the process Task only inside its own claim transaction, so a
+ * bot-side assignment that skipped step 2 stranded the lead: ACTIVE with an
+ * owner but no Task, and out of the pending queue so nobody could recover it
+ * from the CRM. Doing all three writes together keeps CRM and bot claims
+ * indistinguishable downstream.
  *
- * Audit: `oldValues` snapshots the pre-state (`ownerId`, `status`);
- * `newValues` records what changed. `status='ACTIVE'` is an additional CRM
- * write beyond the already-documented `ownerId` write — it appears in the
- * audit trail so ownership + intent stay traceable.
+ * Race guard: the ownership UPDATE stays conditioned on `status='NEW'` — if a
+ * second manager assigns the same lead microseconds later, that UPDATE affects
+ * 0 rows, we `ROLLBACK`, and throw `'הליד כבר שויך'`. Everything runs on a
+ * dedicated pooled client so a mid-transaction failure rolls back cleanly.
+ *
+ * Audit: written only after `COMMIT` so a rolled-back assignment is never
+ * recorded as success. `newValues` includes the new taskId for traceability.
  */
 export async function assignLead(
   leadId: string,
@@ -252,20 +262,58 @@ export async function assignLead(
   actorId: string,
   actorPhone: string,
 ): Promise<void> {
-  const before = await pool.query<{ ownerId: string | null; status: string | null }>(
-    `SELECT "ownerId"::text AS "ownerId", status FROM "IncomingLead" WHERE id = $1`,
-    [leadId],
-  );
-  const prev = before.rows[0] ?? { ownerId: null, status: null };
+  const client = await pool.connect();
+  let prevOwnerId: string | null = null;
+  let newTaskId: string;
+  try {
+    await client.query('BEGIN');
 
-  const result = await pool.query(
-    `UPDATE "IncomingLead"
-       SET "ownerId" = $1, status = 'ACTIVE'
-     WHERE id = $2 AND status = 'NEW'`,
-    [workerId, leadId],
-  );
-  if (result.rowCount === 0) {
-    throw new Error('הליד כבר שויך');
+    // Snapshot the pre-UPDATE ownerId for audit oldValues. Status pre-UPDATE
+    // is guaranteed to be 'NEW' by the guarded UPDATE below (otherwise we
+    // throw), so we don't need to read it here.
+    const beforeRes = await client.query<{ ownerId: string | null }>(
+      `SELECT "ownerId"::text AS "ownerId" FROM "IncomingLead" WHERE id = $1`,
+      [leadId],
+    );
+    prevOwnerId = beforeRes.rows[0]?.ownerId ?? null;
+
+    // Race-guarded claim. RETURNING body lets us use it as the Task
+    // description without a second round-trip on the same row.
+    const claimRes = await client.query<{ body: string | null; prevOwnerId: string }>(
+      `UPDATE "IncomingLead"
+         SET "ownerId" = $1, status = 'ACTIVE'
+       WHERE id = $2 AND status = 'NEW'
+       RETURNING body, "ownerId"::text AS "prevOwnerId"`,
+      [workerId, leadId],
+    );
+    if (claimRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      throw new Error('הליד כבר שויך');
+    }
+    const leadBody = claimRes.rows[0]?.body ?? null;
+
+    // Task table has no DB defaults for id / updatedAt — set them explicitly.
+    const taskRes = await client.query<{ id: string }>(
+      `INSERT INTO "Task"
+         (id, title, description, type, status, priority, "ownerId", "currentStage", "incomingLeadId", "updatedAt")
+       VALUES
+         (gen_random_uuid(), 'ליד חדש נכנס', $1, 'step1', 'OPEN', 'HIGH', $2, 0, $3, now())
+       RETURNING id::text AS id`,
+      [leadBody, workerId, leadId],
+    );
+    newTaskId = taskRes.rows[0]!.id;
+
+    await client.query(
+      `UPDATE "IncomingLead" SET "taskId" = $1 WHERE id = $2`,
+      [newTaskId, leadId],
+    );
+
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* already rolled back */ }
+    throw err;
+  } finally {
+    client.release();
   }
 
   // Import inline to avoid circular dependency with utils/auditLog.
@@ -279,8 +327,8 @@ export async function assignLead(
     detectedAction: 'ASSIGN_LEAD',
     confidence: null,
     targetTaskId: leadId,
-    oldValues: { ownerId: prev.ownerId, status: prev.status },
-    newValues: { leadId, ownerId: workerId, status: 'ACTIVE' },
+    oldValues: { ownerId: prevOwnerId, status: 'NEW' },
+    newValues: { leadId, ownerId: workerId, status: 'ACTIVE', taskId: newTaskId },
     confirmationStatus: 'CONFIRMED',
     approvalStatus: null,
     approverUserId: null,
