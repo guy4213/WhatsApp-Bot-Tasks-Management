@@ -73,6 +73,16 @@ interface HealthSnapshot {
 let lastSnapshot: HealthSnapshot | null = null;
 
 /**
+ * Single-flight guard. When a live fetch is in progress, every other caller
+ * that arrives during the same window awaits the SAME promise instead of
+ * firing its own fetch. Prevents the cold-cache dogpile on deploy: without
+ * this, N sends starting at t=0 each miss the cache and issue their own
+ * `getStateInstance`/`getStatusInstance` calls in parallel, which Green API
+ * rate-limits with 429 (observed 2026-07-19 post-deploy).
+ */
+let inFlight: Promise<HealthSnapshot> | null = null;
+
+/**
  * `source`:
  *   'cache'         — reused a snapshot within CACHE_TTL_MS.
  *   'live'          — fetched fresh; both endpoints returned something.
@@ -92,7 +102,17 @@ export async function checkOutboundHealth(): Promise<PreflightDecision> {
   }
   let snap: HealthSnapshot;
   try {
-    snap = await fetchLive(LIVE_TIMEOUT_MS);
+    // Single-flight: if a fetch is already running, join it instead of firing
+    // our own. This is what prevents the 429 dogpile on cold cache — a burst
+    // of 50 sends collapses to ONE HTTP round-trip.
+    if (!inFlight) inFlight = fetchLive(LIVE_TIMEOUT_MS);
+    try {
+      snap = await inFlight;
+    } finally {
+      // Always clear so the NEXT cache-miss triggers a fresh fetch. If the
+      // in-flight promise rejected, every waiter sees the same rejection.
+      inFlight = null;
+    }
   } catch (err) {
     // The check itself failed. Fail-open: we cannot say the phone is down,
     // and silencing the bot on top of a Green API REST outage is worse than
@@ -195,4 +215,5 @@ function normalizeStatus(raw: string | null | undefined): StatusInstance {
 /** Test-only: clear the cached snapshot so the next call refetches. */
 export function __resetPreflightCacheForTests(): void {
   lastSnapshot = null;
+  inFlight = null;
 }

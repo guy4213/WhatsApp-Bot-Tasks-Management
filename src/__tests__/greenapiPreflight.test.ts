@@ -55,16 +55,29 @@ describe('decide()', () => {
     expect(r.reason).toContain('authorized');
   });
 
-  it('yellowCard + online → allow=false, blocks on stateInstance', async () => {
+  // SOFT WARNING — yellowCard means "reduce volume", not "stop". Sends still
+  // deliver during yellowCard; blocking here would silence the bot for the
+  // ~24h warning window for no benefit. Ops alert (greenapiHealth) already
+  // warned Guy separately.
+  it('yellowCard + online → allow=true (soft warning, sends still deliver)', async () => {
     global.fetch = mockFetchOk('yellowCard', 'online') as unknown as typeof fetch;
     const { checkOutboundHealth } = await loadFresh();
     const r = await checkOutboundHealth();
-    expect(r.allow).toBe(false);
-    expect(r.reason).toContain('stateInstance=yellowCard');
+    expect(r.allow).toBe(true);
+    expect(r.reason).toContain('yellowCard');
     expect(r.source).toBe('live');
   });
 
-  it('notAuthorized + online → allow=false', async () => {
+  it('starting + online → allow=true (transient bootup)', async () => {
+    global.fetch = mockFetchOk('starting', 'online') as unknown as typeof fetch;
+    const { checkOutboundHealth } = await loadFresh();
+    const r = await checkOutboundHealth();
+    expect(r.allow).toBe(true);
+    expect(r.reason).toContain('starting');
+  });
+
+  // HARD BLOCKERS — sends genuinely cannot deliver.
+  it('notAuthorized + online → allow=false (QR expired, sends never leave)', async () => {
     global.fetch = mockFetchOk('notAuthorized', 'online') as unknown as typeof fetch;
     const { checkOutboundHealth } = await loadFresh();
     const r = await checkOutboundHealth();
@@ -72,7 +85,25 @@ describe('decide()', () => {
     expect(r.reason).toContain('stateInstance=notAuthorized');
   });
 
-  // The 2026-07-19 failure mode.
+  it('blocked + online → allow=false (account banned by WhatsApp)', async () => {
+    global.fetch = mockFetchOk('blocked', 'online') as unknown as typeof fetch;
+    const { checkOutboundHealth } = await loadFresh();
+    const r = await checkOutboundHealth();
+    expect(r.allow).toBe(false);
+    expect(r.reason).toContain('stateInstance=blocked');
+  });
+
+  it('sleepMode + online → allow=false (instance stopped)', async () => {
+    global.fetch = mockFetchOk('sleepMode', 'online') as unknown as typeof fetch;
+    const { checkOutboundHealth } = await loadFresh();
+    const r = await checkOutboundHealth();
+    expect(r.allow).toBe(false);
+    expect(r.reason).toContain('stateInstance=sleepMode');
+  });
+
+  // The ACTUAL 2026-07-19 failure mode — socket detached while WhatsApp
+  // account is still "authorized". Green API accepts to the 24h queue but the
+  // phone will not deliver until the socket returns.
   it('authorized + offline → allow=false, blocks on statusInstance', async () => {
     global.fetch = mockFetchOk('authorized', 'offline') as unknown as typeof fetch;
     const { checkOutboundHealth } = await loadFresh();
@@ -81,12 +112,20 @@ describe('decide()', () => {
     expect(r.reason).toContain('statusInstance=offline');
   });
 
-  it('unknown state string → normalized to "unknown" → blocks', async () => {
-    global.fetch = mockFetchOk('garbage', 'online') as unknown as typeof fetch;
+  it('yellowCard + offline → allow=false (offline dominates yellowCard warning)', async () => {
+    global.fetch = mockFetchOk('yellowCard', 'offline') as unknown as typeof fetch;
     const { checkOutboundHealth } = await loadFresh();
     const r = await checkOutboundHealth();
     expect(r.allow).toBe(false);
-    expect(r.reason).toContain('stateInstance=unknown');
+    expect(r.reason).toContain('statusInstance=offline');
+  });
+
+  it('unknown state string → normalized to "unknown" → allow=true (fail-open on schema change)', async () => {
+    global.fetch = mockFetchOk('garbage', 'online') as unknown as typeof fetch;
+    const { checkOutboundHealth } = await loadFresh();
+    const r = await checkOutboundHealth();
+    expect(r.allow).toBe(true);
+    expect(r.reason).toContain('unknown');
   });
 });
 
@@ -154,5 +193,82 @@ describe('cache TTL', () => {
     const after = await checkOutboundHealth();
     expect(after.source).toBe('live');
     expect(fetchMock).toHaveBeenCalledTimes(4); // 2 × 2 endpoints
+  });
+});
+
+// Prevents the 429 dogpile on deploy: N concurrent callers on cold cache
+// must NOT each fire their own live fetch.
+describe('single-flight — cold-cache burst is collapsed to one HTTP round-trip', () => {
+  it('50 concurrent callers on cold cache → exactly ONE pair of fetches (getState + getStatus)', async () => {
+    // Delay each fetch so all 50 callers arrive while the fetch is pending.
+    let resolveState: (v: Response) => void;
+    let resolveStatus: (v: Response) => void;
+    const stateGate  = new Promise<Response>((r) => { resolveState  = r; });
+    const statusGate = new Promise<Response>((r) => { resolveStatus = r; });
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = url.toString();
+      if (u.includes('/getStateInstance/'))  return stateGate;
+      if (u.includes('/getStatusInstance/')) return statusGate;
+      return new Response('{}', { status: 404 });
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { checkOutboundHealth } = await loadFresh();
+    // 50 callers all miss the cache and start awaiting the same in-flight fetch.
+    const pending = Array.from({ length: 50 }, () => checkOutboundHealth());
+
+    // At this point exactly 2 fetches have been issued (one per endpoint).
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Complete the gates and let all 50 resolve.
+    resolveState!(new Response(JSON.stringify({ stateInstance: 'authorized' }), { status: 200 }));
+    resolveStatus!(new Response(JSON.stringify({ statusInstance: 'online' }), { status: 200 }));
+
+    const results = await Promise.all(pending);
+    expect(results).toHaveLength(50);
+    for (const r of results) expect(r.allow).toBe(true);
+    // Critical: still just 2 fetches. No dogpile.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('after in-flight resolves, NEXT cold-cache burst triggers a new fetch pair', async () => {
+    const fetchMock = mockFetchOk('authorized', 'online');
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { checkOutboundHealth, __resetPreflightCacheForTests } = await loadFresh();
+
+    // First burst → 2 fetches, cached.
+    await Promise.all([checkOutboundHealth(), checkOutboundHealth()]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Clear the cache (simulates TTL expiry) and burst again.
+    __resetPreflightCacheForTests();
+    await Promise.all([checkOutboundHealth(), checkOutboundHealth(), checkOutboundHealth()]);
+    // Second cold-cache burst collapses to one more pair — total 4, not 8.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('in-flight rejection is shared: all waiters get fail-open and next call refetches', async () => {
+    let rejectState: (e: Error) => void;
+    const stateGate = new Promise<Response>((_, r) => { rejectState = r; });
+    let statusOk = 0;
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = url.toString();
+      if (u.includes('/getStateInstance/'))  return stateGate;
+      if (u.includes('/getStatusInstance/')) { statusOk++; return new Response(JSON.stringify({ statusInstance: 'online' }), { status: 200 }); }
+      return new Response('{}', { status: 404 });
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { checkOutboundHealth } = await loadFresh();
+
+    const pending = Array.from({ length: 5 }, () => checkOutboundHealth());
+    rejectState!(new Error('boom'));
+    const results = await Promise.all(pending);
+    // Every waiter got the same fail-open answer.
+    for (const r of results) {
+      expect(r.allow).toBe(true);
+      expect(r.source).toBe('check-failed');
+    }
+    // Only one fetch pair was ever issued for the whole burst.
+    expect(statusOk).toBe(1);
   });
 });
