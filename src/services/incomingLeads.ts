@@ -187,10 +187,20 @@ export async function findAssignedLeadById(leadId: string): Promise<AssignedLead
  * Overnight leads (22:00-09:30) are excluded — they are covered by D3-T2.
  */
 export async function findEscalationCandidates(limit = 50): Promise<IncomingLeadRow[]> {
+  // "Unassigned" definition — MUST match the other three lead-list queries
+  // (findUnassignedInWindow, findOvernightUnassignedLeads,
+  // findUnassignedLeadsForAssignment) which filter on `status = 'NEW'`.
+  // Filtering on `"ownerId" IS NULL` alone was the 2026-07-19 escalation
+  // contradiction: leads with status='NEW' but a CRM-populated ownerId
+  // (draft-claim state) appeared in menu 1 ("לידים לא משויכים") but were
+  // silently missed by menu 2 ("שעברו שעה ללא שיוך") and by Sasha's
+  // escalation alerts. `status='NEW'` is the single source of truth for "in
+  // the pool"; a real claim writes both `status='ACTIVE'` AND `ownerId`
+  // atomically (see `assignLead` at incomingLeads.ts:~330).
   const { rows } = await pool.query<IncomingLeadRow>(
     `SELECT ${SELECT_LEAD_COLS}
      FROM "IncomingLead"
-     WHERE "ownerId" IS NULL
+     WHERE status = 'NEW'
        AND "receivedAt" <= now() - interval '1 hour'
        AND ("receivedAt" AT TIME ZONE 'Asia/Jerusalem')::time >= '09:30:00'::time
        AND ("receivedAt" AT TIME ZONE 'Asia/Jerusalem')::time < '22:00:00'::time
@@ -244,14 +254,18 @@ export interface YoramLeadCounts {
  * Bot NEVER writes to IncomingLead — read-only queries.
  */
 export async function getYoramLeadCounts(localDate: string): Promise<YoramLeadCounts> {
+  // "Unassigned" definition matches the other four lead-list queries — see
+  // the comment on `findEscalationCandidates`. `status='NEW'` is the pool
+  // state; filtering on `ownerId IS NULL` alone silently drops leads whose
+  // CRM has populated a draft ownerId (2026-07-19 CEO-digest under-count).
   const { rows } = await pool.query<{ overnight: string; unassigned: string }>(
     `SELECT
        COUNT(*) FILTER (
-         WHERE "ownerId" IS NULL
+         WHERE status = 'NEW'
            AND "receivedAt" >= (($1::date - 1)::timestamp + time '17:00:00') AT TIME ZONE 'Asia/Jerusalem'
            AND "receivedAt" <  ($1::date::timestamp + time '09:30:00') AT TIME ZONE 'Asia/Jerusalem'
        ) AS overnight,
-       COUNT(*) FILTER (WHERE "ownerId" IS NULL) AS unassigned
+       COUNT(*) FILTER (WHERE status = 'NEW') AS unassigned
      FROM "IncomingLead"`,
     [localDate],
   );

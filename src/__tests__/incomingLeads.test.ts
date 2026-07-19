@@ -108,12 +108,21 @@ describe('findNewlyAssignedLeads', () => {
 // ── findEscalationCandidates ──────────────────────────────────────────────────
 
 describe('findEscalationCandidates', () => {
-  it('filters ownerId NULL, >1h old, 09:30-22:00 window, WLN NOT EXISTS', async () => {
+  // "Unassigned" = status='NEW' — same predicate as menu 1
+  // (findUnassignedLeadsForAssignment). Fixed 2026-07-19 after Guy Franses
+  // saw the contradiction: menu 2 ("שעברו שעה ללא שיוך") returned zero rows
+  // while menu 1 was showing the SAME leads as unassigned and >2h old.
+  // Regression guard: DO NOT reintroduce `"ownerId" IS NULL` — the CRM
+  // populates ownerId in a draft state before the real claim (which writes
+  // status='ACTIVE' + ownerId atomically), so filtering on ownerId misses
+  // rows that are unambiguously in the pool.
+  it('filters status=NEW (NOT ownerId IS NULL), >1h old, 09:30-22:00 window, WLN NOT EXISTS', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     await findEscalationCandidates();
     const [sql, params] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/"IncomingLead"/);
-    expect(sql).toMatch(/"ownerId"\s+IS\s+NULL/);
+    expect(sql).toMatch(/status\s*=\s*'NEW'/);
+    expect(sql).not.toMatch(/"ownerId"\s+IS\s+NULL/);
     expect(sql).toMatch(/interval\s+'1 hour'/);
     expect(sql).toMatch(/09:30/);
     expect(sql).toMatch(/22:00/);
@@ -153,7 +162,7 @@ describe('getYoramLeadCounts', () => {
   // leads only (received in the overnight window AND still unassigned) —
   // matches `findOvernightUnassignedLeads`. Raw arrival counts would mislead
   // a CEO reading the digest.
-  it('returns overnight = received-overnight AND ownerId IS NULL (same predicate as Sasha list)', async () => {
+  it('returns overnight = received-overnight AND status=NEW (same predicate as Sasha list)', async () => {
     poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '2', unassigned: '3' }] });
     const result = await getYoramLeadCounts('2026-07-01');
     const [sql, params] = poolQuery.mock.calls[0];
@@ -165,9 +174,12 @@ describe('getYoramLeadCounts', () => {
     expect(sql).toMatch(/COUNT\(\*\)/i);
 
     // The overnight FILTER must combine BOTH predicates — the shared
-    // "actionable overnight" definition. Regex covers whitespace-forgiving
-    // multiline SQL.
-    expect(sql).toMatch(/COUNT\(\*\) FILTER \(\s*WHERE "ownerId" IS NULL[\s\S]+?"receivedAt"[\s\S]+?17:00[\s\S]+?09:30[\s\S]+?\)\s*AS overnight/);
+    // "actionable overnight" definition. Regression guard 2026-07-19: filter
+    // MUST use `status = 'NEW'`, NOT `"ownerId" IS NULL`. See
+    // findEscalationCandidates comment for why.
+    expect(sql).toMatch(/COUNT\(\*\) FILTER \(\s*WHERE status\s*=\s*'NEW'[\s\S]+?"receivedAt"[\s\S]+?17:00[\s\S]+?09:30[\s\S]+?\)\s*AS overnight/);
+    expect(sql).toMatch(/COUNT\(\*\) FILTER \(WHERE status\s*=\s*'NEW'\)\s*AS unassigned/);
+    expect(sql).not.toMatch(/"ownerId"\s+IS\s+NULL/);
 
     expect(params).toEqual(['2026-07-01']);
     expect(result).toEqual({ overnight: 2, unassigned: 3 });
@@ -175,7 +187,8 @@ describe('getYoramLeadCounts', () => {
 
   // 4 product scenarios enumerated by the CEO product decision.
   it('scenario A — 2 overnight arrivals all assigned → overnight count = 0 (CEO sees no pending)', async () => {
-    // DB returns 0 because the SQL filter has AND ownerId IS NULL.
+    // DB returns 0 because the SQL filter has AND status='NEW' — once a claim
+    // flips a row to ACTIVE it drops out of the count.
     poolQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ overnight: '0', unassigned: '5' }] });
     const result = await getYoramLeadCounts('2026-07-01');
     expect(result.overnight).toBe(0);
