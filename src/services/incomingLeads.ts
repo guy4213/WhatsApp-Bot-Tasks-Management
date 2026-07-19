@@ -39,6 +39,33 @@ const SELECT_LEAD_COLS = `
 `;
 
 /**
+ * SQL predicate — excludes CMS/system notifications that the CRM's mail
+ * ingest sometimes captures as leads (real observed case 2026-07-17:
+ * "[גלית ...] האתר עודכן לוורדפרס 6.9.5" from noreply@galit.co.il, shown
+ * to Guy as a lead needing assignment). These are pattern-matched
+ * DELIBERATELY narrowly: subject must contain the actual notification
+ * wording ("עודכן לוורדפרס" / "WordPress" version-update) AND the sender
+ * must be a noreply address. Real form leads from noreply@galit.co.il
+ * (Elementor) do NOT match this — they have subjects like "הודעה חדשה מאת
+ * גלית". If a customer legitimately writes "עודכן לוורדפרס" (unlikely),
+ * their email won't be from noreply@ so the guard doesn't fire.
+ *
+ * Applied to every list the manager or Sasha sees; the row still lives in
+ * IncomingLead for the CRM, we just don't surface it to humans.
+ */
+const NOT_SYSTEM_NOISE_SQL = `
+  NOT (
+    "fromEmail" ILIKE 'noreply@%'
+    AND (
+      subject ILIKE '%עודכן לוורדפרס%'
+      OR subject ILIKE '%עודכן ל-וורדפרס%'
+      OR subject ILIKE '%WordPress%עודכן%'
+      OR subject ILIKE '%WordPress % update%'
+    )
+  )
+`;
+
+/**
  * Unassigned leads received in [from, to) — for D3-T2 Sasha morning digest.
  * Prefer `findOvernightUnassignedLeads` when the window is derived from a local date.
  */
@@ -49,6 +76,7 @@ export async function findUnassignedInWindow(from: Date, to: Date): Promise<Inco
      WHERE status = 'NEW'
        AND "receivedAt" >= $1
        AND "receivedAt" < $2
+       AND ${NOT_SYSTEM_NOISE_SQL}
      ORDER BY "receivedAt"`,
     [from, to],
   );
@@ -67,6 +95,7 @@ export async function findOvernightUnassignedLeads(localDate: string): Promise<I
      WHERE status = 'NEW'
        AND "receivedAt" >= (($1::date - 1)::timestamp + time '17:00:00') AT TIME ZONE 'Asia/Jerusalem'
        AND "receivedAt" <  ($1::date::timestamp + time '09:30:00') AT TIME ZONE 'Asia/Jerusalem'
+       AND ${NOT_SYSTEM_NOISE_SQL}
      ORDER BY "receivedAt"`,
     [localDate],
   );
@@ -165,6 +194,7 @@ export async function findEscalationCandidates(limit = 50): Promise<IncomingLead
        AND "receivedAt" <= now() - interval '1 hour'
        AND ("receivedAt" AT TIME ZONE 'Asia/Jerusalem')::time >= '09:30:00'::time
        AND ("receivedAt" AT TIME ZONE 'Asia/Jerusalem')::time < '22:00:00'::time
+       AND ${NOT_SYSTEM_NOISE_SQL}
        AND NOT EXISTS (
          SELECT 1 FROM "WhatsappLeadNotification" wln
          WHERE wln."leadId" = id::text
@@ -232,13 +262,27 @@ export async function getYoramLeadCounts(localDate: string): Promise<YoramLeadCo
   };
 }
 
-/** Active inspector candidates for the AI suggestion (D3-T4, D3-T2). */
+/**
+ * Assignable-user candidates for the AI suggestion (D3-T4, D3-T2) AND for
+ * the manual assign-lead pick-worker list (D3-T6). Any active user with a
+ * phone is a valid assignee.
+ *
+ * Role filter — INTENTIONALLY NONE (Guy Franses feedback 2026-07-19b). A
+ * prior version filtered `role != 'ADMIN'` and hid managers/admins from
+ * both the AI suggestion input AND the pick-worker list, which contradicts
+ * product reality: managers and admins do field work and can legitimately
+ * receive leads. The alert-side filter was already removed earlier; this
+ * completes the fix on the selection side.
+ *
+ * Name kept as `findActiveInspectors` for now to avoid churn in every
+ * caller; a follow-up rename to `findAssignableUsers` would be more
+ * accurate but is a mechanical refactor for another pass.
+ */
 export async function findActiveInspectors(): Promise<InspectorCandidate[]> {
   const { rows } = await pool.query<InspectorCandidate>(
     `SELECT id::text AS id, name, role
      FROM "User"
      WHERE upper(status::text) = 'ACTIVE'
-       AND role != 'ADMIN'
        AND phone IS NOT NULL`,
   );
   return rows;
@@ -267,6 +311,7 @@ export async function findUnassignedLeadsForAssignment(
        WHERE status = 'NEW'
          AND "receivedAt" >= ($2::date) AT TIME ZONE 'Asia/Jerusalem'
          AND "receivedAt" <  ($3::date) AT TIME ZONE 'Asia/Jerusalem'
+         AND ${NOT_SYSTEM_NOISE_SQL}
        ORDER BY "receivedAt" DESC
        LIMIT $1`,
       [limit, dateRange.from, dateRange.to],
@@ -277,6 +322,7 @@ export async function findUnassignedLeadsForAssignment(
     `SELECT ${SELECT_LEAD_COLS}
      FROM "IncomingLead"
      WHERE status = 'NEW'
+       AND ${NOT_SYSTEM_NOISE_SQL}
      ORDER BY "receivedAt" DESC
      LIMIT $1`,
     [limit],

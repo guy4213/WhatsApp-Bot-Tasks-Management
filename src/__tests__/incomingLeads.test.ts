@@ -39,6 +39,19 @@ describe('findUnassignedInWindow', () => {
     expect(sql).toMatch(/"receivedAt"\s*<\s*\$2/);
     expect(params).toEqual([from, to]);
   });
+
+  // Regression — 2026-07-17 lead 1fa8722f: WordPress "[גלית ...] האתר עודכן
+  // לוורדפרס 6.9.5" surfaced as a lead needing assignment. Query must exclude
+  // that pattern (noreply + WordPress version-update wording) at the DB layer.
+  it('excludes noreply@ + WordPress version-update noise via ILIKE guard', async () => {
+    poolQuery.mockResolvedValueOnce(EMPTY);
+    await findUnassignedInWindow(new Date(), new Date());
+    const [sql] = poolQuery.mock.calls[0];
+    expect(sql).toMatch(/"fromEmail"\s+ILIKE\s+'noreply@%'/);
+    expect(sql).toMatch(/subject\s+ILIKE\s+'%עודכן לוורדפרס%'/);
+    // Enclosed in NOT (...) — the guard EXCLUDES, not includes.
+    expect(sql).toMatch(/NOT\s*\(/);
+  });
 });
 
 // ── findOvernightUnassignedLeads ─────────────────────────────────────────────
@@ -114,7 +127,7 @@ describe('findEscalationCandidates', () => {
 // ── findActiveInspectors ──────────────────────────────────────────────────────
 
 describe('findActiveInspectors', () => {
-  it('selects active non-ADMIN users with phone', async () => {
+  it('selects active users with phone; NO role filter (admins/managers ARE assignable)', async () => {
     poolQuery.mockResolvedValueOnce({ rowCount: 2, rows: [
       { id: 'u1', name: 'דני', role: 'WORKER' },
       { id: 'u2', name: 'יוסי', role: 'TECHNICIAN' },
@@ -122,7 +135,10 @@ describe('findActiveInspectors', () => {
     const result = await findActiveInspectors();
     const [sql] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/FROM\s+"User"/);
-    expect(sql).toMatch(/role\s*!=\s*'ADMIN'/);
+    // Regression guard: role filter was REMOVED (Guy Franses feedback 2026-07-19b).
+    // Admins/managers do field work and are legitimate lead assignees. Do NOT
+    // re-introduce this filter without a product decision.
+    expect(sql).not.toMatch(/role\s*!=\s*'ADMIN'/);
     expect(sql).toMatch(/ACTIVE/);
     expect(sql).toMatch(/phone\s+IS\s+NOT\s+NULL/);
     expect(result).toHaveLength(2);

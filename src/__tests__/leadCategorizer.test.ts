@@ -136,6 +136,40 @@ describe('enrichLead — unrecognizable lead', () => {
   });
 });
 
+// Real observed case 2026-07-19 lead e6d139a1: Elementor web-form submission
+// where the body has NO inspection keywords, but the "קישור לעמוד" URL
+// contains %D7%9E%D7%99%D7%9D (URL-encoded "מים"). Categorizer must decode
+// the URL to still identify the water category.
+describe('enrichLead — URL-encoded Hebrew (Elementor web forms)', () => {
+  it('detects "water" when only URL-encoded "מים" appears in the body', async () => {
+    const lead = makeLead({
+      subject: 'הודעה חדשה מאת גלית',
+      body: 'שם: Noga\nקישור לעמוד: https://galit.co.il/%D7%9E%D7%99%D7%9D/7785-2/',
+      fromEmail: 'noreply@galit.co.il',
+    });
+    const result = await enrichLead(lead);
+    expect(result.category).toBe('water');
+    expect(result.categoryHe).toBe('מים');
+  });
+
+  it('detects "radiation" from URL-encoded "קרינה" (%D7%A7%D7%A8%D7%99%D7%A0%D7%94)', async () => {
+    const lead = makeLead({
+      subject: 'form submission',
+      body: 'קישור: https://galit.co.il/%D7%A7%D7%A8%D7%99%D7%A0%D7%94/page/',
+    });
+    const result = await enrichLead(lead);
+    expect(result.category).toBe('radiation');
+  });
+
+  it('does not crash on malformed percent-escapes (falls back to raw)', async () => {
+    const lead = makeLead({ subject: 'רעש בבניין', body: 'partial %D7 broken %ZZ' });
+    const result = await enrichLead(lead);
+    // Still detects noise from the non-encoded "רעש" — the malformed sequences
+    // are left as-is and do not throw.
+    expect(result.category).toBe('noise');
+  });
+});
+
 describe('enrichLead — location extraction', () => {
   it('extracts city from body text', async () => {
     const lead = makeLead({ subject: 'צריך בדיקה בנתניה', body: 'כתובת בנתניה' });

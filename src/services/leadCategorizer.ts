@@ -137,11 +137,39 @@ export function _resetCacheForTests(): void {
 
 // ── Core detection ────────────────────────────────────────────────────────────
 
-/** Build a combined haystack from lead fields (skip nulls). */
+/**
+ * Decode any URL-encoded Hebrew (or other percent-escaped tokens) so that
+ * form-submission leads whose only inspection hint lives in a URL segment
+ * — e.g. Elementor's "קישור לעמוד: https://galit.co.il/%D7%9E%D7%99%D7%9D/…"
+ * where `%D7%9E%D7%99%D7%9D` is the URL-encoded form of "מים" — are still
+ * categorized. Failing sequences (partial / malformed) fall through as-is.
+ * Real observed case: lead e6d139a1 (Noga, 2026-07-19) — body had no
+ * inspection keywords but the URL contained "מים" URL-encoded.
+ */
+function decodePercentEscapes(s: string): string {
+  // Match one or more consecutive %HH bytes and decode them together
+  // (a Hebrew char is 2 UTF-8 bytes → 2 %HH pairs).
+  return s.replace(/(?:%[0-9A-Fa-f]{2})+/g, (seq) => {
+    try {
+      return decodeURIComponent(seq);
+    } catch {
+      return seq;
+    }
+  });
+}
+
+/**
+ * Build a combined haystack from lead fields (skip nulls). URL-encoded
+ * tokens are decoded and APPENDED (not replaced) so the raw form stays
+ * searchable too — a lead whose body already has both `מים` and
+ * `%D7%9E%D7%99%D7%9D` still matches, no double-counting harm.
+ */
 function buildHaystack(lead: IncomingLeadRow): string {
-  return [lead.subject, lead.body, lead.fromName, lead.fromEmail]
+  const raw = [lead.subject, lead.body, lead.fromName, lead.fromEmail]
     .filter((s): s is string => typeof s === 'string' && s.length > 0)
     .join(' ');
+  const decoded = decodePercentEscapes(raw);
+  return decoded === raw ? raw : `${raw} ${decoded}`;
 }
 
 /** Count how many entries in `keywords` appear (case-insensitive) in `haystack`. */
