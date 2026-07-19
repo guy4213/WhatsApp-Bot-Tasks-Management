@@ -62,7 +62,7 @@ describe('findOvernightUnassignedLeads', () => {
 // ── findNewlyAssignedLeads ────────────────────────────────────────────────────
 
 describe('findNewlyAssignedLeads', () => {
-  it('JOINs User, filters status=ACTIVE + ownerId NOT NULL + role != ADMIN + PENDING/SENT-aware NOT EXISTS', async () => {
+  it('JOINs User, filters status=ACTIVE + ownerId NOT NULL + PENDING/SENT-aware NOT EXISTS; NO role filter', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     await findNewlyAssignedLeads();
     const [sql, params] = poolQuery.mock.calls[0];
@@ -71,7 +71,10 @@ describe('findNewlyAssignedLeads', () => {
     // status='ACTIVE' predicate — signals CRM ownership transition
     expect(sql).toMatch(/il\.status\s*=\s*'ACTIVE'/);
     expect(sql).toMatch(/il\."ownerId"\s+IS\s+NOT\s+NULL/);
-    expect(sql).toMatch(/u\.role\s*!=\s*'ADMIN'/);
+    // Regression guard: role filter was REMOVED (Guy Franses feedback 2026-07-19).
+    // Managers/admins also field-work and are legitimate lead assignees; skipping
+    // their alert silently was a bug. Do not re-introduce.
+    expect(sql).not.toMatch(/u\.role\s*!=\s*'ADMIN'/);
     expect(sql).toMatch(/NOT\s+EXISTS/);
     expect(sql).toMatch(/"WhatsappLeadNotification"/);
     expect(sql).toMatch(/'ASSIGNED_TO_WORKER'/);

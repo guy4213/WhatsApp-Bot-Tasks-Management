@@ -74,25 +74,29 @@ export async function findOvernightUnassignedLeads(localDate: string): Promise<I
 }
 
 /**
- * Leads newly assigned to an inspector — the D3-T3 worker-assignment alert
- * scans this list.
+ * Leads newly assigned to a user — the D3-T3 assignment alert scans this list.
  *
  * Predicates:
  *   - status = 'ACTIVE'          → the CRM's "claimed" state; the ONLY moment
- *     that signals ownership has transitioned from Sasha's inbox to a worker.
+ *     that signals ownership has transitioned from Sasha's inbox to a claim.
  *     Filtering on `ownerId IS NOT NULL` alone was insufficient in prod: rows
  *     arrive with an interim ownerId already populated, so the alert would
  *     fire before the claim was actually made.
  *   - ownerId IS NOT NULL        → belt-and-suspenders; a row that is somehow
- *     ACTIVE without an owner has no worker to notify.
- *   - u.role != 'ADMIN'          → managers using the CRM directly don't get
- *     the worker-facing alert.
+ *     ACTIVE without an owner has no assignee to notify.
  *   - dedup filter               → skip leads with either a SENT dedup row
  *     (already handled) or a PENDING dedup row younger than 5 minutes (a
  *     concurrent send is in flight from the webhook path). Stale PENDING
  *     rows (>5 min old) fall through so a crashed send can be retried on
  *     the next poller tick.
- * Used by D3-T3 worker-assignment alert (poller path).
+ *
+ * Role filter — INTENTIONALLY NONE. An earlier version filtered
+ * `u.role != 'ADMIN'` on the assumption that admins claim leads only in a
+ * supervisory capacity. Product reality is different: managers/admins also
+ * do field work and are legitimate lead assignees; skipping their alert
+ * silently was a bug (Guy Franses feedback 2026-07-19). Every user with a
+ * phone that gets a lead assigned to them now receives the alert.
+ * Used by D3-T3 assignment alert (poller path).
  */
 export async function findNewlyAssignedLeads(limit = 50): Promise<AssignedLeadRow[]> {
   const { rows } = await pool.query<AssignedLeadRow>(
@@ -105,7 +109,6 @@ export async function findNewlyAssignedLeads(limit = 50): Promise<AssignedLeadRo
      JOIN "User" u ON u.id = il."ownerId"
      WHERE il.status = 'ACTIVE'
        AND il."ownerId" IS NOT NULL
-       AND u.role != 'ADMIN'
        AND NOT EXISTS (
          SELECT 1 FROM "WhatsappLeadNotification" wln
          WHERE wln."leadId" = il.id::text
@@ -124,11 +127,12 @@ export async function findNewlyAssignedLeads(limit = 50): Promise<AssignedLeadRo
 
 /**
  * Single-row variant of `findNewlyAssignedLeads` — used by the Supabase
- * webhook path to fetch full worker + lead details for one lead id. Returns
- * `null` when the row is not eligible (missing / not ACTIVE / no ownerId /
- * assigned to an ADMIN). The webhook does NOT apply the dedup pre-filter
- * itself — atomic claim via `tryClaimLeadNotification` is the source of
- * truth for "should we send".
+ * trigger / webhook path to fetch full assignee + lead details for one lead
+ * id. Returns `null` when the row is not eligible (missing / not ACTIVE /
+ * no ownerId). Role filter deliberately absent — see the comment on
+ * `findNewlyAssignedLeads`. The trigger path does NOT apply the dedup
+ * pre-filter itself — atomic claim via `tryClaimLeadNotification` is the
+ * source of truth for "should we send".
  */
 export async function findAssignedLeadById(leadId: string): Promise<AssignedLeadRow | null> {
   const { rows } = await pool.query<AssignedLeadRow>(
@@ -142,7 +146,6 @@ export async function findAssignedLeadById(leadId: string): Promise<AssignedLead
      WHERE il.id = $1
        AND il.status = 'ACTIVE'
        AND il."ownerId" IS NOT NULL
-       AND u.role != 'ADMIN'
      LIMIT 1`,
     [leadId],
   );

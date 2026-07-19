@@ -74,9 +74,13 @@ describe('formatLeadListRowCompact — structure', () => {
   });
 });
 
+// Assignment display — "משויך" requires BOTH status='ACTIVE' AND ownerId.
+// status='NEW' is the CRM pool state; even if ownerId is populated (draft
+// state in the CRM UI), the lead is NOT yet claimed. This was the 2026-07-19
+// bug: manager saw "סטטוס: משויך" on 3 leads shown under "לידים לא משויכים".
 describe('formatLeadListRowCompact — assigned lead', () => {
-  it('shows "סטטוס: משויך" instead of "ממתין:" when ownerId is set', () => {
-    const lead = makeLead({ ownerId: 'owner-u1' });
+  it('shows "סטטוס: משויך" when status is ACTIVE AND ownerId is set', () => {
+    const lead = makeLead({ status: 'ACTIVE', ownerId: 'owner-u1' });
     const text = formatLeadListRowCompact(lead, makeEnrichment(), NOW_SAME_DAY);
     expect(text).toContain('סטטוס: משויך');
     expect(text).not.toContain('ממתין:');
@@ -84,6 +88,21 @@ describe('formatLeadListRowCompact — assigned lead', () => {
 
   it('shows "ממתין:" when ownerId is null', () => {
     const text = formatLeadListRowCompact(makeLead(), makeEnrichment(), NOW_SAME_DAY);
+    expect(text).toContain('ממתין:');
+    expect(text).not.toContain('סטטוס: משויך');
+  });
+
+  // Regression — the exact 2026-07-19 case.
+  it('shows "ממתין:" (NOT משויך) when status is NEW even if ownerId is set', () => {
+    const lead = makeLead({ status: 'NEW', ownerId: 'owner-u1' });
+    const text = formatLeadListRowCompact(lead, makeEnrichment(), NOW_SAME_DAY);
+    expect(text).toContain('ממתין:');
+    expect(text).not.toContain('סטטוס: משויך');
+  });
+
+  it('shows "ממתין:" when status is ACTIVE but ownerId is null (defensive)', () => {
+    const lead = makeLead({ status: 'ACTIVE', ownerId: null });
+    const text = formatLeadListRowCompact(lead, makeEnrichment(), NOW_SAME_DAY);
     expect(text).toContain('ממתין:');
     expect(text).not.toContain('סטטוס: משויך');
   });
@@ -153,11 +172,33 @@ describe('formatLeadListRowCompact — received time format', () => {
   });
 });
 
-describe('formatLeadListRowCompact — ambiguous type', () => {
-  it('shows "לא זוהה בוודאות" when inspectionType is null', () => {
-    const enrichment = makeEnrichment({ inspectionType: null });
+// Sub-type fallback chain. Per product decision (2026-07-19) the manager view
+// must NEVER show "לא זוהה בוודאות" — it hides what we actually know (the
+// category). Fallback order: labelHe → "בדיקת {categoryHe}" → "כללי".
+describe('formatLeadListRowCompact — sub-type fallback', () => {
+  it('shows labelHe when the categorizer resolved a specific type', () => {
+    const text = formatLeadListRowCompact(makeLead(), makeEnrichment(), NOW_SAME_DAY);
+    expect(text).toContain('סוג בדיקה: קרינה – בדיקת קרינה אלקטרומגנטית מרשת החשמל');
+  });
+
+  it('falls back to "בדיקת <categoryHe>" when category resolved but sub-type is null (the radon lead)', () => {
+    const enrichment = makeEnrichment({
+      category: 'radon',
+      categoryHe: 'ראדון',
+      inspectionType: null,
+    });
     const text = formatLeadListRowCompact(makeLead(), enrichment, NOW_SAME_DAY);
-    expect(text).toContain('סוג בדיקה: לא זוהה בוודאות');
+    expect(text).toContain('סוג בדיקה: בדיקת ראדון');
+    expect(text).not.toContain('לא זוהה');
+  });
+
+  it('falls back to "כללי" when nothing resolved (both category and sub-type null)', () => {
+    const enrichment: LeadEnrichment = {
+      category: null, categoryHe: 'לא זוהתה', inspectionType: null, location: null,
+    };
+    const text = formatLeadListRowCompact(makeLead(), enrichment, NOW_SAME_DAY);
+    expect(text).toContain('סוג בדיקה: כללי');
+    expect(text).not.toContain('לא זוהה');
   });
 });
 
@@ -260,8 +301,8 @@ describe('formatLeadDetailCompact — structure', () => {
 });
 
 describe('formatLeadDetailCompact — assigned lead', () => {
-  it('shows "סטטוס: משויך" and NO "ממתין:" when ownerId set', () => {
-    const lead = makeLead({ ownerId: 'owner-u1' });
+  it('shows "סטטוס: משויך" when status is ACTIVE AND ownerId is set', () => {
+    const lead = makeLead({ status: 'ACTIVE', ownerId: 'owner-u1' });
     const text = formatLeadDetailCompact(lead, makeEnrichment(), NOW_SAME_DAY);
     expect(text).toContain('סטטוס: משויך');
     expect(text).not.toContain('ממתין:');
@@ -271,6 +312,34 @@ describe('formatLeadDetailCompact — assigned lead', () => {
     const text = formatLeadDetailCompact(makeLead(), makeEnrichment(), NOW_SAME_DAY);
     expect(text).toContain('סטטוס: לא משויך');
     expect(text).toContain('ממתין:');
+  });
+
+  // Regression — the 2026-07-19 case.
+  it('shows "סטטוס: לא משויך" when status is NEW even if ownerId is set', () => {
+    const lead = makeLead({ status: 'NEW', ownerId: 'owner-u1' });
+    const text = formatLeadDetailCompact(lead, makeEnrichment(), NOW_SAME_DAY);
+    expect(text).toContain('סטטוס: לא משויך');
+    expect(text).toContain('ממתין:');
+  });
+});
+
+describe('formatLeadDetailCompact — sub-type fallback', () => {
+  it('falls back to "בדיקת <categoryHe>" when sub-type is null but category resolved', () => {
+    const enrichment = makeEnrichment({
+      category: 'radon', categoryHe: 'ראדון', inspectionType: null,
+    });
+    const text = formatLeadDetailCompact(makeLead(), enrichment, NOW_SAME_DAY);
+    expect(text).toContain('סוג בדיקה: בדיקת ראדון');
+    expect(text).not.toContain('לא זוהה');
+  });
+
+  it('falls back to "כללי" when nothing resolved', () => {
+    const enrichment: LeadEnrichment = {
+      category: null, categoryHe: 'לא זוהתה', inspectionType: null, location: null,
+    };
+    const text = formatLeadDetailCompact(makeLead(), enrichment, NOW_SAME_DAY);
+    expect(text).toContain('סוג בדיקה: כללי');
+    expect(text).not.toContain('לא זוהה בוודאות');
   });
 });
 

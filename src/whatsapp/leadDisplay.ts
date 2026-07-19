@@ -123,16 +123,49 @@ function formatWaitingAge(receivedAt: Date, now: Date): string {
 // ── Exported formatters ───────────────────────────────────────────────────────
 
 /**
+ * True when the lead is genuinely claimed by a worker. The CRM's assignment
+ * transaction (`services/incomingLeads.assignLeadToWorker`) writes BOTH
+ * `status='ACTIVE'` AND `ownerId=<worker>` atomically — `status='NEW'` is the
+ * pool state and MUST be treated as unassigned, regardless of whether some
+ * upstream flow populated `ownerId` (which happens in the CRM UI's draft
+ * flow). Checking `ownerId` alone was the 2026-07-19 display bug: the manager
+ * menu "לידים לא משויכים" showed 3 NEW leads all labelled "סטטוס: משויך"
+ * because ownerId was populated by the CRM draft state.
+ */
+function isLeadAssigned(lead: IncomingLeadRow): boolean {
+  return lead.status === 'ACTIVE' && !!lead.ownerId;
+}
+
+/**
+ * Sub-type label with a fallback chain. Never returns "לא זוהה בוודאות" —
+ * per product decision (2026-07-19) the manager view must always show
+ * SOMETHING actionable in the "סוג בדיקה" slot:
+ *
+ *   1. inspectionType.labelHe     — the categorizer resolved a specific type.
+ *   2. `בדיקת ${categoryHe}`      — category was resolved but the sub-type
+ *                                    matcher was ambiguous (common: the
+ *                                    customer wrote "בדיקת גז ראדון" and 10
+ *                                    radon sub-types all tie at score=1).
+ *   3. 'כללי'                     — neither category nor sub-type resolved
+ *                                    (e.g. web-form leads with no keywords).
+ */
+function displayInspectionType(enrichment: LeadEnrichment): string {
+  if (enrichment.inspectionType) return enrichment.inspectionType.labelHe;
+  if (enrichment.category) return `בדיקת ${enrichment.categoryHe}`;
+  return 'כללי';
+}
+
+/**
  * Format a single lead as a compact list row (numbered block, one field per line).
  *
  * Format:
  *   <N>.
  *   שם: <fromName | 'לא צוין'>
  *   קטגוריית בדיקה: <categoryHe>
- *   סוג בדיקה: <inspectionType.labelHe | 'לא זוהה בוודאות'>
+ *   סוג בדיקה: <inspectionType.labelHe | 'בדיקת <categoryHe>' | 'כללי'>
  *   מיקום: <location | 'לא צוין'>
  *   התקבל: <relative time>
- *   ממתין: <age>   — OR —   סטטוס: משויך   (when ownerId set)
+ *   ממתין: <age>   — OR —   סטטוס: משויך   (only when status='ACTIVE' AND ownerId)
  */
 export function formatLeadListRowCompact(
   lead: IncomingLeadRow,
@@ -141,11 +174,11 @@ export function formatLeadListRowCompact(
 ): string {
   const name      = lead.fromName?.trim() || 'לא צוין';
   const catHe     = enrichment.categoryHe;
-  const typeLabel = enrichment.inspectionType?.labelHe ?? 'לא זוהה בוודאות';
+  const typeLabel = displayInspectionType(enrichment);
   const location  = enrichment.location ?? 'לא צוין';
   const received  = formatReceivedTime(lead.receivedAt, now);
 
-  const lastLine = lead.ownerId
+  const lastLine = isLeadAssigned(lead)
     ? `סטטוס: משויך`
     : `ממתין: ${formatWaitingAge(lead.receivedAt, now)}`;
 
@@ -189,10 +222,10 @@ export function formatLeadDetailCompact(
   const name      = lead.fromName?.trim() || 'לא צוין';
   const email     = lead.fromEmail?.trim() || 'לא צוין';
   const catHe     = enrichment.categoryHe;
-  const typeLabel = enrichment.inspectionType?.labelHe ?? 'לא זוהה בוודאות';
+  const typeLabel = displayInspectionType(enrichment);
   const location  = enrichment.location ?? 'לא צוין';
   const received  = formatReceivedFull(lead.receivedAt);
-  const isAssigned = Boolean(lead.ownerId);
+  const isAssigned = isLeadAssigned(lead);
   const statusLine = isAssigned ? 'משויך' : 'לא משויך';
 
   const headerLines = [
