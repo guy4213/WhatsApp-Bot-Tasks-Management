@@ -12,6 +12,7 @@ import { runAssignmentCardNotifier }    from './jobs/assignmentCardNotifier';
 import { runLeadAssignmentNotifier }    from './jobs/leadAssignmentNotifier';
 import { runPreInspectionReminderJob }  from './jobs/preInspectionReminder';
 import { runGraphSubscriptionRenewalJob } from './jobs/graphSubscriptionRenewal';
+import { runGreenApiHealthCheck }       from './jobs/greenapiHealthCheck';
 import { recoverInboundQueue }          from '../routes/webhook';
 
 const log = moduleLogger('scheduler');
@@ -34,6 +35,7 @@ const JOB_LOCK_IDS = {
   leadAssignmentNotifier:  1010,
   preInspectionReminder:   1011,
   graphSubscriptionRenewal: 1012,
+  greenapiHealthCheck:      1013,
 } as const;
 
 async function withJobLock(lockId: number, name: string, fn: () => Promise<void>): Promise<void> {
@@ -131,6 +133,12 @@ export function startScheduler(): void {
 
   // Every 5 minutes — reprocess any inbound messages left pending by a crash
   cron.schedule('*/5 * * * *', safe('queueRecovery', JOB_LOCK_IDS.queueRecovery, recoverInboundQueue), { timezone: TZ });
+
+  // Green API instance-health poll — every 5 minutes GET /getStateInstance and
+  // alert ops recipients (services/specialUsers.OPS_ALERT_NAMES) on transitions
+  // out of `authorized`. No-op when WHATSAPP_PROVIDER!=greenapi. Advisory lock
+  // 1013 keeps multi-instance deploys single-alerting. See services/greenapiHealth.ts.
+  cron.schedule('*/5 * * * *', safe('greenapiHealthCheck', JOB_LOCK_IDS.greenapiHealthCheck, runGreenApiHealthCheck), { timezone: TZ });
 
   log.info('All scheduler jobs registered (timezone: Asia/Jerusalem, distributed locks: enabled)');
 }

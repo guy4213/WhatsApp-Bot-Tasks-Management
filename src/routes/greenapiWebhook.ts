@@ -22,6 +22,7 @@ import type { FastifyInstance } from 'fastify';
 import { enqueueInbound, type InboundMessage } from '../services/inboundQueue';
 import { processInbound } from './webhook';
 import { resolvePendingChoice } from '../services/pendingChoice';
+import { handleGreenApiStateChange } from '../services/greenapiHealth';
 import { moduleLogger } from '../utils/logger';
 
 const log = moduleLogger('greenapi-webhook');
@@ -110,7 +111,22 @@ export async function greenapiWebhookRoutes(app: FastifyInstance) {
 
     const body = (req.body ?? {}) as Record<string, unknown>;
 
-    // 2. Only inbound messages are processed; all other webhook types ack + ignore.
+    // 2a. Instance state changes — drive the health-alert flow (services/greenapiHealth.ts).
+    //     Requires the console setting `stateInstanceChanged=ON` (see docs/GREENAPI_OPS.md).
+    //     ACK 200 first, then fire the handler; failures inside it must not
+    //     block Green API's webhook retry loop.
+    if (body.typeWebhook === 'stateInstanceChanged') {
+      reply.code(200).send('OK');
+      const state = (body.stateInstance as string) ?? '';
+      try {
+        await handleGreenApiStateChange(state, 'webhook');
+      } catch (err) {
+        log.error({ err, state }, 'stateInstanceChanged handler failed');
+      }
+      return;
+    }
+
+    // 2b. Only inbound messages are processed; all other webhook types ack + ignore.
     if (body.typeWebhook !== 'incomingMessageReceived') {
       return reply.code(200).send('OK');
     }

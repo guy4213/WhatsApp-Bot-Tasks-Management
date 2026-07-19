@@ -21,7 +21,8 @@ outbound queue.
 | `delaySendMessagesMilliseconds` | **15000** | Paces outbound at 15 s/msg. This is the anti‑ban throttle. The bot relies on it — there is no local throttling. |
 | `webhookUrl` | `https://<host>/greenapi/webhook` | Where inbound messages are delivered. |
 | `webhookUrlToken` | *(a strong secret)* | Sent by Green API as `Authorization: Bearer <token>`. **Must equal** our `GREENAPI_WEBHOOK_TOKEN`. A mismatch → every webhook gets 404. |
-| `incomingMessageReceived` | **ON** | The only webhook type the bot processes. |
+| `incomingMessageReceived` | **ON** | The primary webhook the bot processes. |
+| `stateInstanceChanged` | **ON** | Feeds the health-alert flow (§8). Without it, the poll at `*/5m` is the only signal — you lose real-time notification when the phone drops. |
 | `outgoingMessageReceived` / status types | may stay OFF | The bot acks them 200 and ignores them; leaving them off reduces noise. |
 
 Our matching `.env` (see `.env.example` §2b):
@@ -158,7 +159,52 @@ real cost.
 
 ---
 
-## 7. Plan to reduce the delay
+## 7. Ops health alerts — "the phone died"
+
+Because Green API rides on a physical phone, silent failures are the biggest
+class of production incidents: the phone gets killed by Android battery
+optimization, Wi-Fi drops, WhatsApp Business is force-stopped, or WhatsApp
+itself hangs up the session (yellowCard / notAuthorized). From the code's
+point of view everything looks fine — `sendMessage` returns 200 and the
+message queues up on Green API's server for up to 24h before being dropped.
+
+The bot surfaces this via two paths:
+
+1. **Webhook** (`stateInstanceChanged`) — near real-time. Requires the console
+   setting in §1. Handled by `src/routes/greenapiWebhook.ts` and dispatched to
+   `services/greenapiHealth.ts`.
+2. **Poll** (`GET /getStateInstance`) — every 5 minutes from the scheduler
+   (`src/scheduler/jobs/greenapiHealthCheck.ts`, advisory lock 1013). Runs
+   even if the webhook is off. Alerts on transitions out of `authorized`.
+
+Both funnel through `handleGreenApiStateChange` for dedup:
+
+- Alert on transition `authorized → anything_else`.
+- Alert again if the specific bad state changes (`notAuthorized → blocked`).
+- Re-alert every 30 min while the state stays bad ("still broken" reminder).
+- Alert once on recovery (`bad → authorized`).
+- Transient network errors from the poll are silent (no alert on 500s).
+
+**Recipients** are resolved by `User.name` from the DB — see
+`OPS_ALERT_NAMES` in `src/services/specialUsers.ts`. Intentionally narrower
+than the exceptions-viewer set: this is dev/ops noise, not CEO-facing signal.
+Yoram is NOT included by design.
+
+**Known limitation.** The alert itself goes through the SAME Green API
+transport that's failing. If Green API is fully down, the alert may not
+deliver in real time either — it will queue and deliver when the transport
+recovers. This is documented, not fixed; a truly independent channel (SMS,
+email, PagerDuty) is a future upgrade if the failure rate justifies it.
+
+**Not currently alerted on.**
+- HTTP-level errors from `sendMessage` (400/500 back to us). These already
+  route through the standard httpDelivery retry/DLQ path.
+- Instance quota exceeded (a specific 466 response). Would be a useful
+  addition; not built yet.
+
+---
+
+## 8. Plan to reduce the delay
 
 After one clean week on Green API with no ban flags:
 

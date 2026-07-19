@@ -74,7 +74,10 @@
       "Bash(npm install *)",
       "Bash(npm run *)",
       "PowerShell([System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId\\([DateTime]::UtcNow, 'Israel Standard Time'\\).ToString\\('yyyy-MM-dd HH:mm:ss'\\))",
-      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://whatsapp-bot-tasks-management.onrender.com/health/live\" -TimeoutSec 30 -UseBasicParsing; Write-Output \"HTTP $\\($r.StatusCode\\)\"; Write-Output $r.Content } catch { Write-Output \"ERR: $\\($_.Exception.Message\\)\" })"
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://whatsapp-bot-tasks-management.onrender.com/health/live\" -TimeoutSec 30 -UseBasicParsing; Write-Output \"HTTP $\\($r.StatusCode\\)\"; Write-Output $r.Content } catch { Write-Output \"ERR: $\\($_.Exception.Message\\)\" })",
+      "Bash(echo \"EXIT: $?\")",
+      "PowerShell(Get-Content .env | Where-Object { $_ -match \"GREENAPI\" })",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://7107.api.greenapi.com/waInstance710722680672/getStatusInstance/bc21ddad58544c1abd540be8d363ec2481396b37ce1847c4bb\" -Method Get -TimeoutSec 15 -UseBasicParsing; \"STATUS: $\\($r.StatusCode\\)\"; $r.Content } catch { \"ERROR STATUS: $\\($_.Exception.Response.StatusCode.value__\\)\"; try { $s = $_.Exception.Response.GetResponseStream\\(\\); $sr = New-Object System.IO.StreamReader\\($s\\); $sr.ReadToEnd\\(\\) } catch { $_.Exception.Message } })"
     ],
     "additionalDirectories": [
       "C:\\Users\\guy42\\Documents\\WhatsApp-Bot-Tasks-Management"

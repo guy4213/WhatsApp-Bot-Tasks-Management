@@ -12,6 +12,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 const enqueueInbound      = vi.fn();
 const processInbound      = vi.fn().mockResolvedValue(undefined);
 const resolvePendingChoice = vi.fn().mockResolvedValue(null);
+const handleGreenApiStateChange = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../services/inboundQueue', () => ({
   enqueueInbound: (...a: unknown[]) => enqueueInbound(...a),
@@ -21,6 +22,9 @@ vi.mock('../routes/webhook', () => ({
 }));
 vi.mock('../services/pendingChoice', () => ({
   resolvePendingChoice: (...a: unknown[]) => resolvePendingChoice(...a),
+}));
+vi.mock('../services/greenapiHealth', () => ({
+  handleGreenApiStateChange: (...a: unknown[]) => handleGreenApiStateChange(...a),
 }));
 
 import { greenapiWebhookRoutes } from '../routes/greenapiWebhook';
@@ -53,6 +57,7 @@ beforeEach(async () => {
   enqueueInbound.mockReset().mockResolvedValue(true);
   processInbound.mockReset().mockResolvedValue(undefined);
   resolvePendingChoice.mockReset().mockResolvedValue(null);
+  handleGreenApiStateChange.mockReset().mockResolvedValue(undefined);
   process.env.GREENAPI_WEBHOOK_TOKEN = TOKEN;
   app = Fastify();
   await app.register(greenapiWebhookRoutes);
@@ -103,6 +108,32 @@ describe('type filtering & idMessage guard', () => {
     expect(res.statusCode).toBe(200);
     expect(enqueueInbound).not.toHaveBeenCalled();
     expect(processInbound).not.toHaveBeenCalled();
+    expect(handleGreenApiStateChange).not.toHaveBeenCalled();
+  });
+
+  it('stateInstanceChanged → 200, drives handleGreenApiStateChange with the state + "webhook" source', async () => {
+    const res = await post({
+      typeWebhook: 'stateInstanceChanged',
+      instanceData: { idInstance: 1101, wid: '972501234567@c.us', typeInstance: 'whatsapp' },
+      timestamp: 1719800000,
+      stateInstance: 'notAuthorized',
+    });
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(handleGreenApiStateChange).toHaveBeenCalledWith('notAuthorized', 'webhook');
+    expect(enqueueInbound).not.toHaveBeenCalled();
+    expect(processInbound).not.toHaveBeenCalled();
+  });
+
+  it('stateInstanceChanged handler throwing does NOT crash the route (200 still returned)', async () => {
+    handleGreenApiStateChange.mockRejectedValueOnce(new Error('boom'));
+    const res = await post({
+      typeWebhook: 'stateInstanceChanged',
+      stateInstance: 'authorized',
+    });
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(handleGreenApiStateChange).toHaveBeenCalledTimes(1);
   });
 
   it('empty idMessage → 200, NOT enqueued (never an empty PK)', async () => {

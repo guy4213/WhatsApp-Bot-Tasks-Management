@@ -9,6 +9,85 @@ Conventions:
 
 ---
 
+## OPS-GA-HEALTH — Green API instance-health alerts (2026-07-19)
+
+**Status:** DONE (local, uncommitted)
+
+**What to do.** Surface silent Green API failures (phone died, WhatsApp
+Business killed by Android battery optimization, session expired /
+notAuthorized, WhatsApp yellowCard, etc.) to ops recipients on WhatsApp,
+because `sendMessage` calls will keep returning 200 while messages queue
+undelivered on Green API's server for up to 24h.
+
+**How.**
+- New service `src/services/greenapiHealth.ts`: `handleGreenApiStateChange`
+  drives transition-based dedup (alert on `authorized → bad`, on bad-state
+  changes, on recovery, and re-alerts every 30 min while still bad). Poll
+  helper `pollGreenApiState` calls `GET /getStateInstance` with a 10 s
+  AbortController timeout; transient network / non-2xx errors are silent (no
+  alert) so a Green API blip doesn't spam ops.
+- New scheduler job `src/scheduler/jobs/greenapiHealthCheck.ts` (advisory
+  lock 1013, every 5 min, no-op when `WHATSAPP_PROVIDER!=greenapi`),
+  registered in `src/scheduler/index.ts`.
+- Webhook `src/routes/greenapiWebhook.ts` now handles
+  `typeWebhook === 'stateInstanceChanged'` (ACKs 200 first, then dispatches;
+  handler errors are swallowed so Green API's retry loop isn't triggered).
+- Recipients follow the existing DB-name pattern:
+  `OPS_ALERT_NAMES` in `src/services/specialUsers.ts` +
+  `getOpsAlertPhones()`. Intentionally narrower than the exceptions viewers
+  (Yoram is NOT included by design — this is dev/ops noise, not a CEO signal).
+- Docs: `.env.example` §2b now documents `stateInstanceChanged=ON`;
+  `docs/GREENAPI_OPS.md` new §7 explains the alert flow, dedup rules, and the
+  known "alert rides the failing transport" limitation.
+
+**Files changed.**
+- NEW: `src/services/greenapiHealth.ts`
+- NEW: `src/scheduler/jobs/greenapiHealthCheck.ts`
+- NEW: `src/__tests__/greenapiHealth.test.ts`
+- `src/services/specialUsers.ts` — added `OPS_ALERT_NAMES` + `getOpsAlertPhones`.
+- `src/scheduler/index.ts` — advisory lock 1013 + cron `*/5 * * * *`.
+- `src/routes/greenapiWebhook.ts` — new `stateInstanceChanged` branch.
+- `src/__tests__/greenapiWebhook.test.ts` — 2 new tests
+  (state webhook dispatches; handler error still returns 200).
+- `.env.example` — §2b docs `stateInstanceChanged=ON`.
+- `docs/GREENAPI_OPS.md` — §1 row for `stateInstanceChanged`, new §7 "Ops
+  health alerts", old §7 renumbered to §8.
+- `BOT_CAPABILITIES.md` — capability bullet + date bump.
+
+**Tests.** `npx tsc --noEmit` → clean (exit 0).
+`vitest run src/__tests__/greenapiHealth.test.ts
+src/__tests__/greenapiWebhook.test.ts` → **28/28 passing** (14 new health
+tests including all transition paths + transient-error silence + recipient
+resolution failure; 14 existing webhook tests including 2 new for the state
+webhook branch).
+
+**Constraints upheld.**
+- No CRM writes. No `Task.status` writes. No new tables/migrations.
+- No changes to router.ts or the digest dispatchers.
+- The alert flow is provider-agnostic in structure but currently only wired
+  for Green API (Meta already has native message-delivery status callbacks).
+
+**Manually verified.**
+- Diff of `src/routes/greenapiWebhook.ts` — the state branch is ordered
+  BEFORE the "only incomingMessageReceived is acted on" bailout so it
+  actually runs; ACK precedes the handler; errors are caught so a mocked
+  throw does not turn into a 500.
+- `handleGreenApiStateChange` logic reviewed against all six transition
+  paths (authorized→bad, bad→same-bad, bad→different-bad, bad→authorized,
+  bootstrap→authorized, bootstrap→bad) — matches the tests.
+- Scheduler diff — new cron uses the shared `withJobLock` / `safe` helpers
+  identical to the other 5-minute jobs (`expireActions`, `dueDateReminder`,
+  `queueRecovery`). No structural drift.
+- Provider gate in the job body confirmed: `WHATSAPP_PROVIDER=meta` returns
+  before the HTTP call.
+
+**Known follow-ups (NOT in this task).**
+- The alert itself rides the failing transport. A truly independent channel
+  (SMS/email/PagerDuty) is a future upgrade.
+- No alerting on quota-exceeded (466) or delivery-failure clusters.
+
+---
+
 ## VOICE-MY-TASKS — unified "my tasks today" in the voice agent (2026-07-15)
 
 **Status:** DONE (local, uncommitted)

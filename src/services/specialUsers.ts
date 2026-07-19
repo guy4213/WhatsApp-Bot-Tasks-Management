@@ -90,3 +90,26 @@ export async function getLeadsViewerPhones(): Promise<string[]> {
   );
   return rows.map((r) => r.phone);
 }
+
+/**
+ * Ops alert recipients — receive Green API infra alerts (phone disconnected,
+ * instance not authorized, etc.). Intentionally NARROWER than the exceptions
+ * viewers set: this is dev/ops noise, not a CEO-facing signal, so Yoram is
+ * NOT included by design. Keep the list small and edit by hand.
+ */
+export const OPS_ALERT_NAMES: ReadonlySet<string> = new Set([
+  'גיא פרנסס',
+]);
+
+export async function getOpsAlertPhones(): Promise<string[]> {
+  const names = Array.from(OPS_ALERT_NAMES);
+  const { rows } = await pool.query<{ phone: string }>(
+    `SELECT phone FROM "User"
+     WHERE name = ANY($1::text[])
+       AND upper(status::text) = 'ACTIVE'
+       AND phone IS NOT NULL
+       AND phone <> ''`,
+    [names],
+  );
+  return rows.map((r) => r.phone);
+}
