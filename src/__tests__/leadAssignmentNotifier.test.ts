@@ -1,10 +1,17 @@
 /**
  * D3-T3 + D3-T4 — leadAssignmentNotifier polling job.
  *
- * Dedup check (isLeadNotificationSent, a plain SELECT) now runs BEFORE the
- * WhatsApp send; the ledger row (claimLeadNotification, an INSERT) is only
- * written AFTER the send actually succeeds — never before. A failed send
- * leaves no row, so the next tick retries instead of silently skipping.
+ * D3-T3 (worker assignment alert) — INSERT-first atomic claim (migration 022):
+ *   1. tryClaimLeadNotification — INSERT ... ON CONFLICT DO UPDATE ...
+ *      RETURNING. Only one caller can win; parallel webhook + poller cannot
+ *      both send the same alert.
+ *   2. Send WhatsApp only if we won the claim.
+ *   3. markLeadNotificationSent (UPDATE) on success; releaseLeadNotificationClaim
+ *      (DELETE) on failure so the next tick retries.
+ *
+ * D3-T4 (Sasha escalation) — unchanged legacy check-then-act: isLeadNotificationSent
+ * SELECT before the send, claimLeadNotification INSERT after a successful send.
+ * Racing is acceptable here because there is only one caller (the poller).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -46,11 +53,17 @@ afterEach(() => {
 import { runLeadAssignmentNotifier } from '../scheduler/jobs/leadAssignmentNotifier';
 
 const EMPTY = { rowCount: 0, rows: [] };
-// isLeadNotificationSent (SELECT) result shapes.
+// isLeadNotificationSent (SELECT) — legacy D3-T4 dedup.
 const NOT_SENT = { rowCount: 0, rows: [] };
 const ALREADY_SENT = { rowCount: 1, rows: [{ leadId: 'x' }] };
-// claimLeadNotification (INSERT, called only after a successful send).
+// claimLeadNotification (legacy INSERT ... ON CONFLICT ... RETURNING).
 const CLAIMED = { rowCount: 1, rows: [{ leadId: 'x' }] };
+// D3-T3 INSERT-first: tryClaimLeadNotification win/lose result shapes.
+const CLAIM_WON  = { rowCount: 1, rows: [{ leadId: 'x' }] };
+const CLAIM_LOST = { rowCount: 0, rows: [] };
+// markLeadNotificationSent / releaseLeadNotificationClaim (UPDATE/DELETE).
+const UPDATE_OK = { rowCount: 1, rows: [] };
+const DELETE_OK = { rowCount: 1, rows: [] };
 
 function makeAssignedRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -85,28 +98,31 @@ function makeEscalationRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// ── D3-T3: worker assignment alerts ──────────────────────────────────────────
+// ── D3-T3: worker assignment alerts (INSERT-first atomic claim) ─────────────
 
 describe('D3-T3 worker assignment alert', () => {
-  it('checks dedup, sends to worker phone, then records as sent', async () => {
+  it('claims atomically FIRST, sends to worker phone, then marks as SENT', async () => {
     const row = makeAssignedRow();
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findNewlyAssignedLeads
-      .mockResolvedValueOnce(NOT_SENT)   // isLeadNotificationSent ASSIGNED_TO_WORKER → not sent
-      .mockResolvedValueOnce(CLAIMED);   // claimLeadNotification (after successful send)
+      .mockResolvedValueOnce(CLAIM_WON)   // tryClaimLeadNotification → won
+      .mockResolvedValueOnce(UPDATE_OK);  // markLeadNotificationSent (after successful send)
 
     await runLeadAssignmentNotifier();
 
-    // Dedup check ran BEFORE the send.
-    const checkCall = poolQuery.mock.calls[1];
-    expect(checkCall[0]).toMatch(/SELECT 1 FROM "WhatsappLeadNotification"/);
-    expect(checkCall[1]).toContain('ASSIGNED_TO_WORKER');
-    // The claim INSERT ran AFTER the send.
-    const claimCall = poolQuery.mock.calls[2];
+    // Claim INSERT ran BEFORE the send.
+    const claimCall = poolQuery.mock.calls[1];
     expect(claimCall[0]).toMatch(/INSERT INTO "WhatsappLeadNotification"/);
+    expect(claimCall[0]).toMatch(/ON CONFLICT/);
+    expect(claimCall[0]).toMatch(/'PENDING'/);
     expect(claimCall[1]).toContain('ASSIGNED_TO_WORKER');
 
-    // sendTextMessage was called for the worker
+    // Mark-SENT UPDATE ran AFTER the send.
+    const markCall = poolQuery.mock.calls[2];
+    expect(markCall[0]).toMatch(/UPDATE "WhatsappLeadNotification"/);
+    expect(markCall[0]).toMatch(/'SENT'/);
+
+    // sendTextMessage was called for the worker.
     expect(sendTextMessage).toHaveBeenCalledOnce();
     const [msg] = sendTextMessage.mock.calls[0];
     expect(msg.to).toBe('972501111111');
@@ -115,43 +131,49 @@ describe('D3-T3 worker assignment alert', () => {
     expect(msg.text).toContain('לטיפול ועדכון ב-CRM');
   });
 
-  it('skips send when already sent (dedup)', async () => {
+  it('skips send when the atomic claim loses (webhook already handling)', async () => {
     const row = makeAssignedRow();
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findNewlyAssignedLeads
-      .mockResolvedValueOnce(ALREADY_SENT);                // isLeadNotificationSent → already sent
+      .mockResolvedValueOnce(CLAIM_LOST);                  // tryClaimLeadNotification → someone else won
 
     await runLeadAssignmentNotifier();
 
     expect(sendTextMessage).not.toHaveBeenCalled();
+    // No further pool.query — no send, no mark, no release.
+    expect(poolQuery).toHaveBeenCalledTimes(2);
   });
 
-  it('skips send when worker has no phone, and records it as handled (no re-log every tick)', async () => {
+  it('skips send when worker has no phone, and marks SENT so it is not re-selected', async () => {
     const row = makeAssignedRow({ workerPhone: null });
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findNewlyAssignedLeads
-      .mockResolvedValueOnce(NOT_SENT)                     // isLeadNotificationSent → not sent
-      .mockResolvedValueOnce(CLAIMED);                     // claimLeadNotification (no-phone → recorded as handled)
+      .mockResolvedValueOnce(CLAIM_WON)  // tryClaimLeadNotification → won
+      .mockResolvedValueOnce(UPDATE_OK); // markLeadNotificationSent (no-phone → terminal state)
 
     await runLeadAssignmentNotifier();
 
     expect(sendTextMessage).not.toHaveBeenCalled();
-    const claimCall = poolQuery.mock.calls[2];
-    expect(claimCall[0]).toMatch(/INSERT INTO "WhatsappLeadNotification"/);
+    const markCall = poolQuery.mock.calls[2];
+    expect(markCall[0]).toMatch(/UPDATE "WhatsappLeadNotification"/);
+    expect(markCall[0]).toMatch(/'SENT'/);
   });
 
-  it('does NOT record as sent when the WhatsApp send fails (retry next tick)', async () => {
+  it('RELEASES the claim when the WhatsApp send fails (allows retry next tick)', async () => {
     const row = makeAssignedRow();
     sendTextMessage.mockRejectedValueOnce(new Error('send failed'));
     poolQuery
       .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findNewlyAssignedLeads
-      .mockResolvedValueOnce(NOT_SENT);                    // isLeadNotificationSent → not sent
+      .mockResolvedValueOnce(CLAIM_WON)  // tryClaimLeadNotification → won
+      .mockResolvedValueOnce(DELETE_OK); // releaseLeadNotificationClaim (after send failure)
 
     await runLeadAssignmentNotifier();
 
     expect(sendTextMessage).toHaveBeenCalledOnce();
-    // No further pool.query call (no claim INSERT) after the failed send.
-    expect(poolQuery).toHaveBeenCalledTimes(2);
+    // Release DELETE ran, no mark-SENT.
+    const releaseCall = poolQuery.mock.calls[2];
+    expect(releaseCall[0]).toMatch(/DELETE FROM "WhatsappLeadNotification"/);
+    expect(releaseCall[0]).toMatch(/'PENDING'/);
   });
 
   it('continues loop on per-lead send failure', async () => {
@@ -159,10 +181,10 @@ describe('D3-T3 worker assignment alert', () => {
     const rowB = makeAssignedRow({ id: 'lead-b', fromName: 'שני' });
     poolQuery
       .mockResolvedValueOnce({ rowCount: 2, rows: [rowA, rowB] }) // findNewlyAssignedLeads
-      .mockResolvedValueOnce(NOT_SENT) // isLeadNotificationSent lead-a → not sent
-      // send A fails below → no claim call for lead-a
-      .mockResolvedValueOnce(NOT_SENT) // isLeadNotificationSent lead-b → not sent
-      .mockResolvedValueOnce(CLAIMED); // claimLeadNotification lead-b (send succeeds)
+      .mockResolvedValueOnce(CLAIM_WON)   // tryClaim lead-a → won
+      .mockResolvedValueOnce(DELETE_OK)   // release lead-a (send fails)
+      .mockResolvedValueOnce(CLAIM_WON)   // tryClaim lead-b → won
+      .mockResolvedValueOnce(UPDATE_OK);  // markSent lead-b
 
     sendTextMessage
       .mockRejectedValueOnce(new Error('send A failed'))
@@ -178,6 +200,64 @@ describe('D3-T3 worker assignment alert', () => {
     poolQuery.mockResolvedValueOnce(EMPTY); // findNewlyAssignedLeads
     // SASHA_PHONE not set → escalation skipped without querying
     await runLeadAssignmentNotifier();
+    expect(sendTextMessage).not.toHaveBeenCalled();
+    expect(poolQuery).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── D3-T3 exported single-lead handler (webhook consumer) ───────────────────
+
+describe('processAssignmentAlertForLead (webhook path)', () => {
+  it('preloaded row: claim → send → mark SENT, returns "sent"', async () => {
+    const row = makeAssignedRow({ id: 'lead-w' });
+    poolQuery
+      .mockResolvedValueOnce(CLAIM_WON)  // tryClaim
+      .mockResolvedValueOnce(UPDATE_OK); // markSent
+
+    const { processAssignmentAlertForLead } = await import('../scheduler/jobs/leadAssignmentNotifier');
+    const outcome = await processAssignmentAlertForLead('lead-w', row);
+
+    expect(outcome).toBe('sent');
+    expect(sendTextMessage).toHaveBeenCalledOnce();
+    // findAssignedLeadById is NOT called when preloaded row is provided.
+    expect(poolQuery.mock.calls.every((c) => !/SELECT[\s\S]+FROM "IncomingLead"/.test(c[0] as string))).toBe(true);
+  });
+
+  it('no preload: fetches via findAssignedLeadById, then claim/send/mark', async () => {
+    const row = makeAssignedRow({ id: 'lead-w' });
+    poolQuery
+      .mockResolvedValueOnce(CLAIM_WON)                    // tryClaim first
+      .mockResolvedValueOnce({ rowCount: 1, rows: [row] }) // findAssignedLeadById
+      .mockResolvedValueOnce(UPDATE_OK);                   // markSent
+
+    const { processAssignmentAlertForLead } = await import('../scheduler/jobs/leadAssignmentNotifier');
+    const outcome = await processAssignmentAlertForLead('lead-w');
+
+    expect(outcome).toBe('sent');
+    expect(sendTextMessage).toHaveBeenCalledOnce();
+  });
+
+  it('ineligible lead (missing / not ACTIVE / no owner): releases the claim, returns "ineligible"', async () => {
+    poolQuery
+      .mockResolvedValueOnce(CLAIM_WON)                       // tryClaim
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })       // findAssignedLeadById → null
+      .mockResolvedValueOnce(DELETE_OK);                      // releaseClaim (so future ACTIVE txn can re-claim)
+
+    const { processAssignmentAlertForLead } = await import('../scheduler/jobs/leadAssignmentNotifier');
+    const outcome = await processAssignmentAlertForLead('lead-w');
+
+    expect(outcome).toBe('ineligible');
+    expect(sendTextMessage).not.toHaveBeenCalled();
+    expect(poolQuery.mock.calls[2][0]).toMatch(/DELETE FROM "WhatsappLeadNotification"/);
+  });
+
+  it('claim lost: returns "skipped" without touching send or DB again', async () => {
+    poolQuery.mockResolvedValueOnce(CLAIM_LOST); // tryClaim → lost
+
+    const { processAssignmentAlertForLead } = await import('../scheduler/jobs/leadAssignmentNotifier');
+    const outcome = await processAssignmentAlertForLead('lead-w');
+
+    expect(outcome).toBe('skipped');
     expect(sendTextMessage).not.toHaveBeenCalled();
     expect(poolQuery).toHaveBeenCalledTimes(1);
   });

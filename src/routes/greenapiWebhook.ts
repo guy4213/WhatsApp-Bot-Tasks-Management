@@ -16,6 +16,14 @@
  *    enqueue, so the STORED payload already carries the text the router expects.
  *    The message is then processed by the SAME processInbound the Meta webhook
  *    uses — the router never learns which transport delivered it.
+ *  - Reconnect protection (added after the 2026-07-19 yellowCard incident):
+ *      • GREENAPI_INBOUND_SUPPRESSED=true → ACK 200 immediately with zero
+ *        processing. Ops kill switch for when the socket comes back after a
+ *        long outage and we want to discard the 24h backlog Green API will
+ *        dump. Runs BEFORE any other check.
+ *      • GREENAPI_MAX_INBOUND_AGE_SEC (default 300) — drop `incomingMessage`
+ *        webhooks whose `body.timestamp` (Unix seconds) is older than the
+ *        cutoff. Fail-open when the timestamp field is missing / 0.
  */
 import crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
@@ -109,9 +117,19 @@ export async function greenapiWebhookRoutes(app: FastifyInstance) {
       return reply.code(404).send('Not Found');
     }
 
+    // 2. Kill switch — GREENAPI_INBOUND_SUPPRESSED=true silences ALL inbound
+    //    processing (no state handling, no dedup, no enqueue) while still ACKing
+    //    200 so Green API stops retrying. Ops escape hatch: turn it on from
+    //    Render env when the socket comes back after a long outage and we do NOT
+    //    want the bot to reply to the 24h backlog Green API is about to dump.
+    //    Precedes every other check below, including the freshness cutoff.
+    if (process.env.GREENAPI_INBOUND_SUPPRESSED === 'true') {
+      return reply.code(200).send('OK');
+    }
+
     const body = (req.body ?? {}) as Record<string, unknown>;
 
-    // 2a. Instance state changes — drive the health-alert flow (services/greenapiHealth.ts).
+    // 3a. Instance state changes — drive the health-alert flow (services/greenapiHealth.ts).
     //     Requires the console setting `stateInstanceChanged=ON` (see docs/GREENAPI_OPS.md).
     //     ACK 200 first, then fire the handler; failures inside it must not
     //     block Green API's webhook retry loop.
@@ -126,12 +144,32 @@ export async function greenapiWebhookRoutes(app: FastifyInstance) {
       return;
     }
 
-    // 2b. Only inbound messages are processed; all other webhook types ack + ignore.
+    // 3b. Only inbound messages are processed; all other webhook types ack + ignore.
     if (body.typeWebhook !== 'incomingMessageReceived') {
       return reply.code(200).send('OK');
     }
 
-    // 3. idMessage is the dedup key — never store an empty primary key.
+    // 4. Freshness cutoff — Green API queues undelivered webhooks up to 24h;
+    //    when the socket reconnects it dumps the backlog and, without this
+    //    filter, the router replies to every stale message (real incident
+    //    2026-07-19: yellowCard triggered by a mass reply-storm on reconnect).
+    //    body.timestamp is Unix SECONDS. ts=0 / field missing → fail-open (no
+    //    filtering). Must return 200, never 4xx/5xx — Green API would otherwise
+    //    keep the notification and retry it.
+    const MAX_INBOUND_AGE_SEC = Number(process.env.GREENAPI_MAX_INBOUND_AGE_SEC ?? 300);
+    const ts = Number(body.timestamp ?? 0);
+    if (ts > 0 && MAX_INBOUND_AGE_SEC > 0) {
+      const ageSec = Math.floor(Date.now() / 1000) - ts;
+      if (ageSec > MAX_INBOUND_AGE_SEC) {
+        log.warn(
+          { idMessage: body.idMessage, ageSec, cutoffSec: MAX_INBOUND_AGE_SEC },
+          'Green API webhook: stale — dropped',
+        );
+        return reply.code(200).send('OK');
+      }
+    }
+
+    // 5. idMessage is the dedup key — never store an empty primary key.
     const idMessage = (body.idMessage as string) ?? '';
     if (!idMessage) {
       log.warn('Green API webhook: incomingMessageReceived with empty idMessage — ignored');
@@ -145,7 +183,7 @@ export async function greenapiWebhookRoutes(app: FastifyInstance) {
       return reply.code(200).send('OK');
     }
 
-    // 4. Build the normalized (Meta-shaped) payload. For text, translate a numeric
+    // 6. Build the normalized (Meta-shaped) payload. For text, translate a numeric
     //    reply back to its command via PendingChoice BEFORE enqueue, so the STORED
     //    payload already carries the resolved text.
     let payload: Record<string, unknown>;
@@ -172,7 +210,7 @@ export async function greenapiWebhookRoutes(app: FastifyInstance) {
 
     const item: InboundMessage = { msgId: `greenapi:${idMessage}`, fromPhone: from, payload };
 
-    // 5. Enqueue BEFORE the ACK (durable + dedup). DB down → process inline once,
+    // 7. Enqueue BEFORE the ACK (durable + dedup). DB down → process inline once,
     //    no durability (mirrors the Meta webhook's fallback).
     let isNew = false;
     try {
@@ -183,10 +221,10 @@ export async function greenapiWebhookRoutes(app: FastifyInstance) {
       isNew = true;
     }
 
-    // 6. ACK.
+    // 8. ACK.
     reply.code(200).send('OK');
 
-    // 7. Process only when newly enqueued (dedup: a re-delivered idMessage is skipped).
+    // 9. Process only when newly enqueued (dedup: a re-delivered idMessage is skipped).
     if (isNew) await processInbound(item);
   });
 }

@@ -14,6 +14,21 @@
  *  - sendListMessage     — interactive list; the selected row `id` routes as text.
  *  - sendTemplateMessage — pre-approved template for business-initiated /
  *                          out-of-window messages.
+ *
+ * Kill switch (added after 2026-07-19 incident):
+ *   WHATSAPP_OUTBOUND_SUPPRESSED=true → every outbound entry point becomes a
+ *   no-op that returns null without contacting the provider or writing any
+ *   dedup row. Operator escape hatch to stop the bot from sending in real time
+ *   without a deploy — complement of GREENAPI_INBOUND_SUPPRESSED on the
+ *   webhook side. A throttled `log.warn` fires at most once per minute so the
+ *   suppression is visible in Render logs without spamming.
+ *
+ * Ops-alert bypass:
+ *   `sendOpsAlertText` is the ONE entry that skips both the kill switch AND
+ *   the Green-API preflight (`checkOutboundHealth`). Rationale: the alerts
+ *   that warn humans about the outbound path being blocked must never
+ *   themselves be blocked, or the mechanism is blind to itself. Reserved for
+ *   `services/greenapiHealth.ts`; do NOT wire from router / dispatchers.
  */
 import {
   getProvider,
@@ -23,12 +38,47 @@ import {
   type TemplateMessage,
   type TemplateButtonParam,
 } from './provider';
+import { moduleLogger } from '../utils/logger';
+
+const log = moduleLogger('sender');
 
 // Re-export the message shapes so existing importers of these types from this
 // module (e.g. templates.ts imports `type TemplateButtonParam`) keep working.
 export type { TextMessage, ButtonMessage, ListMessage, TemplateMessage, TemplateButtonParam };
 
+// ── Kill switch ────────────────────────────────────────────────────────────────
+
+/** How often the "outbound suppressed" warn log is allowed to fire per process. */
+const SUPPRESS_WARN_INTERVAL_MS = 60_000;
+let lastSuppressWarnAt = 0;
+
+function outboundSuppressed(): boolean {
+  return process.env.WHATSAPP_OUTBOUND_SUPPRESSED === 'true';
+}
+
+function logSuppressedThrottled(to: string, preview: string): void {
+  const now = Date.now();
+  if (now - lastSuppressWarnAt < SUPPRESS_WARN_INTERVAL_MS) return;
+  lastSuppressWarnAt = now;
+  log.warn(
+    { to, preview: preview.slice(0, 80) },
+    'WHATSAPP_OUTBOUND_SUPPRESSED — outbound skipped (throttled to 1/min)',
+  );
+}
+
+/** Test-only: reset the throttle so a repeated test observes the first warn. */
+export function __resetSuppressThrottleForTests(): void {
+  lastSuppressWarnAt = 0;
+}
+
+// ── Send entrypoints ──────────────────────────────────────────────────────────
+
 export function sendTextMessage(msg: TextMessage): Promise<string | null> {
+  // bypassGuards is honored here for the ops-alert path (see sendOpsAlertText).
+  if (!msg.bypassGuards && outboundSuppressed()) {
+    logSuppressedThrottled(msg.to, msg.text);
+    return Promise.resolve(null);
+  }
   return getProvider().sendText(msg);
 }
 
@@ -41,6 +91,10 @@ export function sendTextMessage(msg: TextMessage): Promise<string | null> {
  * tap and a typed reply run the same handler path.
  */
 export function sendButtonMessage(msg: ButtonMessage): Promise<string | null> {
+  if (outboundSuppressed()) {
+    logSuppressedThrottled(msg.to, msg.body);
+    return Promise.resolve(null);
+  }
   return getProvider().sendButton(msg);
 }
 
@@ -51,9 +105,27 @@ export function sendButtonMessage(msg: ButtonMessage): Promise<string | null> {
  * that wrap this in try/catch fall back to numbered text on send failure.
  */
 export function sendListMessage(msg: ListMessage): Promise<string | null> {
+  if (outboundSuppressed()) {
+    logSuppressedThrottled(msg.to, msg.body);
+    return Promise.resolve(null);
+  }
   return getProvider().sendList(msg);
 }
 
 export function sendTemplateMessage(msg: TemplateMessage): Promise<string | null> {
+  if (outboundSuppressed()) {
+    logSuppressedThrottled(msg.to, `[template:${msg.name}]`);
+    return Promise.resolve(null);
+  }
   return getProvider().sendTemplate(msg);
+}
+
+/**
+ * Ops-alert text send — bypasses WHATSAPP_OUTBOUND_SUPPRESSED and the Green-API
+ * preflight (`checkOutboundHealth`). Reserved for `services/greenapiHealth.ts`
+ * — the one path that must warn humans that the outbound is blocked. Do NOT
+ * wire from router or dispatchers.
+ */
+export function sendOpsAlertText(msg: TextMessage): Promise<string | null> {
+  return getProvider().sendText({ ...msg, bypassGuards: true });
 }

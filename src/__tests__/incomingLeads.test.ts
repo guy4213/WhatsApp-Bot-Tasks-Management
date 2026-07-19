@@ -62,17 +62,22 @@ describe('findOvernightUnassignedLeads', () => {
 // ── findNewlyAssignedLeads ────────────────────────────────────────────────────
 
 describe('findNewlyAssignedLeads', () => {
-  it('JOINs User, filters ownerId NOT NULL, role != ADMIN, and WLN NOT EXISTS', async () => {
+  it('JOINs User, filters status=ACTIVE + ownerId NOT NULL + role != ADMIN + PENDING/SENT-aware NOT EXISTS', async () => {
     poolQuery.mockResolvedValueOnce(EMPTY);
     await findNewlyAssignedLeads();
     const [sql, params] = poolQuery.mock.calls[0];
     expect(sql).toMatch(/"IncomingLead"\s+il/);
     expect(sql).toMatch(/JOIN\s+"User"\s+u\s+ON\s+u\.id\s*=\s*il\."ownerId"/);
+    // status='ACTIVE' predicate — signals CRM ownership transition
+    expect(sql).toMatch(/il\.status\s*=\s*'ACTIVE'/);
     expect(sql).toMatch(/il\."ownerId"\s+IS\s+NOT\s+NULL/);
     expect(sql).toMatch(/u\.role\s*!=\s*'ADMIN'/);
     expect(sql).toMatch(/NOT\s+EXISTS/);
     expect(sql).toMatch(/"WhatsappLeadNotification"/);
     expect(sql).toMatch(/'ASSIGNED_TO_WORKER'/);
+    // PENDING/SENT filter: skip if SENT OR PENDING < 5 minutes
+    expect(sql).toMatch(/status"?\s*=\s*'SENT'/);
+    expect(sql).toMatch(/interval\s+'5 minutes'/);
     expect(sql).toMatch(/ORDER BY\s+il\."receivedAt"/);
     expect(params).toEqual([50]);
   });

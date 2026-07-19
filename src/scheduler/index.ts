@@ -105,11 +105,18 @@ export function startScheduler(): void {
     log.info('assignmentCardNotifier is DISABLED (ASSIGNMENT_CARD_NOTIFIER_ENABLED!=true) — auto-send on TaskField creation is intentionally off per product decision Jul 2026; enable via ASSIGNMENT_CARD_NOTIFIER_ENABLED=true for future manual-command flows');
   }
 
-  // D3-T3 + D3-T4: every 2 minutes, poll IncomingLead for newly assigned rows
+  // D3-T3 + D3-T4: every 15 minutes, poll IncomingLead for newly assigned rows
   // (alert the inspector) and daytime-unassigned >1h rows (escalate to Sasha).
-  // Dedup via WhatsappLeadNotification (migration 010). Advisory lock prevents
-  // concurrent double-sends across instances.
-  cron.schedule('*/2 * * * *', safe('leadAssignmentNotifier', JOB_LOCK_IDS.leadAssignmentNotifier, runLeadAssignmentNotifier), { timezone: TZ });
+  // Dedup via WhatsappLeadNotification (migration 010 + 022). The Supabase
+  // Database Webhook (routes/supabaseLeadWebhook.ts) is now the primary
+  // delivery path for ASSIGNED_TO_WORKER — it fires within ~1 second of the
+  // CRM claim, regardless of channel. This poller is the SAFETY NET for
+  // webhook delivery failures, which is why the frequency dropped from */2 to
+  // */15: at */2 it burned quota for near-zero real work, at */15 it still
+  // recovers any lost webhook within a coffee break. Advisory lock prevents
+  // concurrent double-sends across instances; INSERT-first claim inside the
+  // job prevents webhook × poller double-sends.
+  cron.schedule('*/15 * * * *', safe('leadAssignmentNotifier', JOB_LOCK_IDS.leadAssignmentNotifier, runLeadAssignmentNotifier), { timezone: TZ });
 
   // OUTLOOK-D: every 12 hours, renew Microsoft Graph subscriptions expiring within 48h.
   // Advisory lock 1012 prevents concurrent double-renewals across instances.

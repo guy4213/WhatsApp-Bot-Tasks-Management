@@ -74,9 +74,25 @@ export async function findOvernightUnassignedLeads(localDate: string): Promise<I
 }
 
 /**
- * Leads newly assigned to an inspector (ownerId IS NOT NULL, role != 'ADMIN')
- * with no ASSIGNED_TO_WORKER dedup row yet.
- * Used by D3-T3 worker-assignment alert.
+ * Leads newly assigned to an inspector — the D3-T3 worker-assignment alert
+ * scans this list.
+ *
+ * Predicates:
+ *   - status = 'ACTIVE'          → the CRM's "claimed" state; the ONLY moment
+ *     that signals ownership has transitioned from Sasha's inbox to a worker.
+ *     Filtering on `ownerId IS NOT NULL` alone was insufficient in prod: rows
+ *     arrive with an interim ownerId already populated, so the alert would
+ *     fire before the claim was actually made.
+ *   - ownerId IS NOT NULL        → belt-and-suspenders; a row that is somehow
+ *     ACTIVE without an owner has no worker to notify.
+ *   - u.role != 'ADMIN'          → managers using the CRM directly don't get
+ *     the worker-facing alert.
+ *   - dedup filter               → skip leads with either a SENT dedup row
+ *     (already handled) or a PENDING dedup row younger than 5 minutes (a
+ *     concurrent send is in flight from the webhook path). Stale PENDING
+ *     rows (>5 min old) fall through so a crashed send can be retried on
+ *     the next poller tick.
+ * Used by D3-T3 worker-assignment alert (poller path).
  */
 export async function findNewlyAssignedLeads(limit = 50): Promise<AssignedLeadRow[]> {
   const { rows } = await pool.query<AssignedLeadRow>(
@@ -87,18 +103,50 @@ export async function findNewlyAssignedLeads(limit = 50): Promise<AssignedLeadRo
        u.id::text AS "workerId", u.phone AS "workerPhone", u.name AS "workerName"
      FROM "IncomingLead" il
      JOIN "User" u ON u.id = il."ownerId"
-     WHERE il."ownerId" IS NOT NULL
+     WHERE il.status = 'ACTIVE'
+       AND il."ownerId" IS NOT NULL
        AND u.role != 'ADMIN'
        AND NOT EXISTS (
          SELECT 1 FROM "WhatsappLeadNotification" wln
          WHERE wln."leadId" = il.id::text
            AND wln."eventKind" = 'ASSIGNED_TO_WORKER'
+           AND (
+             wln."status" = 'SENT'
+             OR wln."notifiedAt" > now() - interval '5 minutes'
+           )
        )
      ORDER BY il."receivedAt"
      LIMIT $1`,
     [limit],
   );
   return rows;
+}
+
+/**
+ * Single-row variant of `findNewlyAssignedLeads` — used by the Supabase
+ * webhook path to fetch full worker + lead details for one lead id. Returns
+ * `null` when the row is not eligible (missing / not ACTIVE / no ownerId /
+ * assigned to an ADMIN). The webhook does NOT apply the dedup pre-filter
+ * itself — atomic claim via `tryClaimLeadNotification` is the source of
+ * truth for "should we send".
+ */
+export async function findAssignedLeadById(leadId: string): Promise<AssignedLeadRow | null> {
+  const { rows } = await pool.query<AssignedLeadRow>(
+    `SELECT
+       il.id::text AS id, il.subject, il.body, il."fromName", il."fromEmail",
+       il."receivedAt", il.status,
+       il."ownerId"::text AS "ownerId", il."taskId"::text AS "taskId",
+       u.id::text AS "workerId", u.phone AS "workerPhone", u.name AS "workerName"
+     FROM "IncomingLead" il
+     JOIN "User" u ON u.id = il."ownerId"
+     WHERE il.id = $1
+       AND il.status = 'ACTIVE'
+       AND il."ownerId" IS NOT NULL
+       AND u.role != 'ADMIN'
+     LIMIT 1`,
+    [leadId],
+  );
+  return rows[0] ?? null;
 }
 
 /**

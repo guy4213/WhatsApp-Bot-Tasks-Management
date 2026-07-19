@@ -34,7 +34,7 @@
  */
 import { moduleLogger } from '../utils/logger';
 import { getOpsAlertPhones } from './specialUsers';
-import { sendTextMessage } from '../whatsapp/sender';
+import { sendOpsAlertText } from '../whatsapp/sender';
 
 const log = moduleLogger('greenapi-health');
 
@@ -243,7 +243,10 @@ async function sendToOpsRecipients(text: string): Promise<void> {
 
   for (const to of recipients) {
     try {
-      await sendTextMessage({ to, text });
+      // sendOpsAlertText bypasses WHATSAPP_OUTBOUND_SUPPRESSED + Green-API
+      // preflight. The alert about "outbound is blocked / Green API is offline"
+      // must not itself be blocked by the same mechanism it's warning about.
+      await sendOpsAlertText({ to, text });
     } catch (err) {
       log.error({ err, to }, 'Failed to send Green API alert');
     }

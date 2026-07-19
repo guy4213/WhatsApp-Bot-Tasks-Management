@@ -43,6 +43,11 @@ beforeEach(() => {
   delete process.env.WHATSAPP_OUTBOUND_SUPPRESSED;
 });
 afterEach(() => {
+  // Cross-file env leak protection: tests here set WHATSAPP_OUTBOUND_SUPPRESSED
+  // to exercise the kill switch. Vitest may reuse the same worker for later
+  // test files (e.g. goLive.test.ts loads the whole app); a leaked "true" here
+  // would silently gate every send in unrelated test files.
+  delete process.env.WHATSAPP_OUTBOUND_SUPPRESSED;
   vi.restoreAllMocks();
 });
 

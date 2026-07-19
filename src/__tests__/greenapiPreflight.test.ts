@@ -37,6 +37,11 @@ beforeEach(() => {
 });
 afterEach(() => {
   global.fetch = originalFetch;
+  // Cross-file env leak protection: the "missing credentials" test deletes
+  // these; make sure they don't stay deleted for later test files.
+  delete process.env.GREENAPI_ID_INSTANCE;
+  delete process.env.GREENAPI_API_TOKEN_INSTANCE;
+  delete process.env.GREENAPI_API_URL;
   vi.restoreAllMocks();
 });
 

@@ -22,6 +22,15 @@ import { greenapiProvider } from './providers/greenapi';
 export interface TextMessage {
   to: string;   // E.164 without +, e.g. "972501234567"
   text: string;
+  /**
+   * @internal Bypass the WHATSAPP_OUTBOUND_SUPPRESSED kill switch (sender.ts)
+   * AND the Green-API preflight (`checkOutboundHealth`). Reserved for ops
+   * alerts from `services/greenapiHealth.ts` — the one path that must reach
+   * humans even when the outbound is suppressed or Green API is offline,
+   * otherwise the mechanism is blind to itself. Set ONLY via
+   * `sender.sendOpsAlertText`. Do not use from router / dispatchers.
+   */
+  bypassGuards?: boolean;
 }
 
 export interface ButtonMessage {

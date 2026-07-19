@@ -27,6 +27,7 @@ import { moduleLogger } from '../../utils/logger';
 import { normalizeIsraeliPhone } from '../../auth/phoneNormalizer';
 import { postJson, runWithRetry } from './httpDelivery';
 import { savePendingChoice } from '../../services/pendingChoice';
+import { checkOutboundHealth } from '../../services/greenapiPreflight';
 
 const log = moduleLogger('greenapi');
 
@@ -36,8 +37,8 @@ const API_TOKEN   = process.env.GREENAPI_API_TOKEN_INSTANCE ?? '';
 
 // ── Senders ───────────────────────────────────────────────────────────────────
 
-async function sendText({ to, text }: TextMessage): Promise<string | null> {
-  return await deliver(normalizeRecipient(to), text);
+async function sendText({ to, text, bypassGuards }: TextMessage): Promise<string | null> {
+  return await deliver(normalizeRecipient(to), text, { bypassPreflight: bypassGuards === true });
 }
 
 /**
@@ -106,10 +107,27 @@ async function sendNumbered(recipient: string, body: string, options: NumberedOp
   return await deliver(recipient, text);
 }
 
-// ── Shared delivery (credential check → retry loop → DLQ) ──────────────────────
+// ── Shared delivery (credential check → preflight → retry loop → DLQ) ─────────
 
-/** `recipient` is already normalized (digits, no @c.us). */
-async function deliver(recipient: string, text: string): Promise<string | null> {
+/**
+ * `recipient` is already normalized (digits, no @c.us).
+ *
+ * `opts.bypassPreflight` skips `checkOutboundHealth` — reserved for ops alerts
+ * routed via `sender.sendOpsAlertText` (bypassGuards=true propagates here from
+ * `sendText`). Buttons / lists / templates NEVER bypass (no ops-alert path
+ * uses them).
+ *
+ * When preflight blocks:
+ *   - no HTTP call is made (skip queueing to Green API's 24h server-side queue),
+ *   - no dedup row is written (caller's INSERT-first pattern will retry on the
+ *     next scheduler tick — implicit exponential retry via cron cadence),
+ *   - no DLQ row is written (DLQ is reserved for real send failures after retries).
+ */
+async function deliver(
+  recipient: string,
+  text: string,
+  opts: { bypassPreflight?: boolean } = {},
+): Promise<string | null> {
   if (!recipient) {
     log.warn({ preview: text.slice(0, 80) }, 'Empty recipient — message skipped');
     return null;
@@ -117,6 +135,22 @@ async function deliver(recipient: string, text: string): Promise<string | null> 
   if (!ID_INSTANCE || !API_TOKEN) {
     log.warn({ to: recipient, preview: text.slice(0, 80) }, 'Missing Green API credentials — message not sent');
     return null;
+  }
+
+  if (!opts.bypassPreflight) {
+    const health = await checkOutboundHealth();
+    if (!health.allow) {
+      log.warn(
+        {
+          to: recipient,
+          reason: health.reason,
+          source: health.source,
+          preview: text.slice(0, 80),
+        },
+        'Green API preflight blocked send — dropped (no dedup row; next tick will retry)',
+      );
+      return null;
+    }
   }
 
   const chatId = `${recipient}@c.us`;

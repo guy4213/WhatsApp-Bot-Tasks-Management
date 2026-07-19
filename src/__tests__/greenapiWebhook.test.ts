@@ -35,13 +35,15 @@ let app: FastifyInstance;
 /** Let the post-ACK `await processInbound(...)` (fire-and-forget vs inject) settle. */
 const flush = () => new Promise((r) => setImmediate(r));
 
-function textWebhook(idMessage: string, text: string) {
-  return {
+function textWebhook(idMessage: string, text: string, timestamp?: number) {
+  const payload: Record<string, unknown> = {
     typeWebhook: 'incomingMessageReceived',
     idMessage,
     senderData: { chatId: '972501234567@c.us', sender: '972501234567@c.us' },
     messageData: { typeMessage: 'textMessage', textMessageData: { textMessage: text } },
   };
+  if (timestamp !== undefined) payload.timestamp = timestamp;
+  return payload;
 }
 
 async function post(payload: unknown, token: string | null = TOKEN) {
@@ -59,6 +61,10 @@ beforeEach(async () => {
   resolvePendingChoice.mockReset().mockResolvedValue(null);
   handleGreenApiStateChange.mockReset().mockResolvedValue(undefined);
   process.env.GREENAPI_WEBHOOK_TOKEN = TOKEN;
+  // Reconnect-protection envs — must be off by default so unrelated tests
+  // exercise the normal path (fail-open freshness, no suppression).
+  delete process.env.GREENAPI_INBOUND_SUPPRESSED;
+  delete process.env.GREENAPI_MAX_INBOUND_AGE_SEC;
   app = Fastify();
   await app.register(greenapiWebhookRoutes);
   await app.ready();
@@ -218,5 +224,103 @@ describe('quotedMessage (swipe-reply) — preserves text + stanzaId as context.i
     const item = enqueueInbound.mock.calls[0][0] as { payload: Record<string, unknown> };
     expect((item.payload.text as { body: string }).body).toBe('30 דקות');
     expect((item.payload.context as { id: string }).id).toBe('ORIG2');
+  });
+});
+
+// ── Reconnect protection (2026-07-19 incident): after a long Green API socket
+//    outage the server dumps its 24h backlog. Without a freshness filter the
+//    router replies to every stale message and WhatsApp raises a yellowCard on
+//    the sender. GREENAPI_MAX_INBOUND_AGE_SEC (default 300) drops stale
+//    webhooks; GREENAPI_INBOUND_SUPPRESSED is the operator kill switch.
+describe('freshness cutoff (GREENAPI_MAX_INBOUND_AGE_SEC)', () => {
+  it('a 10s-old message is processed (well under the 300s default)', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const res = await post(textWebhook('FRESH1', 'שלום', now - 10));
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(enqueueInbound).toHaveBeenCalledTimes(1);
+    expect(processInbound).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 3600s-old message is dropped with 200 (never enqueued, never processed)', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const res = await post(textWebhook('STALE1', 'שלום', now - 3600));
+    await flush();
+    // MUST be 200 — a 4xx/5xx would make Green API keep the notification and retry.
+    expect(res.statusCode).toBe(200);
+    expect(enqueueInbound).not.toHaveBeenCalled();
+    expect(processInbound).not.toHaveBeenCalled();
+  });
+
+  it('missing timestamp → fail-open (message processed)', async () => {
+    const res = await post(textWebhook('NOTS1', 'שלום')); // no timestamp
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(enqueueInbound).toHaveBeenCalledTimes(1);
+    expect(processInbound).toHaveBeenCalledTimes(1);
+  });
+
+  it('GREENAPI_MAX_INBOUND_AGE_SEC overrides the 300s default', async () => {
+    process.env.GREENAPI_MAX_INBOUND_AGE_SEC = '60';
+    const now = Math.floor(Date.now() / 1000);
+    // 100s ago — would pass with default 300, blocked by override 60.
+    const res = await post(textWebhook('OVR1', 'שלום', now - 100));
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(enqueueInbound).not.toHaveBeenCalled();
+  });
+
+  it('drops before enqueue AND before number→command translation (no PendingChoice lookup)', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await post(textWebhook('STALE2', '2', now - 999));
+    await flush();
+    expect(resolvePendingChoice).not.toHaveBeenCalled();
+    expect(enqueueInbound).not.toHaveBeenCalled();
+  });
+});
+
+describe('inbound suppress (GREENAPI_INBOUND_SUPPRESSED)', () => {
+  it('=true → 200 with zero processing (no enqueue, no PendingChoice, no processInbound)', async () => {
+    process.env.GREENAPI_INBOUND_SUPPRESSED = 'true';
+    const now = Math.floor(Date.now() / 1000);
+    const res = await post(textWebhook('SUP1', 'שלום', now));
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(enqueueInbound).not.toHaveBeenCalled();
+    expect(processInbound).not.toHaveBeenCalled();
+    expect(resolvePendingChoice).not.toHaveBeenCalled();
+  });
+
+  it('=true also suppresses stateInstanceChanged handling', async () => {
+    process.env.GREENAPI_INBOUND_SUPPRESSED = 'true';
+    const res = await post({
+      typeWebhook: 'stateInstanceChanged',
+      stateInstance: 'notAuthorized',
+    });
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(handleGreenApiStateChange).not.toHaveBeenCalled();
+  });
+
+  it('=true precedes the freshness cutoff (a stale message returns 200 without evaluating age)', async () => {
+    process.env.GREENAPI_INBOUND_SUPPRESSED = 'true';
+    const now = Math.floor(Date.now() / 1000);
+    const res = await post(textWebhook('SUP2', 'שלום', now - 999999));
+    expect(res.statusCode).toBe(200);
+    expect(enqueueInbound).not.toHaveBeenCalled();
+  });
+
+  it('=true still requires a valid Bearer token (auth still returns 404)', async () => {
+    process.env.GREENAPI_INBOUND_SUPPRESSED = 'true';
+    const res = await post(textWebhook('SUP3', 'שלום'), 'wrong-token');
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('unset / "false" / anything != "true" → suppression OFF (normal processing)', async () => {
+    process.env.GREENAPI_INBOUND_SUPPRESSED = 'false';
+    const res = await post(textWebhook('SUP4', 'שלום'));
+    await flush();
+    expect(res.statusCode).toBe(200);
+    expect(enqueueInbound).toHaveBeenCalledTimes(1);
   });
 });

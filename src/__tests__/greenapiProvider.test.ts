@@ -29,6 +29,13 @@ vi.mock('../services/pendingChoice', () => ({
 const poolQuery = vi.fn().mockResolvedValue({ rows: [], rowCount: 0 });
 vi.mock('../db/connection', () => ({ pool: { query: (...a: unknown[]) => poolQuery(...a) } }));
 
+// Mock the outbound preflight — these tests exercise transport-layer behavior
+// (URL building, retries, DLQ) and should not do real health calls to Green API.
+// A dedicated test file (greenapiPreflight.test.ts) covers the preflight itself.
+vi.mock('../services/greenapiPreflight', () => ({
+  checkOutboundHealth: vi.fn().mockResolvedValue({ allow: true, reason: 'test', source: 'cache' }),
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let lastOpts: any = null;
 let lastBody = '';
