@@ -937,6 +937,13 @@ async function continueConversation(
     await handleReassignPickWorkerReply(user, trimmed, ctx);
     return;
   }
+  // UX-T1: single-shot reassign confirmation (reached when the user named the
+  // target worker in one message). A numeric "1"/"2" reaches here directly (it's
+  // a NUMERIC_PICKER_AWAITING state, so the smart-escape hatch is skipped).
+  if (ctx.awaiting === 'reassign_confirm') {
+    await handleReassignConfirmReply(user, trimmed, ctx);
+    return;
+  }
 
   // PROV-T9 (TASKS §4.20): manager asked to enable OwnTracks tracking without
   // naming the worker; this reply is the worker name.
@@ -1272,7 +1279,11 @@ async function executeIntent(
         ? intent.params.durationMinutes : null;
       const specialInstr = typeof intent.params?.specialInstructions === 'string'
         ? intent.params.specialInstructions.trim() : null;
-      await startScheduleTaskFieldFlow(user, startAt, duration, specialInstr);
+      // UX-T1 single-shot: a customer/task hint in the same message
+      // ("לתזמן ביקור מחר ב-10 ללקוח לוי") rides in task_reference.
+      const scheduleCustomerRef = typeof intent.task_reference === 'string'
+        ? intent.task_reference : null;
+      await startScheduleTaskFieldFlow(user, startAt, duration, specialInstr, scheduleCustomerRef);
       return;
     }
 
@@ -4836,6 +4847,50 @@ async function showWorkerListForReassign(
     await sendTextMessage({ to: user.phone, text: 'לא נמצאו עובדים פעילים.' });
     return;
   }
+
+  // UX-T1 single-shot: if the user named the target worker in the same message
+  // ("להעביר לאורי את הבדיקה של כהן"), resolve it and jump straight to a single
+  // confirmation instead of showing the full numbered worker list. A destructive
+  // write (reassignTask resets inspection rows) always goes through a confirm on
+  // this free-text path, since the user never saw the candidate list.
+  const newWorkerName = typeof intent.params?.newWorkerName === 'string'
+    ? intent.params.newWorkerName.trim() : '';
+  if (newWorkerName) {
+    let resolvedId: string | null = null;
+    let resolvedName = '';
+    const selfId = resolveSelfReference(newWorkerName, user);
+    if (selfId && workers.some((w) => w.id === selfId)) {
+      resolvedId = selfId;
+      resolvedName = workers.find((w) => w.id === selfId)?.name ?? '';
+    } else {
+      const match = resolveWorkerName(newWorkerName, workers);
+      if (match.status === 'unique') { resolvedId = match.id; resolvedName = match.name; }
+    }
+    if (resolvedId) {
+      await setContext(user.phone, {
+        awaiting: 'reassign_confirm',
+        intent,
+        candidateTaskIds: [taskId],
+        candidateUserIds: [resolvedId],
+      });
+      const body = `לשייך מחדש את המשימה ל-${resolvedName}?`;
+      try {
+        await sendButtonMessage({
+          to: user.phone,
+          body,
+          buttons: [
+            { id: 'CONFIRM_YES_REASSIGN', title: 'אישור' },
+            { id: 'CONFIRM_NO_REASSIGN',  title: 'ביטול' },
+          ],
+        });
+      } catch (err) {
+        log.warn({ err }, 'sendButtonMessage failed for reassign confirm — falling back to text');
+        await sendTextMessage({ to: user.phone, text: `${body}\n1. אישור\n2. ביטול` });
+      }
+      return;
+    }
+  }
+
   const lines = workers.map((w, i) => `${i + 1}. ${w.name}`);
   await setContext(user.phone, {
     awaiting: 'reassign_pick_worker',
@@ -4844,6 +4899,45 @@ async function showWorkerListForReassign(
     candidateUserIds: workers.map((w) => w.id),
   });
   await sendTextMessage({ to: user.phone, text: `למי לשייך את המשימה?\n${lines.join('\n')}\nהשב במספר.` });
+}
+
+/** State: reassign_confirm — single-shot reassign confirmation (UX-T1). The
+ *  numbered-pick reassign flow writes on pick with no confirm, but the free-text
+ *  single-shot path never showed the worker list, so it confirms first. */
+async function handleReassignConfirmReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  if (!user.isElevated) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין הרשאה — רק מנהל יכול לשייך מחדש.' });
+    return;
+  }
+  const taskId = ctx.candidateTaskIds?.[0];
+  const newOwnerId = ctx.candidateUserIds?.[0];
+  if (!taskId || !newOwnerId) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'שגיאה פנימית. נסה שוב.' });
+    return;
+  }
+  const isYes = trimmed === '1' || /^CONFIRM_YES_REASSIGN/i.test(trimmed) || YES_RE.test(trimmed);
+  const isNo  = trimmed === '2' || /^CONFIRM_NO_REASSIGN/i.test(trimmed)  || NO_RE.test(trimmed);
+  if (isNo) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    return;
+  }
+  if (!isYes) {
+    await sendTextMessage({ to: user.phone, text: 'השב 1 לאישור או 2 לביטול.' });
+    return;
+  }
+  const result = await reassignTask(taskId, newOwnerId, user.id);
+  await clearContext(user.phone);
+  let msg = `המשימה שויכה מחדש. ${result.resetCount} שורות בדיקה אופסו.`;
+  if (result.hadInProgressRows) msg += ' (שורות שכבר בביצוע לא שונו.)';
+  await sendTextMessage({ to: user.phone, text: msg });
+  await auditEvent(user, 'reassign_task', taskId, 'SUCCESS');
 }
 
 async function handleReassignPickWorkerReply(
@@ -5214,6 +5308,7 @@ async function startScheduleTaskFieldFlow(
   prefilledStartAt: string | null,
   prefilledDuration: number | null,
   prefilledSpecialInstructions: string | null,
+  customerRef: string | null = null,
 ): Promise<void> {
   const rawTasks = canScheduleAnyTask(user)
     ? await findOpenTasksForAdmin(10)
@@ -5245,6 +5340,29 @@ async function startScheduleTaskFieldFlow(
     navigationUrl: t.navigationUrl,
     productName: t.productName,
   }));
+
+  // UX-T1 single-shot: if the user named a customer/task in the same message
+  // ("לתזמן ביקור מחר ב-10 ללקוח לוי"), auto-select it when it resolves to
+  // exactly one open task and advance straight to the time/confirm step —
+  // no list-pick needed. Falls through to the numbered list on none/ambiguous.
+  if (customerRef && customerRef.trim()) {
+    const named = taskCandidates.map((t) => ({ id: t.id, name: t.customerName ?? t.title }));
+    const match = resolveWorkerName(customerRef.trim(), named);
+    if (match.status === 'unique') {
+      const chosen = taskCandidates.find((t) => t.id === match.id);
+      if (chosen) {
+        const effectiveCtx: ConversationState = {
+          awaiting: 'schedule_intake_pick_task',
+          scheduleTaskCandidates: taskCandidates,
+          scheduleStartAt: prefilledStartAt ?? undefined,
+          scheduleDurationMinutes: prefilledDuration ?? undefined,
+          scheduleSpecialInstructions: prefilledSpecialInstructions ?? undefined,
+        };
+        await scheduleProcessChosenTask(user, effectiveCtx, chosen);
+        return;
+      }
+    }
+  }
 
   const list = renderTaskCandidateList(taskCandidates);
   await setContext(user.phone, {

@@ -1086,3 +1086,86 @@ describe('D5-T19l — mid-flow pivot from task-hint ENTRY states', () => {
     expect(resolveOpenTaskFieldByHint).toHaveBeenCalledWith('u-worker', 'מזרחי דוד כתובת חדשה');
   });
 });
+
+// ── UX-T1 single-shot: naming the target worker in the same message
+// ("להעביר לאורי את הבדיקה של כהן") resolves it and jumps straight to ONE
+// confirmation instead of the numbered worker list. The destructive write goes
+// through a confirm on this free-text path (user never saw the list). ──────────
+describe('UX-T1 single-shot — reassign start flow auto-resolves the named worker', () => {
+  it('naming the worker jumps to a confirmation (no worker list, no write yet)', async () => {
+    resolveTask.mockResolvedValueOnce({ match: { id: 'task-1', title: 'ביקור כהן' }, ambiguous: false, candidates: [] });
+    findUsersByName.mockResolvedValueOnce([
+      { id: 'w-1', name: 'דני' },
+      { id: 'w-2', name: 'אורי' },
+    ]);
+
+    await driveIntent(makeManager(), {
+      intent: 'reassign_task', confidence: 1, task_reference: 'כהן',
+      field: null, new_value: null, params: { newWorkerName: 'אורי' }, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: true,
+      transition: null, problem_type: null,
+    });
+
+    expect(ctxStore?.awaiting).toBe('reassign_confirm');
+    expect(ctxStore?.candidateTaskIds).toEqual(['task-1']);
+    expect(ctxStore?.candidateUserIds).toEqual(['w-2']);
+    expect(reassignTask).not.toHaveBeenCalled();
+    const shown = [...sendTextMessage.mock.calls, ...sendButtonMessage.mock.calls]
+      .map((c) => (c[0].text ?? c[0].body) as string);
+    expect(shown.some((t) => t.includes('אורי'))).toBe(true);
+    // The numbered "pick a worker" list is NOT shown.
+    expect(shown.some((t) => t.includes('למי לשייך'))).toBe(false);
+  });
+
+  it('falls back to the numbered worker list when the named worker is not on the list', async () => {
+    resolveTask.mockResolvedValueOnce({ match: { id: 'task-1', title: 'ביקור כהן' }, ambiguous: false, candidates: [] });
+    findUsersByName.mockResolvedValueOnce([
+      { id: 'w-1', name: 'דני' },
+      { id: 'w-2', name: 'אורי' },
+    ]);
+
+    await driveIntent(makeManager(), {
+      intent: 'reassign_task', confidence: 1, task_reference: 'כהן',
+      field: null, new_value: null, params: { newWorkerName: 'רותי' }, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: true,
+      transition: null, problem_type: null,
+    });
+
+    expect(ctxStore?.awaiting).toBe('reassign_pick_worker');
+    expect(reassignTask).not.toHaveBeenCalled();
+    expect(sendTextMessage.mock.calls.map((c) => c[0].text).join('\n')).toContain('למי לשייך');
+  });
+
+  it('reassign_confirm "1" performs the write', async () => {
+    reassignTask.mockResolvedValueOnce({ resetCount: 2, hadInProgressRows: false });
+    ctxStore = { awaiting: 'reassign_confirm', candidateTaskIds: ['task-1'], candidateUserIds: ['w-2'] };
+    sendTextMessage.mockClear(); sendButtonMessage.mockClear();
+
+    await sendMessage(makeManager(), '1');
+
+    expect(reassignTask).toHaveBeenCalledWith('task-1', 'w-2', 'u-manager');
+    expect(ctxStore).toBeNull();
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('שויכה מחדש');
+  });
+
+  it('reassign_confirm "2" cancels without writing', async () => {
+    ctxStore = { awaiting: 'reassign_confirm', candidateTaskIds: ['task-1'], candidateUserIds: ['w-2'] };
+    sendTextMessage.mockClear();
+
+    await sendMessage(makeManager(), '2');
+
+    expect(reassignTask).not.toHaveBeenCalled();
+    expect(ctxStore).toBeNull();
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('בוטל');
+  });
+
+  it('reassign_confirm rejects a non-elevated user', async () => {
+    ctxStore = { awaiting: 'reassign_confirm', candidateTaskIds: ['task-1'], candidateUserIds: ['w-2'] };
+    sendTextMessage.mockClear();
+
+    await sendMessage(makeWorker(), '1');
+
+    expect(reassignTask).not.toHaveBeenCalled();
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('אין הרשאה');
+  });
+});

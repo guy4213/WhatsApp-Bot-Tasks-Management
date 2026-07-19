@@ -1033,3 +1033,47 @@ describe('UX-T1 — smart picker escape (mergeSchedule)', () => {
     expect(texts.some((t) => t.includes('לצאת'))).toBe(true);
   });
 });
+
+// ── UX-T1 single-shot: naming a customer in the same message auto-selects the
+// unique open task and skips the numbered task-pick step (fresh-message path,
+// startScheduleTaskFieldFlow). ────────────────────────────────────────────────
+describe('UX-T1 single-shot — schedule start flow auto-selects a named customer', () => {
+  it('a customer named in the same message auto-selects the unique task and skips the list', async () => {
+    const user = makeManager();
+    const taskLevi = { ...SAMPLE_TASK_WORKER, id: 'task-levi', customerName: 'לוי בע"מ' };
+    // Two open tasks; only one matches "לוי" → unambiguous auto-select.
+    findOpenTasksForAdmin.mockResolvedValueOnce([SAMPLE_TASK_WORKER, taskLevi]);
+    parseIntent.mockResolvedValueOnce(defaultScheduleIntent({
+      task_reference: 'לוי',
+      params: { scheduledStartAt: '2026-07-20T10:00:00+03:00' },
+    }));
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'לתזמן ביקור מחר ב-10 ללוי');
+
+    // Advanced past the task-pick step — the numbered list was NOT shown.
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('המשימות הפתוחות'))).toBe(false);
+    expect(ctxStore?.awaiting).not.toBe('schedule_intake_pick_task');
+    expect(['schedule_await_time', 'schedule_await_duration', 'schedule_confirm'])
+      .toContain(ctxStore?.awaiting);
+    expect(scheduleTaskField).not.toHaveBeenCalled(); // not yet confirmed
+  });
+
+  it('falls back to the numbered list when the named customer is ambiguous', async () => {
+    const user = makeManager();
+    // Both tasks are "כהן בע\"מ" → ambiguous → no auto-select, show the list.
+    findOpenTasksForAdmin.mockResolvedValueOnce([
+      SAMPLE_TASK_WORKER,
+      { ...SAMPLE_TASK_WORKER, id: 'task-2' },
+    ]);
+    parseIntent.mockResolvedValueOnce(defaultScheduleIntent({ task_reference: 'כהן' }));
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'לתזמן ביקור לכהן');
+
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('המשימות הפתוחות'))).toBe(true);
+    expect(ctxStore?.awaiting).toBe('schedule_intake_pick_task');
+  });
+});
