@@ -15,9 +15,13 @@
  *   using two Green API endpoints:
  *     - getStateInstance   → authorized | notAuthorized | yellowCard | ...
  *     - getStatusInstance  → online | offline (socket state)
- *   Both must be good to allow. `stateInstance=authorized` + `statusInstance=offline`
- *   is a REAL failure mode (observed 2026-07-19): WhatsApp treats the account as
- *   OK, but the phone-side socket is down and nothing actually delivers.
+ *
+ *   Block ONLY on states that genuinely prevent delivery — see `decide()` for
+ *   the exact list. `yellowCard` is a WhatsApp SOFT warning ("slow down or
+ *   risk a ban"); messages STILL deliver during yellowCard, so we do NOT
+ *   block on it — the right lever is `delaySendMessagesMilliseconds` in the
+ *   console, not silencing the bot for ~24h. The 2026-07-19 incident was
+ *   caused by `statusInstance=offline`, which we DO block.
  *
  * Fail-open policy (deliberate):
  *   - The check itself failed (network / timeout / non-2xx / missing creds)
@@ -102,19 +106,47 @@ export async function checkOutboundHealth(): Promise<PreflightDecision> {
 }
 
 function decide(snap: HealthSnapshot, source: 'cache' | 'live'): PreflightDecision {
-  // stateInstance is the WhatsApp-account signal (yellowCard / notAuthorized
-  // / blocked / sleepMode / starting all mean "will not deliver").
-  if (snap.stateInstance !== 'authorized') {
+  // Two DIFFERENT classes of "not authorized":
+  //
+  //   HARD BLOCKERS (sends genuinely cannot deliver):
+  //     notAuthorized   — QR expired / logged out. Message enters queue but
+  //                       never leaves.
+  //     blocked         — WhatsApp banned the account. Never delivers.
+  //     sleepMode       — Instance is stopped. Not just paused — stopped.
+  //     statusInstance=offline — Phone-side socket detached from Green API.
+  //                       Green API's 24h queue accepts but the phone won't
+  //                       deliver until it reconnects. THIS was the actual
+  //                       2026-07-19 failure mode (state=authorized + socket
+  //                       down).
+  //
+  //   SOFT WARNINGS (sends WORK, just at risk):
+  //     yellowCard      — WhatsApp pre-ban warning. Messages ARE delivered.
+  //                       Blocking here would silence the bot for ~24h for a
+  //                       warning that only asks for reduced volume — the
+  //                       right lever is `delaySendMessagesMilliseconds` in
+  //                       the Green API console, not stopping outbound. Ops
+  //                       is already alerted via handleGreenApiStateChange.
+  //     starting        — Transient bootup, will resolve in seconds.
+  //     unknown         — Never seen state string; fail-open rather than
+  //                       silence on a Green API schema change.
+  //
+  // Rationale: the 19/07 incident happened because status=offline was
+  // silently accepting sends into a dead queue, NOT because yellowCard was
+  // ignored. Blocking on yellowCard adds no protection against escalation to
+  // `blocked` — volume management does. Blocking on yellowCard DOES prevent
+  // in-window customer replies and daily digests during the warning window.
+  const FATAL_STATES = new Set<StateInstance>(['notAuthorized', 'blocked', 'sleepMode']);
+  if (FATAL_STATES.has(snap.stateInstance)) {
     return { allow: false, reason: `stateInstance=${snap.stateInstance}`, source };
   }
-  // statusInstance is the SOCKET signal (phone ↔ Green API). state=authorized
-  // + status=offline was the actual 2026-07-19 failure mode: WhatsApp sees the
-  // number as fine, but the phone-side socket dropped and Green API silently
-  // queues everything.
-  if (snap.statusInstance !== 'online') {
-    return { allow: false, reason: `statusInstance=${snap.statusInstance}`, source };
+  if (snap.statusInstance === 'offline') {
+    return { allow: false, reason: `statusInstance=offline`, source };
   }
-  return { allow: true, reason: 'authorized + online', source };
+  return {
+    allow: true,
+    reason: `${snap.stateInstance} + ${snap.statusInstance}`,
+    source,
+  };
 }
 
 async function fetchLive(timeoutMs: number): Promise<HealthSnapshot> {
