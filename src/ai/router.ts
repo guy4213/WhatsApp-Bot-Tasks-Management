@@ -20,6 +20,10 @@ import {
   setActiveInspection, getActiveInspection,
   type ConversationState, type AwaitingKind,
 } from '../services/conversationContext';
+// UX-T1: smart picker escape (Wave 2 router wiring — see router.ts §"Smart
+// Picker Escape" below).
+import { classifySmartPickerEscape, FLOW_INTENT_BY_STATE } from './smartPickerEscape';
+import { resolveSelfReference, resolveWorkerName, resolveLeadReference } from './nameResolvers';
 import { parseTravelMinutes } from './travelEta';
 import { resolveQuotedContext, recordTaskFieldRef, type QuotedContext } from '../services/messageRefs';
 import {
@@ -717,18 +721,32 @@ async function continueConversation(
     return;
   }
 
+  // UX-T1: mid-flow pivot yes/no confirmation. `pivot_confirm` is NOT in
+  // NUMERIC_PICKER_AWAITING (its "1"/"2" reply is handled explicitly here),
+  // so it must be dispatched before the escape hatch below.
+  if (ctx.awaiting === 'pivot_confirm') {
+    await handlePivotConfirmReply(user, trimmed, ctx);
+    return;
+  }
+
   // ── Free-text escape hatch (v2 UX contract) ─────────────────────────────
   // If we're in a numeric-picker awaiting state (see NUMERIC_PICKER_AWAITING)
   // and the user typed free-text — a question, a command, a description —
-  // rather than a number or nav word, clear the context and re-enter the
-  // fresh-message path so the AI parser can try to understand it. This is
-  // what makes free text + voice work "at any time", including while a
-  // manager is viewing a specific inspection's detail card.
+  // rather than a number or nav word, try the UX-T1 "smart picker escape"
+  // first: classify the reply against the intent that owns the current flow
+  // and either merge it into the in-progress selection, ask to confirm a
+  // pivot to a different flow, or redisplay a short hint — all without
+  // wiping the partial selection. Only when that classifier can't make a
+  // call (no AI provider / parse failure — `passthrough`) do we fall back to
+  // the old defensive net: clear the context and re-enter the fresh-message
+  // path so the AI parser can try to understand it from scratch.
   if (
     NUMERIC_PICKER_AWAITING.has(ctx.awaiting) &&
     !looksLikeNumericPickerInput(trimmed)
   ) {
-    await clearContext(user.phone);
+    const consumed = await trySmartPickerEscape(user, text, ctx);
+    if (consumed) return;
+    await clearContext(user.phone);   // defensive legacy net (parse failed / no provider)
     await handleAIMessage(user, text);
     return;
   }
@@ -3603,12 +3621,19 @@ async function tryPrePopulateAssignLead(
     : [];
   if (leadRef && matchingLeads.length !== 1) return false;
 
-  // Match worker by substring on name.
+  // Match worker: self-reference ("אלי"/"לי"/"אותי"/"עצמי"/"לעצמי") is checked
+  // FIRST (UX-T1) so "לשייך את הליד של X אלי" resolves to the speaker without
+  // requiring the speaker's own name to appear in the sentence; otherwise fall
+  // back to the existing substring match on name.
   const candidates = await findActiveInspectors();
+  const selfWorkerId = resolveSelfReference(assigneeName, user);
+  const selfCandidate = selfWorkerId ? candidates.find((c) => c.id === selfWorkerId) ?? null : null;
   const assigneeLower = assigneeName.toLowerCase();
-  const matchingWorkers = assigneeName
-    ? candidates.filter((c) => c.name.toLowerCase().includes(assigneeLower))
-    : [];
+  const matchingWorkers = selfCandidate
+    ? [selfCandidate]
+    : assigneeName
+      ? candidates.filter((c) => c.name.toLowerCase().includes(assigneeLower))
+      : [];
   if (assigneeName && matchingWorkers.length !== 1) return false;
 
   // Both hints must resolve to exactly one row for a straight-to-confirm jump.
@@ -3700,6 +3725,36 @@ async function handleAssignLeadPickLeadReply(
 
   const leadId = ids[idx - 1];
   const leadName = names[idx - 1] ?? '—';
+
+  // UX-T1: a worker may already be pinned via the smart-picker merge
+  // (mergeAssignLead) when the user free-texted a worker name while still
+  // choosing a lead. Skip the worker-pick step and jump straight to confirm.
+  if (ctx.assignLeadSelectedWorkerId) {
+    const workerId = ctx.assignLeadSelectedWorkerId;
+    const workerName = ctx.assignLeadSelectedWorkerName ?? '—';
+    await setContext(user.phone, {
+      awaiting: 'assign_lead_confirm',
+      assignLeadSelectedLeadId: leadId,
+      assignLeadSelectedLeadName: leadName,
+      assignLeadSelectedWorkerId: workerId,
+      assignLeadSelectedWorkerName: workerName,
+    });
+    const assignConfirmBody = `לשייך את הליד של ${leadName} ל-${workerName}?`;
+    try {
+      await sendButtonMessage({
+        to: user.phone,
+        body: assignConfirmBody,
+        buttons: [
+          { id: 'CONFIRM_YES_ASSIGN_LEAD', title: 'אישור' },
+          { id: 'CONFIRM_NO_ASSIGN_LEAD',  title: 'ביטול' },
+        ],
+      });
+    } catch (err) {
+      log.warn({ err }, 'sendButtonMessage failed for assign_lead confirm — falling back to text');
+      await sendTextMessage({ to: user.phone, text: `${assignConfirmBody}\n1. אישור\n2. ביטול` });
+    }
+    return;
+  }
 
   // Fetch inspectors then AI suggestion (suggestion needs the candidate list).
   const candidates = await findActiveInspectors();
@@ -3834,6 +3889,310 @@ async function handleAssignLeadConfirmReply(
     to: user.phone,
     text: `הליד שויך ל-${workerName} ✓. הוא יקבל התראה תוך כמה דקות.`,
   });
+}
+
+// ── UX-T1: Smart Picker Escape (Wave 2 router wiring) ────────────────────────
+//
+// Replaces the old "clearContext + handleAIMessage" escape hatch for numeric
+// picker states (see NUMERIC_PICKER_AWAITING) with a context-preserving flow:
+// classify the free-text reply via `classifySmartPickerEscape`
+// (smartPickerEscape.ts) and either merge it into the in-progress flow, ask
+// to confirm a pivot to a different flow, re-prompt on low-confidence noise,
+// or fall through to the legacy net.
+//
+// Agent D (this wave) builds the scaffolding + the assign_lead merge handler.
+// Agents E/F (same wave, serial after D) ONLY add cases to
+// `mergeIntoCurrentFlow` and entries to `FLOW_LABELS` for their own flows
+// (schedule/reassign/correct, then manager list flows) — the assign_lead
+// case/handler here is not theirs to touch.
+
+/** Bound parseIntent used ONLY for classifying a picker-state escape. Returns
+ *  null (→ passthrough/redisplay) on any failure so a broken parse never
+ *  throws out of the router. */
+async function boundParseIntentForEscape(user: ResolvedUser, text: string): Promise<AIIntentResult | null> {
+  if (!getProvider()) return null;
+  try {
+    const [allowedTypes, allowedPriorities, history] = await Promise.all([
+      getAllowedTaskTypes(), safePriorities(), getHistory(user.phone),
+    ]);
+    return await parseIntent(text, { user, allowedTypes, allowedPriorities, history });
+  } catch {
+    return null;
+  }
+}
+
+const SMART_ESCAPE_REDISPLAY_HINT =
+  'לא הבנתי אם זו בחירה מהרשימה או בקשה חדשה. אפשר להשיב במספר מהרשימה שלמעלה, לנסח מחדש, או "ביטול".';
+
+/** Hebrew labels for the pivot-confirm prompt ("אתה באמצע X. לצאת ולעבור ל-Y?"). */
+const FLOW_LABELS: Record<string, string> = {
+  assign_lead: 'שיוך ליד',
+  schedule_task_field: 'תזמון ביקור',
+  reassign_task: 'שיוך משימה מחדש',
+  correct_task_field_site: 'תיקון פרטי אתר',
+  correct_inspection_type: 'תיקון סוג בדיקה',
+  list_today_field_inspections: 'בדיקות שטח להיום',
+  list_my_inspections: 'הבדיקות שלי',
+  list_open_exceptions: 'חריגים ודיווחים',
+  list_pending_leads: 'לידים ממתינים',
+  workers_day_overview: 'עובדים וסיכומי יום',
+  search_task: 'חיפוש',
+};
+
+/**
+ * Called from the NUMERIC_PICKER_AWAITING escape hatch when the user's reply
+ * doesn't look like a number/nav word. Returns true when the reply was fully
+ * handled (merge / pivot-prompt / redisplay-hint) — false means "passthrough"
+ * and the caller runs its own legacy net (clearContext + handleAIMessage).
+ */
+async function trySmartPickerEscape(user: ResolvedUser, text: string, ctx: ConversationState): Promise<boolean> {
+  const decision = await classifySmartPickerEscape(text, ctx, {
+    parseIntent: (t) => boundParseIntentForEscape(user, t),
+    confHigh: CONF_HIGH,
+  });
+  switch (decision.kind) {
+    case 'passthrough':
+      return false;                                                 // caller runs legacy net
+    case 'redisplay':
+      await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+      return true;                                                  // keep state as-is
+    case 'pivot':
+      await promptPivotConfirm(user, ctx, decision.intent);
+      return true;
+    case 'merge':
+      return await mergeIntoCurrentFlow(user, text, ctx, decision.intent);
+  }
+}
+
+// Dispatch by the flow that owns the current picker (== decision.intent.intent).
+// D implements assign_lead. E adds schedule/reassign/correct. F adds mgr_*.
+// Any flow without a merge handler returns false → caller's legacy net fires.
+async function mergeIntoCurrentFlow(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  intent: AIIntentResult,
+): Promise<boolean> {
+  switch (intent.intent) {
+    case 'assign_lead':
+      return await mergeAssignLead(user, text, ctx, intent);
+    default:
+      return false;
+  }
+}
+
+async function promptPivotConfirm(user: ResolvedUser, ctx: ConversationState, pendingIntent: AIIntentResult): Promise<void> {
+  const fromKey = FLOW_INTENT_BY_STATE[ctx.awaiting] ?? '';
+  const fromLabel = FLOW_LABELS[fromKey] ?? 'הפעולה הנוכחית';
+  const toLabel = FLOW_LABELS[pendingIntent.intent] ?? 'הפעולה החדשה';
+  await setContext(user.phone, { ...ctx, awaiting: 'pivot_confirm', pendingIntent, pivotPrevAwaiting: ctx.awaiting });
+  await sendTextMessage({ to: user.phone, text: `אתה באמצע ${fromLabel}. לצאת ולעבור ל${toLabel}?\n1. כן\n2. לא` });
+}
+
+async function handlePivotConfirmReply(user: ResolvedUser, trimmed: string, ctx: ConversationState): Promise<void> {
+  const pending = ctx.pendingIntent;
+  const isYes = trimmed === '1' || YES_RE.test(trimmed);
+  const isNo  = trimmed === '2' || NO_RE.test(trimmed);
+  if (isYes && pending) {
+    await clearContext(user.phone);
+    await appendTurn(user.phone, 'user', trimmed);
+    await routeIntent(user, pending, '');
+    return;
+  }
+  if (isNo || !pending) {
+    const prev = ctx.pivotPrevAwaiting;
+    if (prev) {
+      const restored: ConversationState = { ...ctx, awaiting: prev };
+      delete restored.pendingIntent;
+      delete restored.pivotPrevAwaiting;
+      await setContext(user.phone, restored);
+      await sendTextMessage({ to: user.phone, text: 'בסדר, נמשיך. השב במספר מהרשימה (או "ביטול").' });
+    } else {
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'בוטל.' });
+    }
+    return;
+  }
+  await sendTextMessage({ to: user.phone, text: 'השב 1 כדי לעבור, או 2 כדי להישאר.' });
+}
+
+/**
+ * Merge handler for the assign_lead flow — the reference implementation the
+ * Wave-2 merge handlers (E/F) mirror. Extracts whatever the LLM pulled out of
+ * the free text (`leadRef` / `assigneeName`), resolves it against on-screen
+ * candidates (falling back to the wider pool only when nothing was shown
+ * yet), keeps anything already resolved in `ctx`, and advances to the
+ * furthest state that is now resolvable — never wiping a selection the user
+ * already made.
+ */
+async function mergeAssignLead(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  intent: AIIntentResult,
+): Promise<boolean> {
+  if (!canAssignLeads(user)) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: AUTH_REJECT_MSG });
+    return true;
+  }
+
+  const leadRef = typeof intent.params?.leadRef === 'string' ? intent.params.leadRef.trim() : '';
+  const assigneeName = typeof intent.params?.assigneeName === 'string' ? intent.params.assigneeName.trim() : '';
+
+  // ── Resolve worker: self-reference → active-inspector validation → name
+  // fragment match. Anything already chosen in ctx is kept as-is.
+  let workerId = ctx.assignLeadSelectedWorkerId ?? null;
+  let workerName = ctx.assignLeadSelectedWorkerName ?? null;
+  if (!workerId) {
+    const selfId = resolveSelfReference(assigneeName || text, user);
+    if (selfId) {
+      const inspectors = await findActiveInspectors();
+      const self = inspectors.find((c) => c.id === selfId);
+      if (self) {
+        workerId = self.id;
+        workerName = self.name;
+      }
+    } else if (assigneeName) {
+      const inspectors = await findActiveInspectors();
+      const match = resolveWorkerName(assigneeName, inspectors);
+      if (match.status === 'unique') {
+        workerId = match.id;
+        workerName = match.name;
+      }
+    }
+  }
+
+  // ── Resolve lead: on-screen candidates first, else the wider unassigned
+  // pool. Anything already chosen in ctx is kept as-is.
+  let leadId = ctx.assignLeadSelectedLeadId ?? null;
+  let leadName = ctx.assignLeadSelectedLeadName ?? null;
+  if (!leadId && leadRef) {
+    const onScreenIds = ctx.assignLeadCandidateIds ?? [];
+    let candidates: { id: string; name: string; subject?: string | null }[];
+    if (onScreenIds.length > 0) {
+      const names = ctx.assignLeadCandidateNames ?? [];
+      candidates = onScreenIds.map((id, i) => ({ id, name: names[i] ?? '—' }));
+    } else {
+      const leads = await findUnassignedLeadsForAssignment(50);
+      candidates = leads.map((l) => ({ id: l.id, name: l.fromName ?? '—', subject: l.subject ?? null }));
+    }
+    const match = resolveLeadReference(leadRef, candidates);
+    if (match.status === 'unique') {
+      leadId = match.id;
+      leadName = match.name;
+    }
+  }
+
+  // ── Both resolved → jump straight to confirm (reuse the existing wording).
+  if (leadId && workerId) {
+    await setContext(user.phone, {
+      awaiting: 'assign_lead_confirm',
+      assignLeadSelectedLeadId: leadId,
+      assignLeadSelectedLeadName: leadName ?? '—',
+      assignLeadSelectedWorkerId: workerId,
+      assignLeadSelectedWorkerName: workerName ?? '—',
+    });
+    const assignConfirmBody = `לשייך את הליד של ${leadName ?? '—'} ל-${workerName ?? '—'}?`;
+    try {
+      await sendButtonMessage({
+        to: user.phone,
+        body: assignConfirmBody,
+        buttons: [
+          { id: 'CONFIRM_YES_ASSIGN_LEAD', title: 'אישור' },
+          { id: 'CONFIRM_NO_ASSIGN_LEAD',  title: 'ביטול' },
+        ],
+      });
+    } catch (err) {
+      log.warn({ err }, 'sendButtonMessage failed for assign_lead merge confirm — falling back to text');
+      await sendTextMessage({ to: user.phone, text: `${assignConfirmBody}\n1. אישור\n2. ביטול` });
+    }
+    return true;
+  }
+
+  // ── Lead only → replicate handleAssignLeadPickLeadReply's "lead chosen"
+  // branch: fetch inspectors + AI suggestion, show the numbered worker list.
+  if (leadId && !workerId) {
+    const candidates = await findActiveInspectors();
+    if (candidates.length === 0) {
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'לא נמצאו עובדים פעילים לשיוך.' });
+      return true;
+    }
+    const suggestion = await suggestWorkerForLead({ customerName: leadName ?? '—' }, candidates);
+    const suggestedCandidate = suggestion.userId
+      ? candidates.find((c) => c.id === suggestion.userId) ?? null
+      : null;
+    const lines = candidates.map((c, i) => `${i + 1}. ${c.name} (${c.role})`);
+    const suggestionLine = suggestedCandidate
+      ? `הצעת AI: ${suggestedCandidate.name} (${suggestedCandidate.role}) — ${suggestion.reason}.\n`
+      : '';
+    await setContext(user.phone, {
+      awaiting: 'assign_lead_pick_worker',
+      assignLeadSelectedLeadId: leadId,
+      assignLeadSelectedLeadName: leadName ?? '—',
+      assignLeadWorkerIds: candidates.map((c) => c.id),
+      assignLeadWorkerNames: candidates.map((c) => c.name),
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: `${suggestionLine}בחר עובד לשיוך הליד של ${leadName ?? '—'}:\n${lines.join('\n')}\n\nהשב במספר (או "ביטול").`,
+    });
+    return true;
+  }
+
+  // ── Worker only → keep the lead picker open, but remember the worker so
+  // handleAssignLeadPickLeadReply can jump straight to confirm once a lead
+  // number comes in.
+  if (workerId && !leadId) {
+    const candidateIds = ctx.assignLeadCandidateIds ?? [];
+    if (candidateIds.length > 0) {
+      await setContext(user.phone, {
+        ...ctx,
+        awaiting: 'assign_lead_pick_lead',
+        assignLeadSelectedWorkerId: workerId,
+        assignLeadSelectedWorkerName: workerName ?? '—',
+      });
+      await sendTextMessage({
+        to: user.phone,
+        text: `בחר ליד מהרשימה ואשייך אותו ל-${workerName ?? '—'}.`,
+      });
+      return true;
+    }
+    // No on-screen lead list to reuse (defensive — shouldn't normally happen
+    // from these states) — start the lead list fresh with the worker pinned.
+    const leads = await findUnassignedLeadsForAssignment(20);
+    if (leads.length === 0) {
+      await clearContext(user.phone);
+      await sendTextMessage({ to: user.phone, text: 'אין כרגע לידים לא משויכים.' });
+      return true;
+    }
+    const lines = leads.map((l, i) => {
+      const rowData: LeadListRowData = {
+        fromName: l.fromName ?? null,
+        fromEmail: l.fromEmail ?? null,
+        subject: l.subject ?? null,
+        receivedAt: l.receivedAt ?? null,
+      };
+      return `${i + 1}. ${formatLeadListRow(rowData)}`;
+    });
+    await setContext(user.phone, {
+      awaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: leads.map((l) => l.id),
+      assignLeadCandidateNames: leads.map((l) => l.fromName ?? '—'),
+      assignLeadSelectedWorkerId: workerId,
+      assignLeadSelectedWorkerName: workerName ?? '—',
+    });
+    await sendTextMessage({
+      to: user.phone,
+      text: `בחר ליד מהרשימה ואשייך אותו ל-${workerName ?? '—'}:\n\n${lines.join('\n\n')}\n\nהשב במספר.`,
+    });
+    return true;
+  }
+
+  // ── Neither resolved → keep state, ask for clarity.
+  await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+  return true;
 }
 
 // ── D2-T12: correct site metadata on a TaskField ─────────────────────────────

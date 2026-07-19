@@ -245,6 +245,13 @@ beforeEach(() => {
   setContext.mockClear();
   clearContext.mockClear();
   getContext.mockClear();
+  // UX-T1 QA: restore the DYNAMIC getContext reader each test. Dozens of tests
+  // call `getContext.mockResolvedValue(ctxStore)`, which snapshots a fixed value
+  // and leaks into later tests (mockClear does NOT reset the implementation).
+  // That stale leak previously drove the old escape hatch into infinite
+  // clearContext→handleAIMessage recursion (OOM). Re-binding the live reader in
+  // beforeEach restores per-test isolation.
+  getContext.mockImplementation(async () => ctxStore);
   ctxStore = null;
   getManagementSnapshot.mockReset();
   getTodayFieldInspections.mockReset();
@@ -675,7 +682,9 @@ describe('item 6 — search sub-menu', () => {
     getContext.mockResolvedValue(ctxStore);
 
     await handleAIMessage(admin, 'xyz');
-    expect(lastMsg()).toContain('לא נמצאו תוצאות');
+    // UX-T1 QA: product message was improved to a worker-specific not-found
+    // string ("לא נמצא עובד בשם ..."); the old generic assertion was stale.
+    expect(lastMsg()).toContain('לא נמצא עובד בשם');
   });
 
   it('option 4 returns to menu', async () => {

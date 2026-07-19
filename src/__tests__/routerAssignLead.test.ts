@@ -65,9 +65,16 @@ vi.mock('../ai/provider', () => ({
   getProvider: () => ({ name: 'test' }),
 }));
 
-// parseIntent — returns assign_lead with high confidence when called.
-vi.mock('../ai/intentParser', () => ({
-  parseIntent: vi.fn().mockResolvedValue({
+// parseIntent — defaults to assign_lead with high confidence when called.
+// Declared as a controllable mock (not an inline `vi.fn().mockResolvedValue`)
+// so UX-T1 tests can override it per-call via `parseIntent.mockResolvedValueOnce`
+// — the smart-picker-escape scaffolding in router.ts calls this SAME parseIntent
+// (via `boundParseIntentForEscape`) to classify free-text replies inside a
+// numeric-picker state, so tests that exercise merge/pivot need per-test control.
+function defaultAssignLeadIntent(overrides: Partial<{
+  intent: string; confidence: number; params: Record<string, unknown>;
+}> = {}) {
+  return {
     intent: 'assign_lead',
     confidence: 0.95,
     task_reference: null,
@@ -80,7 +87,12 @@ vi.mock('../ai/intentParser', () => ({
     requires_manager_approval: false,
     transition: null,
     problem_type: null,
-  }),
+    ...overrides,
+  };
+}
+const parseIntent = vi.fn().mockResolvedValue(defaultAssignLeadIntent());
+vi.mock('../ai/intentParser', () => ({
+  parseIntent: (...a: unknown[]) => parseIntent(...(a as [string, unknown])),
   buildSystemPrompt: vi.fn().mockReturnValue(''),
 }));
 
@@ -214,8 +226,11 @@ beforeEach(() => {
   suggestWorkerForLead.mockReset();
   suggestWorkerForLead.mockResolvedValue({ userId: null, reason: 'אין המלצה' });
   sendTextMessage.mockReset(); sendTextMessage.mockResolvedValue(undefined);
+  sendButtonMessage.mockReset(); sendButtonMessage.mockResolvedValue(undefined);
   setContext.mockClear();
   clearContext.mockClear();
+  parseIntent.mockReset();
+  parseIntent.mockResolvedValue(defaultAssignLeadIntent());
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -486,7 +501,17 @@ describe('assign_lead — edge cases', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'assign_lead_pick_worker' });
   });
 
-  it('free-text at confirm escapes to AI (no assignLead call, ctx cleared per v2 UX)', async () => {
+  // UX-T1 UPDATE: this test previously asserted the OLD blunt escape hatch
+  // (clearContext + handleAIMessage on ANY free text at a numeric-picker
+  // state), which wiped the in-progress lead/worker selection and restarted
+  // the whole assign_lead flow from scratch. The smart-picker escape
+  // (classifySmartPickerEscape + mergeAssignLead) now recognizes that the
+  // free-text reply parses (per this file's default parseIntent mock) as the
+  // SAME intent already in progress (`assign_lead`) and merges instead of
+  // wiping: since `params` carries no new leadRef/assigneeName, the already-
+  // selected lead/worker are kept as-is and the confirm prompt is re-sent —
+  // context-preserving, not silently restarted.
+  it('free-text at confirm with no new signal re-confirms (does not wipe ctx) — UX-T1 merge', async () => {
     const user = makeLeadsViewer();
     ctxStore = {
       awaiting: 'assign_lead_confirm',
@@ -495,20 +520,22 @@ describe('assign_lead — edge cases', () => {
       assignLeadSelectedWorkerId: 'w-1',
       assignLeadSelectedWorkerName: 'דני',
     };
-    // After the escape, AI (per this file's parseIntent mock) parses as
-    // `assign_lead` and re-enters `startAssignLeadFlow`, which needs a lead
-    // list. Empty list is fine — the test only cares that assignLead is not
-    // called and the ctx is no longer `assign_lead_confirm`.
-    findUnassignedLeadsForAssignment.mockResolvedValueOnce([]);
 
     const { handleAIMessage } = await loadRouter();
-    // "אולי" is Hebrew free text — the top-of-router escape hatch clears the
-    // ctx and re-enters as a fresh message so the AI parser can try to
-    // understand it. The confirm branch is NOT re-run (assignLead is not
-    // invoked). This is the v2 "free text at any time" UX contract.
     await handleAIMessage(user, 'אולי');
+
     expect(assignLead).not.toHaveBeenCalled();
-    expect(ctxStore?.awaiting).not.toBe('assign_lead_confirm');
+    // Context NOT cleared/restarted — same lead + worker retained.
+    expect(ctxStore).toMatchObject({
+      awaiting: 'assign_lead_confirm',
+      assignLeadSelectedLeadId: 'lead-1',
+      assignLeadSelectedWorkerId: 'w-1',
+    });
+    const btnCalls = sendButtonMessage.mock.calls.map((c) => c[0] as { body: string });
+    const txtCalls = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    const confirmMsg = btnCalls.find((c) => c.body.includes('לשייך'))?.body
+      ?? txtCalls.find((t) => t.includes('לשייך'));
+    expect(confirmMsg).toBeDefined();
   });
 
   it('AI suggestion shown when provider returns a valid candidate', async () => {
@@ -526,5 +553,192 @@ describe('assign_lead — edge cases', () => {
 
     const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
     expect(texts.some((t) => t.includes('הצעת AI') && t.includes('דני'))).toBe(true);
+  });
+});
+
+// ── UX-T1 — smart picker escape: merge / pivot / pivot_confirm ──────────────
+//
+// The old escape hatch for numeric-picker states (assign_lead_pick_lead,
+// assign_lead_pick_worker, assign_lead_confirm, …) always did
+// `clearContext + handleAIMessage` on any free text, wiping the in-progress
+// selection. `trySmartPickerEscape` (router.ts) now classifies the reply via
+// `classifySmartPickerEscape` (smartPickerEscape.ts): same intent → merge into
+// the current flow (`mergeAssignLead`); different high-confidence intent →
+// pivot_confirm; low-confidence/unparseable → redisplay hint; no owning
+// intent for the state → legacy passthrough.
+describe('UX-T1 — smart picker escape (merge / pivot / pivot_confirm)', () => {
+  it('(a) mid-picker merge: free-text worker name in assign_lead_pick_lead stores the worker, stays awaiting a lead pick, does NOT restart', async () => {
+    const user = makeLeadsViewer();
+    ctxStore = {
+      awaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: ['lead-1', 'lead-2'],
+      assignLeadCandidateNames: ['ישראל ישראלי', 'שרה כהן'],
+    };
+    findActiveInspectors.mockResolvedValueOnce(SAMPLE_WORKERS);
+    parseIntent.mockResolvedValueOnce(defaultAssignLeadIntent({ params: { assigneeName: 'דני' } }));
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'שייך אל דני');
+
+    // NOT a restart: context was never cleared, and the original lead list
+    // presented to the user is still intact.
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(assignLead).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({
+      awaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: ['lead-1', 'lead-2'],
+      assignLeadSelectedWorkerId: 'w-1',
+      assignLeadSelectedWorkerName: 'דני',
+    });
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('דני'))).toBe(true);
+  });
+
+  it('(b) self-reference ("אלי") resolves to the acting user when they are an active inspector', async () => {
+    const user = makeLeadsViewer(); // id: 'u-sasha', name: 'סשה'
+    ctxStore = {
+      awaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: ['lead-1', 'lead-2'],
+      assignLeadCandidateNames: ['ישראל ישראלי', 'שרה כהן'],
+    };
+    findActiveInspectors.mockResolvedValueOnce([
+      { id: user.id, name: user.name, role: 'MANAGER' },
+      ...SAMPLE_WORKERS,
+    ]);
+    parseIntent.mockResolvedValueOnce(defaultAssignLeadIntent({ params: { assigneeName: 'אלי' } }));
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'שייך אלי');
+
+    expect(ctxStore).toMatchObject({
+      awaiting: 'assign_lead_pick_lead',
+      assignLeadSelectedWorkerId: user.id,
+      assignLeadSelectedWorkerName: user.name,
+    });
+  });
+
+  it('(c) a different high-confidence intent triggers pivot_confirm — NOT a silent reset', async () => {
+    const user = makeLeadsViewer();
+    ctxStore = {
+      awaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: ['lead-1', 'lead-2'],
+      assignLeadCandidateNames: ['ישראל ישראלי', 'שרה כהן'],
+    };
+    parseIntent.mockResolvedValueOnce({
+      intent: 'list_today_field_inspections',
+      confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: {}, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'מה יש להיום בשטח');
+
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({
+      awaiting: 'pivot_confirm',
+      pivotPrevAwaiting: 'assign_lead_pick_lead',
+    });
+    expect((ctxStore as { pendingIntent?: { intent?: string } } | null)?.pendingIntent?.intent)
+      .toBe('list_today_field_inspections');
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('לצאת'))).toBe(true);
+  });
+
+  it('(d) pivot_confirm "1" dispatches the pendingIntent through routeIntent and clears the pivot context', async () => {
+    const user = makeLeadsViewer();
+    const pendingIntent = {
+      intent: 'assign_lead', confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: {}, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    };
+    ctxStore = {
+      awaiting: 'pivot_confirm',
+      pendingIntent,
+      pivotPrevAwaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: ['lead-1'],
+      assignLeadCandidateNames: ['ישראל ישראלי'],
+    };
+    findUnassignedLeadsForAssignment.mockResolvedValueOnce(SAMPLE_LEADS);
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, '1');
+
+    // The pendingIntent (assign_lead) was dispatched via routeIntent →
+    // startAssignLeadFlow, which shows a FRESH lead list (2 leads, matching
+    // SAMPLE_LEADS) — proof this went through real dispatch, not a leftover
+    // of the pivot state (which only had 1 candidate lead).
+    expect(ctxStore).toMatchObject({
+      awaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: ['lead-1', 'lead-2'],
+    });
+    expect((ctxStore as Record<string, unknown>).pendingIntent).toBeUndefined();
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('ישראל ישראלי'))).toBe(true);
+  });
+
+  it('(d) pivot_confirm "2" restores pivotPrevAwaiting and drops pendingIntent — no dispatch', async () => {
+    const user = makeLeadsViewer();
+    const pendingIntent = {
+      intent: 'list_today_field_inspections', confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: {}, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    };
+    ctxStore = {
+      awaiting: 'pivot_confirm',
+      pendingIntent,
+      pivotPrevAwaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: ['lead-1', 'lead-2'],
+      assignLeadCandidateNames: ['ישראל ישראלי', 'שרה כהן'],
+    };
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, '2');
+
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(findUnassignedLeadsForAssignment).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({
+      awaiting: 'assign_lead_pick_lead',
+      assignLeadCandidateIds: ['lead-1', 'lead-2'],
+    });
+    expect((ctxStore as Record<string, unknown>).pendingIntent).toBeUndefined();
+    expect((ctxStore as Record<string, unknown>).pivotPrevAwaiting).toBeUndefined();
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('נמשיך'))).toBe(true);
+  });
+
+  it('(e) regression — one-shot from scratch: leadRef + self-reference assigneeName ("אלי") still jumps straight to a single confirm', async () => {
+    const user = makeLeadsViewer();
+    ctxStore = null; // fresh message, no context
+    findUnassignedLeadsForAssignment.mockResolvedValueOnce([
+      {
+        id: 'lead-1', fromName: 'יוסי כהן', subject: null, receivedAt: new Date(),
+        fromEmail: null, body: null, status: null, ownerId: null, taskId: null,
+      },
+    ]);
+    findActiveInspectors.mockResolvedValueOnce([
+      { id: user.id, name: user.name, role: 'MANAGER' },
+    ]);
+    parseIntent.mockResolvedValueOnce(defaultAssignLeadIntent({
+      params: { leadRef: 'יוסי', assigneeName: 'אלי' },
+    }));
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'לשייך את הליד של יוסי אלי');
+
+    expect(ctxStore).toMatchObject({
+      awaiting: 'assign_lead_confirm',
+      assignLeadSelectedLeadId: 'lead-1',
+      assignLeadSelectedWorkerId: user.id,
+    });
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('לשייך') && t.includes('אישור'))).toBe(true);
+    expect(assignLead).not.toHaveBeenCalled(); // not yet confirmed
   });
 });
