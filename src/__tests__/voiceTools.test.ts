@@ -109,6 +109,7 @@ describe('role gating', () => {
     expect(withCrm).toContain('update_crm_task');
     expect(withCrm).toContain('list_my_crm_tasks');
     expect(withCrm).toContain('get_calendar_events');
+    expect(withCrm).toContain('get_calendar_event_details');
     expect(withCrm).toContain('create_calendar_event');
     expect(withCrm).toContain('update_calendar_event');
     expect(withCrm).toContain('delete_calendar_event');

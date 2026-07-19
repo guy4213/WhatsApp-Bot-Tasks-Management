@@ -97,6 +97,7 @@ function buildInstructions(user: ResolvedUser, toolNames: string[]): string {
     ``,
     `כלים ייעודיים כשמבקשים משהו ממוקד:`,
     `- "כל היומן" / "כל הפגישות" / "מה קבוע לי השבוע" / קביעת פגישה = get_calendar_events (צפייה רחבה), create_calendar_event / update_calendar_event / delete_calendar_event.`,
+    `- כשהמשתמש שואל "מה יש לי בפגישה של X?", "מי מוזמן ל...", "תן לי את קישור ה-Teams", "מה כתוב בהזמנה של..." וכו' — ראשית קראי ל-get_calendar_events כדי לזהות את הפגישה לפי כותרת/שעה, ואז קראי ל-get_calendar_event_details עם ה-id שקיבלת. הימנעי מלהקריא את ה-body המלא אם הוא HTML כבד — תמצתי אותו למשתמש; לקישור Teams השתמשי בשדה joinUrl.`,
     `- "כל משימות המשרד הפתוחות שלי" (בלי קשר לתאריך) = list_my_crm_tasks. לפרטי משימה = get_crm_task_details. ליצירת משימה = create_crm_task. למנהלים: "המשימות של כל העובדים" / "מה יש לדני" = list_all_crm_tasks.`,
     `- "לידים" / "פניות" / "לקוחות חדשים" = list_pending_leads, get_lead_details, assign_lead (למורשים בלבד).`,
     ``,

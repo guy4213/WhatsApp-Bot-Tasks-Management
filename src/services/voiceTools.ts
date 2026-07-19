@@ -102,6 +102,7 @@ import {
   getCrmTaskById,
   crmApiConfigured,
   listCrmCalendarEvents,
+  getCrmCalendarEventById,
   createCrmCalendarEvent,
   updateCrmCalendarEvent,
   deleteCrmCalendarEvent,
@@ -966,6 +967,49 @@ const TOOLS: VoiceToolDef[] = [
               ? 'היומן פנוי בתקופה הזו.'
               : `יש ${events.length} אירועים ביומן.`,
         };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          ok: false,
+          error: msg.includes('מחובר')
+            ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM (הגדרות → Outlook).'
+            : msg,
+        };
+      }
+    },
+  },
+  {
+    name: 'get_calendar_event_details',
+    gate: 'any',
+    available: crmApiConfigured,
+    description:
+      'שליפת פרטים מלאים על פגישה ספציפית ביומן ה-Outlook של המשתמש (גוף/הערות, '
+      + 'רשימת מוזמנים עם סטטוס תגובה, מארגן, קישור Teams להצטרפות, קטגוריות ועוד). '
+      + 'קרא לזה כשהמשתמש מבקש פרטים נוספים על פגישה שכבר זוהתה — למשל אחרי '
+      + 'get_calendar_events. אם אין לך event_id ודאי, קרא קודם ל-get_calendar_events '
+      + 'בחלון הזמן הרלוונטי, בחר את הפגישה לפי הכותרת/שעה, ואז קרא לכלי הזה עם ה-id.',
+    parameters: {
+      type: 'object',
+      required: ['event_id'],
+      properties: {
+        event_id: {
+          type: 'string',
+          description: 'מזהה האירוע כפי שחזר משדה id ב-get_calendar_events.',
+        },
+      },
+      additionalProperties: false,
+    },
+    handler: async (user, args) => {
+      const eventId = str(args.event_id);
+      if (!eventId) {
+        return {
+          ok: false,
+          error: 'חסר event_id — קרא קודם ל-get_calendar_events כדי לקבל את מזהה הפגישה.',
+        };
+      }
+      try {
+        const ev = await getCrmCalendarEventById(user.id, eventId);
+        return { ok: true, event: ev };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {

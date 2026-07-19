@@ -90,7 +90,8 @@
       "Bash(Select-String -Path \"C:\\\\Users\\\\guy42\\\\.claude\\\\projects\\\\C--Users-guy42-Documents-WhatsApp-Bot-Tasks-Management\\\\712e1a43-822e-4841-9003-34a8bca72a2d\\\\tool-results\\\\bb9smaee4.txt\" -Pattern \"FAIL \" -SimpleMatch)",
       "Bash(Select-Object -First 5)",
       "PowerShell(Get-Content .env | Where-Object { $_ -match \"^\\(WHATSAPP_OUTBOUND_SUPPRESSED|GREENAPI_INBOUND_SUPPRESSED|GREENAPI_MAX_INBOUND_AGE_SEC|WHATSAPP_PROVIDER\\)\" })",
-      "PowerShell($state = \\(Invoke-RestMethod -Uri \"https://7105.api.greenapi.com/waInstance7105576896/getStateInstance/ac85ff73d0a84125ac496423f51683562beebc125f0c42b287\"\\).stateInstance; $status = \\(Invoke-RestMethod -Uri \"https://7105.api.greenapi.com/waInstance7105576896/getStatusInstance/ac85ff73d0a84125ac496423f51683562beebc125f0c42b287\"\\).statusInstance; \"state=$state status=$status\")"
+      "PowerShell($state = \\(Invoke-RestMethod -Uri \"https://7105.api.greenapi.com/waInstance7105576896/getStateInstance/ac85ff73d0a84125ac496423f51683562beebc125f0c42b287\"\\).stateInstance; $status = \\(Invoke-RestMethod -Uri \"https://7105.api.greenapi.com/waInstance7105576896/getStatusInstance/ac85ff73d0a84125ac496423f51683562beebc125f0c42b287\"\\).statusInstance; \"state=$state status=$status\")",
+      "Bash(npx jest *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\guy42\\Documents\\WhatsApp-Bot-Tasks-Management"

@@ -303,6 +303,58 @@ export async function listCrmCalendarEvents(
   return data.events ?? [];
 }
 
+// Full-details shape returned by GET /outlook/calendar/events/:id — the list
+// endpoint deliberately returns a thin row (speech-friendly), while this one
+// carries body, attendees, organizer, joinUrl etc. for questions like
+// "מי מוזמן ל..." / "תני לי את הקישור ל-Teams".
+
+export interface CalendarEventAttendee {
+  email: string;
+  name: string | null;
+  type: 'required' | 'optional' | 'resource';
+  responseStatus:
+    | 'none'
+    | 'organizer'
+    | 'tentativelyAccepted'
+    | 'accepted'
+    | 'declined'
+    | 'notResponded';
+}
+
+export interface CalendarEventDetails {
+  id: string;
+  subject: string | null;
+  body: { content: string; contentType: 'html' | 'text' } | null;
+  bodyPreview: string | null;
+  start: { dateTime: string; timeZone: string } | null;
+  end: { dateTime: string; timeZone: string } | null;
+  location: string | null;
+  attendees: CalendarEventAttendee[];
+  organizer: { email: string; name: string | null } | null;
+  isOnlineMeeting: boolean;
+  isAllDay: boolean;
+  /** Populated only when isOnlineMeeting=true. */
+  joinUrl: string | null;
+  webLink: string | null;
+  categories: string[];
+  /** low / normal / high. */
+  importance: string | null;
+  /** free / tentative / busy / oof / workingElsewhere / unknown. */
+  showAs: string | null;
+}
+
+/** Fetch full details for a single Outlook event through the CRM. */
+export async function getCrmCalendarEventById(
+  userId: string,
+  eventId: string,
+): Promise<CalendarEventDetails> {
+  return crmCalendarFetch<CalendarEventDetails>(
+    'GET',
+    `/outlook/calendar/events/${encodeURIComponent(eventId)}`,
+    userId,
+  );
+}
+
 /** Create an event on the speaking user's Outlook calendar through the CRM. */
 export async function createCrmCalendarEvent(
   userId: string,
