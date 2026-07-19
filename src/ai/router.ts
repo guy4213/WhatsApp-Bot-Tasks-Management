@@ -3984,6 +3984,10 @@ async function mergeIntoCurrentFlow(
       return await mergeCorrectSite(user, text, ctx, intent);
     case 'correct_inspection_type':
       return await mergeCorrectType(user, text, ctx, intent);
+    case 'workers_day_overview':
+      return await mergeMgrWorkersPick(user, text, ctx, intent);
+    case 'list_pending_leads':
+      return await mergeMgrLeadsPick(user, text, ctx, intent);
     default:
       return false;
   }
@@ -4366,6 +4370,159 @@ async function mergeCorrectType(
   const ref = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
   if (!ref) return false;
   await resolveAndShowTypeList(user, ctx.intent ?? intent, ref);
+  return true;
+}
+
+/**
+ * Merge handler for the workers_day_overview flow (Wave-2 F) — mirrors
+ * `handleMgrWorkersPickWorkerReply`'s "worker chosen" branch. Only acts at
+ * `mgr_workers_pick_worker` — the one state where `ctx.mgrWorkerIds` /
+ * `ctx.mgrWorkerNames` hold the on-screen numbered worker list (`mgr_workers_sub`
+ * has no name to pick against, so the default:false legacy net handles it, same
+ * as the task-id-only manager pickers per the contract).
+ *
+ * Name resolution checks whatever the parser filled — `params.workerName` (the
+ * documented param for this intent), `params.assigneeName` (defensive, mirrors
+ * assign_lead's slot naming), then the generic `task_reference` — and tries
+ * `resolveSelfReference` first. Candidates passed to the resolvers are ONLY the
+ * on-screen pair (no wider table exists for this flow), so any 'unique' match
+ * is inherently on-screen; the explicit `ids.includes(...)` checks below are
+ * kept anyway for defense/consistency with `mergeReassign`'s validation style.
+ * Not unique / not resolvable → redisplay hint, keep state.
+ */
+async function mergeMgrWorkersPick(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  intent: AIIntentResult,
+): Promise<boolean> {
+  if (ctx.awaiting !== 'mgr_workers_pick_worker') return false;
+
+  const ids = ctx.mgrWorkerIds ?? [];
+  const names = ctx.mgrWorkerNames ?? [];
+  if (ids.length === 0) return false;
+
+  const candidates = ids.map((id, i) => ({ id, name: names[i] ?? '—' }));
+
+  const paramWorkerName = typeof intent.params?.workerName === 'string' ? intent.params.workerName.trim() : '';
+  const paramAssigneeName = typeof intent.params?.assigneeName === 'string' ? intent.params.assigneeName.trim() : '';
+  const paramTaskRef = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
+  const nameHint = paramWorkerName || paramAssigneeName || paramTaskRef;
+
+  let workerId: string | null = null;
+  let workerName: string | null = null;
+
+  const selfId = resolveSelfReference(nameHint || text, user);
+  if (selfId && ids.includes(selfId)) {
+    workerId = selfId;
+    workerName = candidates.find((c) => c.id === selfId)?.name ?? null;
+  } else if (nameHint) {
+    const match = resolveWorkerName(nameHint, candidates);
+    if (match.status === 'unique' && ids.includes(match.id)) {
+      workerId = match.id;
+      workerName = match.name;
+    }
+  }
+
+  if (!workerId) {
+    await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+    return true;
+  }
+
+  // From here mirrors handleMgrWorkersPickWorkerReply's "worker chosen" branch exactly.
+  const localDate = localJerusalemDate();
+  const detail = await getWorkerDayDetail(workerId, localDate);
+
+  if (detail.total === 0) {
+    await setContext(user.phone, { awaiting: 'mgr_workers_sub' });
+    await sendTextMessage({ to: user.phone, text: `אין בדיקות היום עבור ${workerName ?? '—'}.\n\n${renderMgrWorkersSub()}` });
+    return true;
+  }
+
+  const lines = detail.inspections.map((r, i) => {
+    const rowData: InspectionListRowData = {
+      taskTitle: r.taskTitle,
+      typeLabelHe: r.typeLabelHe,
+      timeHm: r.timeHm,
+      siteCity: r.siteCity,
+      fieldStatus: r.fieldStatus,
+      dateStr: localDate,
+    };
+    return `${i + 1}. ${formatInspectionListRow(rowData)}`;
+  });
+  const summary = `סיכום: ${detail.finished}/${detail.total} בוצעו, חריגים פתוחים: ${detail.openExceptions}`;
+
+  // Layer 1 fix (same as the numeric-pick handler): restore mgr_menu_root so
+  // the next bare digit picks the right item.
+  await setContext(user.phone, { awaiting: 'mgr_menu_root' });
+  await sendChunked(user.phone,
+    `${workerName ?? '—'} — היום (${fmtDDMM(localDate)}):\n\n${lines.join('\n\n')}\n\n${summary}`,
+  );
+  return true;
+}
+
+/**
+ * Merge handler for the list_pending_leads flow (Wave-2 F) — mirrors
+ * `handleMgrLeadsPickRowReply`'s "lead chosen" branch. Only acts at
+ * `mgr_leads_pick_row` — the one state where `ctx.mgrLeadIds` / `ctx.mgrLeadNames`
+ * hold the on-screen numbered lead list (`mgr_leads_sub` has no row to pick
+ * against, so the default:false legacy net handles it).
+ *
+ * `list_pending_leads` has no dedicated "which lead" param in the current
+ * intent-parser prompt (owner/name scoping for this intent is documented as
+ * "not yet supported"), so this checks a few plausible param slots defensively
+ * (`params.leadRef`, `params.customerName`) before falling back to the generic
+ * `task_reference` — whichever the parser actually fills for a named follow-up
+ * like "תראה לי את הליד של דנה". Matches only against the on-screen pair (no
+ * wider pool for this flow); ambiguous/no match → redisplay hint, keep state.
+ */
+async function mergeMgrLeadsPick(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  intent: AIIntentResult,
+): Promise<boolean> {
+  if (ctx.awaiting !== 'mgr_leads_pick_row') return false;
+
+  const ids = ctx.mgrLeadIds ?? [];
+  const names = ctx.mgrLeadNames ?? [];
+  if (ids.length === 0) return false;
+
+  const candidates = ids.map((id, i) => ({ id, name: names[i] ?? '—' }));
+
+  const paramLeadRef = typeof intent.params?.leadRef === 'string' ? intent.params.leadRef.trim() : '';
+  const paramCustomerName = typeof intent.params?.customerName === 'string' ? intent.params.customerName.trim() : '';
+  const paramTaskRef = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
+  const nameHint = paramLeadRef || paramCustomerName || paramTaskRef;
+
+  if (!nameHint) {
+    await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+    return true;
+  }
+
+  const match = resolveLeadReference(nameHint, candidates);
+  if (match.status !== 'unique' || !ids.includes(match.id)) {
+    await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+    return true;
+  }
+
+  // From here mirrors handleMgrLeadsPickRowReply's "lead chosen" branch exactly.
+  const lead = await getLeadById(match.id);
+  if (!lead) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'לא נמצא ליד. נסה שוב.' });
+    return true;
+  }
+  const enrichment = await enrichLead(lead);
+  const detailText = formatLeadDetailCompact(lead, enrichment);
+  // Keep state in mgr_leads_pick_row so "חזרה" resends the sub-menu and typing
+  // another number/name re-picks a lead from the same list.
+  await setContext(user.phone, {
+    awaiting: 'mgr_leads_pick_row',
+    mgrLeadIds: ctx.mgrLeadIds,
+    mgrLeadNames: ctx.mgrLeadNames,
+  });
+  await sendTextMessage({ to: user.phone, text: detailText });
   return true;
 }
 

@@ -50,6 +50,9 @@ vi.mock('../services/incomingLeads', () => ({
   findNewlyAssignedLeads: vi.fn().mockResolvedValue([]),
   findEscalationCandidates: vi.fn().mockResolvedValue([]),
   getYoramLeadCounts: vi.fn().mockResolvedValue({ overnight: 0, unassigned: 0 }),
+  // UX-T1 Wave-2F: mergeMgrLeadsPick fetches the lead detail through the same
+  // getLeadById used by handleMgrLeadsPickRowReply.
+  getLeadById: vi.fn().mockResolvedValue(null),
 }));
 
 // sender
@@ -933,5 +936,135 @@ describe('item 7 — הבדיקות שלי (D2-T16)', () => {
     expect(msg).not.toContain('mgr_my_inspections_today');
     // Worker context must be 'menu', NOT 'mgr_menu_root'
     expect(ctxStore).toMatchObject({ awaiting: 'menu' });
+  });
+});
+
+// ── UX-T1 Wave-2F: smart picker escape — manager list flows ─────────────────
+// mergeMgrWorkersPick / mergeMgrLeadsPick — same-intent free text at
+// mgr_workers_pick_worker / mgr_leads_pick_row merges by NAME instead of
+// wiping the picker (the old clearContext+handleAIMessage escape hatch).
+// Different high-conf intent → pivot_confirm. Numeric picks and "חזרה" nav
+// must keep working unchanged (they never reach the escape hatch at all,
+// since looksLikeNumericPickerInput() is true for them).
+
+describe('UX-T1 Wave-2F — smart picker escape for manager list flows', () => {
+  it('free-text worker name in mgr_workers_pick_worker merges to that worker\'s day detail without wiping context', async () => {
+    const { parseIntent } = await import('../ai/intentParser');
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      intent: 'workers_day_overview', confidence: 0.9, task_reference: null, field: null,
+      new_value: null, params: { workerName: 'יוסי' }, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false, transition: null, problem_type: null,
+    });
+    getWorkerDayDetail.mockResolvedValue({
+      inspections: [
+        { taskFieldId: 'tf2', taskId: 't2', workerName: 'יוסי', customerName: 'לקוח ב',
+          timeHm: '11:00', siteCity: 'הרצליה', fieldStatus: 'EN_ROUTE', family: 'radiation', typeLabelHe: 'קרינה' },
+      ],
+      finished: 0, total: 1, openExceptions: 0,
+    });
+    ctxStore = { awaiting: 'mgr_workers_pick_worker', mgrWorkerIds: ['w1', 'w2'], mgrWorkerNames: ['דני', 'יוסי'] };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, 'תראה לי את הסיכום של יוסי');
+
+    expect(getWorkerDayDetail).toHaveBeenCalledWith('w2', expect.any(String));
+    const msg = lastMsg();
+    expect(msg).toContain('יוסי');
+    expect(msg).toContain('0/1 בוצעו');
+    // Context was NOT wiped by the old clearContext+handleAIMessage escape net.
+    expect(clearContext).not.toHaveBeenCalled();
+    // Same "Layer 1" landing state as the numeric-pick handler.
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+  });
+
+  it('free-text lead name in mgr_leads_pick_row merges to that lead\'s detail without wiping context', async () => {
+    const { parseIntent } = await import('../ai/intentParser');
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      intent: 'list_pending_leads', confidence: 0.9, task_reference: 'דנה', field: null,
+      new_value: null, params: { filter: 'unassigned' }, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false, transition: null, problem_type: null,
+    });
+    const { getLeadById } = await import('../services/incomingLeads');
+    (getLeadById as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 'lead2', fromName: 'דנה', subject: 'בדיקת רעש', body: null,
+      fromEmail: null, receivedAt: new Date(), status: null, ownerId: null, taskId: null,
+    });
+    ctxStore = { awaiting: 'mgr_leads_pick_row', mgrLeadIds: ['lead1', 'lead2'], mgrLeadNames: ['רונן', 'דנה'] };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, 'תראה לי את הליד של דנה');
+
+    expect(getLeadById).toHaveBeenCalledWith('lead2');
+    const msg = lastMsg();
+    expect(msg).toContain('שם: דנה');
+    // Context stays in mgr_leads_pick_row (same list re-usable), not wiped.
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({
+      awaiting: 'mgr_leads_pick_row',
+      mgrLeadIds: ['lead1', 'lead2'],
+      mgrLeadNames: ['רונן', 'דנה'],
+    });
+  });
+
+  it('a different high-confidence intent from mgr_workers_pick_worker asks to pivot instead of merging', async () => {
+    const { parseIntent } = await import('../ai/intentParser');
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      intent: 'list_pending_leads', confidence: 0.92, task_reference: null, field: null,
+      new_value: null, params: { filter: 'unassigned' }, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false, transition: null, problem_type: null,
+    });
+    ctxStore = { awaiting: 'mgr_workers_pick_worker', mgrWorkerIds: ['w1'], mgrWorkerNames: ['דני'] };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, 'תראה לי לידים ממתינים');
+
+    expect(lastMsg()).toContain('לצאת ולעבור ל');
+    expect(getWorkerDayDetail).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({ awaiting: 'pivot_confirm', pivotPrevAwaiting: 'mgr_workers_pick_worker' });
+  });
+
+  it('regression: a bare numeric pick in mgr_workers_pick_worker still works unchanged', async () => {
+    getWorkerDayDetail.mockResolvedValue({
+      inspections: [
+        { taskFieldId: 'tf1', taskId: 't1', workerName: 'דני', customerName: 'לקוח',
+          timeHm: '09:00', siteCity: 'עיר', fieldStatus: 'FINISHED_FIELD', family: 'noise', typeLabelHe: 'רעש' },
+      ],
+      finished: 1, total: 1, openExceptions: 0,
+    });
+    ctxStore = { awaiting: 'mgr_workers_pick_worker', mgrWorkerIds: ['w1'], mgrWorkerNames: ['דני'] };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, '1');
+
+    expect(lastMsg()).toContain('דני');
+    expect(lastMsg()).toContain('1/1 בוצעו');
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+  });
+
+  it('regression: "חזרה" from mgr_leads_pick_row still re-shows the leads sub-menu unchanged', async () => {
+    ctxStore = { awaiting: 'mgr_leads_pick_row', mgrLeadIds: ['lead1'], mgrLeadNames: ['רונן'] };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, 'חזרה');
+
+    expect(lastMsg()).toContain('לידים לא משויכים');
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_leads_sub' });
+  });
+
+  it('unresolved name in mgr_workers_pick_worker keeps state and sends the redisplay hint (does not fall back to legacy clearContext)', async () => {
+    const { parseIntent } = await import('../ai/intentParser');
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      intent: 'workers_day_overview', confidence: 0.9, task_reference: null, field: null,
+      new_value: null, params: { workerName: 'מישהו שלא ברשימה' }, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false, transition: null, problem_type: null,
+    });
+    ctxStore = { awaiting: 'mgr_workers_pick_worker', mgrWorkerIds: ['w1'], mgrWorkerNames: ['דני'] };
+    getContext.mockResolvedValue(ctxStore);
+
+    await handleAIMessage(admin, 'מה עם מישהו שלא ברשימה');
+
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(getWorkerDayDetail).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_workers_pick_worker' });
   });
 });

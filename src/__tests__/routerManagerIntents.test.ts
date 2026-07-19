@@ -65,7 +65,11 @@ vi.mock('../whatsapp/sender', () => ({
 
 let ctxStore: Record<string, unknown> | null = null;
 const setContext = vi.fn(async (_phone: string, state: unknown) => { ctxStore = state as Record<string, unknown>; });
-const getContext = vi.fn(async () => null); // fresh message = no context
+// UX-T1 Wave-2F: explicit return-type annotation so `.mockResolvedValueOnce(ctxStore)`
+// (used by the smart-escape merge/pivot tests below to simulate a resumed
+// mid-flow context) type-checks — otherwise TS narrows the inferred return
+// type to the literal `null` from this default implementation.
+const getContext = vi.fn(async (): Promise<Record<string, unknown> | null> => null); // fresh message = no context
 const clearContext = vi.fn(async () => { ctxStore = null; });
 vi.mock('../services/conversationContext', () => ({
   setContext: (p: string, s: unknown) => setContext(p, s),
@@ -703,5 +707,46 @@ describe('fallback for manager users', () => {
     const msg = lastMsg();
     expect(msg).toContain('לא הבנתי');
     expect(msg).toContain('תרצה לראות את התפריט? כתוב "תפריט".');
+  });
+});
+
+// ── UX-T1 Wave-2F: smart picker escape — manager list flows ─────────────────
+// A free-text reply while a manager list picker (mgr_workers_pick_worker /
+// mgr_leads_pick_row) is active must merge by name instead of the old
+// clearContext+handleAIMessage escape hatch; a different high-confidence
+// intent must ask to pivot rather than silently merging or wiping.
+
+describe('UX-T1 Wave-2F — manager smart-escape merge / pivot (mid-flow context)', () => {
+  it('a worker-name free-text reply mid mgr_workers_pick_worker merges to that worker\'s detail (context not wiped)', async () => {
+    ctxStore = { awaiting: 'mgr_workers_pick_worker', mgrWorkerIds: ['w1', 'w2'], mgrWorkerNames: ['דני', 'יוסי'] };
+    getContext.mockResolvedValueOnce(ctxStore);
+    getWorkerDayDetail.mockResolvedValue({
+      inspections: [
+        { taskFieldId: 'tf2', taskId: 't2', workerName: 'יוסי', customerName: 'לקוח ב',
+          timeHm: '11:00', siteCity: 'הרצליה', fieldStatus: 'EN_ROUTE', family: 'radiation', typeLabelHe: 'קרינה' },
+      ],
+      finished: 0, total: 1, openExceptions: 0,
+    });
+    mockParseIntent(makeIntent('workers_day_overview', { params: { workerName: 'יוסי' } }));
+
+    await handleAIMessage(admin, 'תראה לי את הסיכום של יוסי');
+
+    expect(getWorkerDayDetail).toHaveBeenCalledWith('w2', expect.any(String));
+    expect(lastMsg()).toContain('יוסי');
+    expect(clearContext).not.toHaveBeenCalled();
+    // Same "Layer 1" landing state as the numeric-pick handler — not cleared.
+    expect(ctxStore).toMatchObject({ awaiting: 'mgr_menu_root' });
+  });
+
+  it('a different high-confidence manager intent mid mgr_leads_pick_row asks to pivot instead of merging or wiping', async () => {
+    ctxStore = { awaiting: 'mgr_leads_pick_row', mgrLeadIds: ['lead1'], mgrLeadNames: ['רונן'] };
+    getContext.mockResolvedValueOnce(ctxStore);
+    mockParseIntent(makeIntent('workers_day_overview', { params: {} })); // confidence 0.95 (makeIntent default) ≥ CONF_HIGH
+
+    await handleAIMessage(admin, 'עובדים היום');
+
+    expect(lastMsg()).toContain('לצאת ולעבור ל');
+    expect(getAllWorkersDayOverview).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({ awaiting: 'pivot_confirm', pivotPrevAwaiting: 'mgr_leads_pick_row' });
   });
 });
