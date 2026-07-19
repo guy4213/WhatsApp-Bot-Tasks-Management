@@ -57,6 +57,8 @@ const WORKER_INTENT_LIST = [
   '- missing_equipment_free: worker reports missing equipment BEFORE going out (general, not scoped to a specific TaskField). Phrases: "אין לי בטריות", "חסר לי מזרן", "לא לקחתי את המכשיר", "חסר לי ציוד". Put the missing item in params.note. This is different from `report_problem` with problem_type=MISSING_EQUIPMENT — that one is scoped to a specific TaskField in the field.',
   '- help: user asks what you can do.',
   '- unknown: you cannot tell what they want, OR the request is out of scope. Set a Hebrew "clarification" so the user gets a clear answer.',
+  // UX-T1: self-reference guidance so the AI never invents a Hebrew name for "me"/"myself".
+  'SELF-REFERENCE: When the user says "אלי" / "לי" / "אותי" / "עצמי" / "לעצמי" in the context of an assignee/owner/worker (e.g. "שייך את הליד אלי", "תעביר לי את הבדיקה"), keep the LITERAL string "אלי" in params.assigneeName — do NOT invent a Hebrew name. Code-side logic detects this token and substitutes the current user identity.',
 ].join('\n');
 
 const WORKER_FEW_SHOT = [
@@ -244,6 +246,8 @@ const MANAGER_INTENT_LIST = [
   '- help, unknown',
   '',
   'ASSIGN_LEAD ONE-SHOT (Phase 6): For `assign_lead`, if the user names BOTH the source lead AND the target worker in one message (e.g. "לשייך את הליד של יוסי ללירן"), set params.leadRef="יוסי" (customer/subject substring) and params.assigneeName="לירן" (worker name substring). The router will pre-populate the flow with these hints and jump straight to the confirmation step when both look-ups resolve unambiguously. If only one hint is present, still emit it — the router will fall through to the normal multi-step flow.',
+  // UX-T1: self-reference guidance so the AI never invents a Hebrew name for "me"/"myself".
+  'SELF-REFERENCE: When the user says "אלי" / "לי" / "אותי" / "עצמי" / "לעצמי" in the context of an assignee/owner/worker (e.g. "שייך את הליד אלי", "תעביר לי את הבדיקה"), keep the LITERAL string "אלי" in params.assigneeName — do NOT invent a Hebrew name. Code-side logic detects this token and substitutes the current user identity.',
 ].join('\n');
 
 const MANAGER_FEW_SHOT = [
