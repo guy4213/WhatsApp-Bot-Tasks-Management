@@ -61,8 +61,16 @@ vi.mock('../ai/provider', () => ({
 }));
 
 // parseIntent — returns schedule_task_field with high confidence when called.
-vi.mock('../ai/intentParser', () => ({
-  parseIntent: vi.fn().mockResolvedValue({
+// UX-T1: declared as a controllable mock (not an inline `vi.fn().mockResolvedValue`)
+// so the smart-picker-escape merge/pivot tests can override it per-call via
+// `parseIntent.mockResolvedValueOnce` — mirrors routerAssignLead.test.ts. The
+// scaffolding in router.ts calls this SAME parseIntent (via
+// `boundParseIntentForEscape`) to classify free-text replies inside a numeric-
+// picker state.
+function defaultScheduleIntent(overrides: Partial<{
+  intent: string; confidence: number; task_reference: string | null; params: Record<string, unknown>;
+}> = {}) {
+  return {
     intent: 'schedule_task_field',
     confidence: 0.95,
     task_reference: null,
@@ -75,7 +83,12 @@ vi.mock('../ai/intentParser', () => ({
     requires_manager_approval: false,
     transition: null,
     problem_type: null,
-  }),
+    ...overrides,
+  };
+}
+const parseIntent = vi.fn().mockResolvedValue(defaultScheduleIntent());
+vi.mock('../ai/intentParser', () => ({
+  parseIntent: (...a: unknown[]) => parseIntent(...(a as [string, unknown])),
   buildSystemPrompt: vi.fn().mockReturnValue(''),
 }));
 
@@ -252,6 +265,8 @@ beforeEach(() => {
   sendTextMessage.mockResolvedValue(undefined);
   setContext.mockClear();
   clearContext.mockClear();
+  parseIntent.mockReset();
+  parseIntent.mockResolvedValue(defaultScheduleIntent());
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -897,5 +912,124 @@ describe('prefilled scheduledStartAt from intent params', () => {
     expect(ctxStore).toMatchObject({ awaiting: 'schedule_await_duration' });
     const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
     expect(texts.some((t) => t.includes('משך'))).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UX-T1 — smart picker escape: mergeSchedule (Wave 2E)
+//
+// The old escape hatch for numeric-picker states always did
+// `clearContext + handleAIMessage` on any free text, wiping the in-progress
+// task selection and restarting the whole schedule_task_field flow from
+// scratch. `trySmartPickerEscape` now classifies the reply via
+// `classifySmartPickerEscape`: same intent (schedule_task_field) → merge into
+// the current flow (`mergeSchedule`, resolving the task by customer/title
+// against `ctx.scheduleTaskCandidates`); different high-confidence intent →
+// pivot_confirm; unresolved reference → redisplay hint, state kept.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SCHEDULE_CANDIDATE_COHEN = {
+  id: SAMPLE_TASK_WORKER.id, title: SAMPLE_TASK_WORKER.title,
+  customerName: SAMPLE_TASK_WORKER.customerName, // 'כהן בע"מ'
+  inspectionLabelHe: SAMPLE_TASK_WORKER.inspectionLabelHe,
+  siteCity: SAMPLE_TASK_WORKER.siteCity,
+  inspectionTypeId: SAMPLE_TASK_WORKER.inspectionTypeId,
+  family: SAMPLE_TASK_WORKER.inspectionFamily,
+  ownerId: SAMPLE_TASK_WORKER.ownerId,
+  siteAddress: SAMPLE_TASK_WORKER.siteAddress,
+  fieldContactName: SAMPLE_TASK_WORKER.fieldContactName,
+  fieldContactPhone: SAMPLE_TASK_WORKER.fieldContactPhone,
+  navigationUrl: SAMPLE_TASK_WORKER.navigationUrl,
+  productName: SAMPLE_TASK_WORKER.productName,
+};
+
+const SCHEDULE_CANDIDATE_LEVI = {
+  ...SCHEDULE_CANDIDATE_COHEN,
+  id: 'task-levi',
+  customerName: 'לוי בע"מ',
+};
+
+describe('UX-T1 — smart picker escape (mergeSchedule)', () => {
+  it('mid-picker merge: task resolves by customer name and advances, threading the LLM-extracted time+duration', async () => {
+    const user = makeWorker();
+    ctxStore = {
+      awaiting: 'schedule_intake_pick_task',
+      scheduleTaskCandidates: [SCHEDULE_CANDIDATE_COHEN, SCHEDULE_CANDIDATE_LEVI],
+    };
+    parseIntent.mockResolvedValueOnce(defaultScheduleIntent({
+      task_reference: 'כהן',
+      params: { scheduledStartAt: '2026-07-20T10:00:00+03:00', durationMinutes: 90 },
+    }));
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'לתזמן לכהן מחר בעשר, תשעים דקות');
+
+    // Not a restart: context was never cleared, task list never re-fetched.
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(findOpenTasksForOwner).not.toHaveBeenCalled();
+    // Resolved the RIGHT candidate (כהן, not לוי) and advanced past the time
+    // ask straight to duration (scheduleStartAt was threaded from params).
+    expect(ctxStore).toMatchObject({
+      awaiting: 'schedule_await_duration',
+      scheduleStartAt: '2026-07-20T10:00:00+03:00',
+      scheduleDurationMinutes: 90,
+      scheduleSelectedTask: expect.objectContaining({ id: SCHEDULE_CANDIDATE_COHEN.id }),
+    });
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('משך'))).toBe(true);
+    expect(scheduleTaskField).not.toHaveBeenCalled();
+  });
+
+  it('unresolved reference redisplays the hint and keeps the picker state (does not restart or write)', async () => {
+    const user = makeWorker();
+    ctxStore = {
+      awaiting: 'schedule_intake_pick_task',
+      scheduleTaskCandidates: [SCHEDULE_CANDIDATE_COHEN, SCHEDULE_CANDIDATE_LEVI],
+    };
+    // Parses as the SAME intent but with a task_reference that matches neither
+    // on-screen candidate.
+    parseIntent.mockResolvedValueOnce(defaultScheduleIntent({ task_reference: 'מישהו שלא ברשימה' }));
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'לתזמן למישהו שלא ברשימה');
+
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(scheduleTaskField).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({
+      awaiting: 'schedule_intake_pick_task',
+      scheduleTaskCandidates: [SCHEDULE_CANDIDATE_COHEN, SCHEDULE_CANDIDATE_LEVI],
+    });
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('לא הבנתי'))).toBe(true);
+  });
+
+  it('a different high-confidence intent triggers pivot_confirm — not a silent reset', async () => {
+    const user = makeWorker();
+    ctxStore = {
+      awaiting: 'schedule_intake_pick_task',
+      scheduleTaskCandidates: [SCHEDULE_CANDIDATE_COHEN, SCHEDULE_CANDIDATE_LEVI],
+    };
+    parseIntent.mockResolvedValueOnce({
+      intent: 'list_my_inspections',
+      confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: {}, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+
+    const { handleAIMessage } = await loadRouter();
+    await handleAIMessage(user, 'תראה לי מה יש לי היום');
+
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(scheduleTaskField).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({
+      awaiting: 'pivot_confirm',
+      pivotPrevAwaiting: 'schedule_intake_pick_task',
+    });
+    expect((ctxStore as { pendingIntent?: { intent?: string } } | null)?.pendingIntent?.intent)
+      .toBe('list_my_inspections');
+    const texts = sendTextMessage.mock.calls.map((c) => c[0].text as string);
+    expect(texts.some((t) => t.includes('לצאת'))).toBe(true);
   });
 });

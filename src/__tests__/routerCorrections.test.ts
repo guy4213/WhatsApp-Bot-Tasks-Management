@@ -609,6 +609,204 @@ describe('D2-T13 — reassign_task', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// UX-T1 — smart picker escape: mergeReassign (Wave 2E)
+//
+// The old escape hatch for numeric-picker states always did
+// `clearContext + handleAIMessage` on any free text, wiping the in-progress
+// worker-pick selection and restarting reassign_task from scratch.
+// `trySmartPickerEscape` now classifies the reply via
+// `classifySmartPickerEscape`: same intent (reassign_task) → merge into the
+// current flow (`mergeReassign`, resolving `params.newWorkerName` against the
+// on-screen worker list — `ctx.candidateUserIds` holds only ids, so
+// `findUsersByName('')` is re-queried to recover names); different
+// high-confidence intent → pivot_confirm; unresolved worker → redisplay
+// hint, state kept.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('UX-T1 — smart picker escape (mergeReassign)', () => {
+  it('mid-picker merge: free-text worker name resolves and performs the reassignment (no restart)', async () => {
+    ctxStore = {
+      awaiting: 'reassign_pick_worker',
+      candidateTaskIds: ['task-1'],
+      candidateUserIds: ['w-1', 'w-2'],
+    };
+    findUsersByName.mockResolvedValueOnce([
+      { id: 'w-1', name: 'דני' },
+      { id: 'w-2', name: 'מרים' },
+    ]);
+    reassignTask.mockResolvedValueOnce({ resetCount: 3, hadInProgressRows: false });
+    parseIntentMock.mockResolvedValueOnce({
+      intent: 'reassign_task', confidence: 1, task_reference: null,
+      field: null, new_value: null, params: { newWorkerName: 'מרים' },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: true,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    await sendMessage(makeManager(), 'תעביר את זה למרים בבקשה');
+
+    // Resolved via the free-text name, NOT a restart of the flow.
+    expect(reassignTask).toHaveBeenCalledWith('task-1', 'w-2', 'u-manager');
+    expect(ctxStore).toBeNull(); // write path clears context on success, like the numeric-pick handler
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('שויכה מחדש');
+  });
+
+  it('self-reference ("אלי") resolves to the acting manager when they are in the offered worker list', async () => {
+    const manager = makeManager();
+    ctxStore = {
+      awaiting: 'reassign_pick_worker',
+      candidateTaskIds: ['task-1'],
+      candidateUserIds: [manager.id, 'w-2'],
+    };
+    findUsersByName.mockResolvedValueOnce([
+      { id: manager.id, name: manager.name },
+      { id: 'w-2', name: 'מרים' },
+    ]);
+    reassignTask.mockResolvedValueOnce({ resetCount: 1, hadInProgressRows: false });
+    parseIntentMock.mockResolvedValueOnce({
+      intent: 'reassign_task', confidence: 1, task_reference: null,
+      field: null, new_value: null, params: { newWorkerName: 'אלי' },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: true,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    await sendMessage(manager, 'תעביר אלי');
+
+    expect(reassignTask).toHaveBeenCalledWith('task-1', manager.id, manager.id);
+    expect(ctxStore).toBeNull();
+  });
+
+  it('a worker name that was never offered on screen redisplays the hint and keeps state (no write)', async () => {
+    ctxStore = {
+      awaiting: 'reassign_pick_worker',
+      candidateTaskIds: ['task-1'],
+      candidateUserIds: ['w-1', 'w-2'],
+    };
+    // The wider table has a THIRD worker who was never shown on screen —
+    // matching them must NOT be treated as a valid pick.
+    findUsersByName.mockResolvedValueOnce([
+      { id: 'w-1', name: 'דני' },
+      { id: 'w-2', name: 'מרים' },
+      { id: 'w-3', name: 'רותי' },
+    ]);
+    parseIntentMock.mockResolvedValueOnce({
+      intent: 'reassign_task', confidence: 1, task_reference: null,
+      field: null, new_value: null, params: { newWorkerName: 'רותי' },
+      missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: true,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    await sendMessage(makeManager(), 'תעביר לרותי');
+
+    expect(reassignTask).not.toHaveBeenCalled();
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({
+      awaiting: 'reassign_pick_worker',
+      candidateUserIds: ['w-1', 'w-2'],
+    });
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('לא הבנתי');
+  });
+
+  it('a different high-confidence intent triggers pivot_confirm — not a silent reset', async () => {
+    ctxStore = {
+      awaiting: 'reassign_pick_worker',
+      candidateTaskIds: ['task-1'],
+      candidateUserIds: ['w-1', 'w-2'],
+    };
+    parseIntentMock.mockResolvedValueOnce({
+      intent: 'list_open_exceptions', confidence: 0.95,
+      task_reference: null, field: null, new_value: null,
+      params: {}, missing_fields: [], clarification: null,
+      requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    await sendMessage(makeManager(), 'תראה לי חריגים');
+
+    expect(reassignTask).not.toHaveBeenCalled();
+    expect(clearContext).not.toHaveBeenCalled();
+    expect(ctxStore).toMatchObject({
+      awaiting: 'pivot_confirm',
+      pivotPrevAwaiting: 'reassign_pick_worker',
+    });
+    expect((ctxStore as { pendingIntent?: { intent?: string } } | null)?.pendingIntent?.intent)
+      .toBe('list_open_exceptions');
+    expect(sendTextMessage.mock.calls[0][0].text).toContain('לצאת');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UX-T1 — smart picker escape: mergeCorrectSite / mergeCorrectType (Wave 2E)
+//
+// Conservative per the Wave-2 contract: a fresh `task_reference` re-runs the
+// SAME resolve-and-show entry point the fresh-intent path uses; no new
+// value-extraction logic is invented here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('UX-T1 — smart picker escape (mergeCorrectSite / mergeCorrectType)', () => {
+  it('correct_site_pick_field: a fresh task_reference re-resolves via resolveAndShowSiteFieldMenu', async () => {
+    ctxStore = {
+      awaiting: 'correct_site_pick_field',
+      intent: {
+        intent: 'correct_task_field_site', confidence: 1, task_reference: 'ישן',
+        field: null, new_value: null, params: {}, missing_fields: [],
+        clarification: null, requires_confirmation: false, requires_manager_approval: false,
+        transition: null, problem_type: null,
+      },
+    };
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-9', customerName: 'חדש' });
+    parseIntentMock.mockResolvedValueOnce({
+      intent: 'correct_task_field_site', confidence: 1, task_reference: 'חדש',
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear(); sendListMessage.mockClear();
+
+    await sendMessage(makeWorker(), 'בעצם תקן את הבדיקה של חדש');
+
+    expect(resolveOpenTaskFieldByHint).toHaveBeenCalledWith('u-worker', 'חדש');
+    expect(ctxStore?.awaiting).toBe('correct_site_await_value');
+    expect(ctxStore?.taskFieldId).toBe('tf-9');
+  });
+
+  it('correct_type_confirm: a fresh task_reference abandons the pending confirm and re-resolves the new task hint', async () => {
+    ctxStore = {
+      awaiting: 'correct_type_confirm',
+      taskFieldId: 'tf-old',
+      candidateUserIds: ['type-old'],
+      // No `intent` in ctx here — matches the real flow (showInspectionTypeListForCorrection
+      // / handleCorrectTypePickFromListReply never store one at this state).
+    };
+    getTaskFieldForCorrection.mockResolvedValueOnce({
+      taskFieldId: 'tf-new', taskId: 'task-x', taskOwnerId: 'u-worker',
+      fieldStatus: 'ASSIGNED', currentInspectionTypeId: null, currentLabelHe: null,
+    });
+    resolveOpenTaskFieldByHint.mockResolvedValueOnce({ taskFieldId: 'tf-new', customerName: 'מזרחי' });
+    listInspectionTypes.mockResolvedValueOnce([{ id: 'type-1', code: 'C1', labelHe: 'סוג אחד' }]);
+    parseIntentMock.mockResolvedValueOnce({
+      intent: 'correct_inspection_type', confidence: 1, task_reference: 'מזרחי',
+      field: null, new_value: null, params: {}, missing_fields: [],
+      clarification: null, requires_confirmation: false, requires_manager_approval: false,
+      transition: null, problem_type: null,
+    });
+    sendTextMessage.mockClear();
+
+    await sendMessage(makeWorker(), 'בעצם תקן את הסוג של מזרחי');
+
+    expect(resolveOpenTaskFieldByHint).toHaveBeenCalledWith('u-worker', 'מזרחי');
+    expect(ctxStore?.awaiting).toBe('correct_type_pick_from_list');
+    expect(ctxStore?.taskFieldId).toBe('tf-new');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // D2-T14: correct_inspection_type
 // ─────────────────────────────────────────────────────────────────────────────
 

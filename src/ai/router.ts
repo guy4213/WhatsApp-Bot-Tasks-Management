@@ -3976,6 +3976,14 @@ async function mergeIntoCurrentFlow(
   switch (intent.intent) {
     case 'assign_lead':
       return await mergeAssignLead(user, text, ctx, intent);
+    case 'schedule_task_field':
+      return await mergeSchedule(user, text, ctx, intent);
+    case 'reassign_task':
+      return await mergeReassign(user, text, ctx, intent);
+    case 'correct_task_field_site':
+      return await mergeCorrectSite(user, text, ctx, intent);
+    case 'correct_inspection_type':
+      return await mergeCorrectType(user, text, ctx, intent);
     default:
       return false;
   }
@@ -4192,6 +4200,172 @@ async function mergeAssignLead(
 
   // ── Neither resolved → keep state, ask for clarity.
   await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+  return true;
+}
+
+/**
+ * Merge handler for the schedule_task_field flow (Wave-2 E). Only applies at
+ * the two task-pick states (`schedule_intake_pick_task` /
+ * `schedule_pick_from_search`) — the states where `ctx.scheduleTaskCandidates`
+ * is the on-screen list. Resolves `intent.task_reference` against that list
+ * (reusing `resolveWorkerName`'s generic {id,name} fragment matcher — a Task
+ * candidate is just another named candidate here) and, on a unique match,
+ * advances via the SAME `scheduleProcessChosenTask` the numeric-pick handler
+ * uses — threading any `params.scheduledStartAt` / `durationMinutes` the LLM
+ * already extracted so a one-shot "לתזמן ביקור מחר ב-10 לכהן" skips the
+ * time prompt too. Never touches `schedule_confirm` (out of scope for this
+ * handler — falls through to the caller's legacy net).
+ */
+async function mergeSchedule(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  intent: AIIntentResult,
+): Promise<boolean> {
+  if (ctx.awaiting !== 'schedule_intake_pick_task' && ctx.awaiting !== 'schedule_pick_from_search') {
+    return false;
+  }
+  const taskCandidates = ctx.scheduleTaskCandidates ?? [];
+  if (taskCandidates.length === 0) {
+    return false;
+  }
+
+  const ref = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
+  if (!ref) {
+    await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+    return true;
+  }
+
+  const named = taskCandidates.map((t) => ({ id: t.id, name: t.customerName ?? t.title }));
+  const match = resolveWorkerName(ref, named);
+  const chosen = match.status === 'unique' ? taskCandidates.find((t) => t.id === match.id) : undefined;
+  if (!chosen) {
+    // 'none' or 'ambiguous' — keep the picker open, ask for clarity.
+    await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+    return true;
+  }
+
+  // Thread any time/duration the LLM already extracted from this same message
+  // (mirrors the `startScheduleTaskFieldFlow` prefill path at intent-trigger).
+  const paramStartAt = typeof intent.params?.scheduledStartAt === 'string'
+    ? intent.params.scheduledStartAt.trim() : '';
+  const paramDuration = typeof intent.params?.durationMinutes === 'number'
+    ? intent.params.durationMinutes : undefined;
+  const paramSpecialInstructions = typeof intent.params?.specialInstructions === 'string'
+    ? intent.params.specialInstructions.trim() : '';
+  const effectiveCtx: ConversationState = {
+    ...ctx,
+    scheduleStartAt: paramStartAt || ctx.scheduleStartAt,
+    scheduleDurationMinutes: paramDuration ?? ctx.scheduleDurationMinutes,
+    scheduleSpecialInstructions: paramSpecialInstructions || ctx.scheduleSpecialInstructions,
+  };
+  await scheduleProcessChosenTask(user, effectiveCtx, chosen);
+  return true;
+}
+
+/**
+ * Merge handler for the reassign_task flow (Wave-2 E) — HIGHEST VALUE per the
+ * contract. Applies at `reassign_pick_worker` (the only state this flow
+ * actually reaches in the current code; `reassign_confirm` is a reserved
+ * AwaitingKind not currently wired to any handler). `ctx.candidateUserIds`
+ * holds ONLY worker ids (see `showWorkerListForReassign`), so we re-fetch
+ * `findUsersByName('')` — the exact same source that built the on-screen
+ * list — to recover names for matching. Mirrors
+ * `handleReassignPickWorkerReply`'s write+audit exactly (that flow has no
+ * separate confirm step, so neither does this merge).
+ */
+async function mergeReassign(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  intent: AIIntentResult,
+): Promise<boolean> {
+  if (!user.isElevated) {
+    await clearContext(user.phone);
+    await sendTextMessage({ to: user.phone, text: 'אין הרשאה — רק מנהל יכול לשייך מחדש.' });
+    return true;
+  }
+
+  const taskId = ctx.candidateTaskIds?.[0];
+  const onScreenWorkerIds = ctx.candidateUserIds ?? [];
+  if (!taskId || onScreenWorkerIds.length === 0) {
+    await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+    return true;
+  }
+
+  const newWorkerName = typeof intent.params?.newWorkerName === 'string'
+    ? intent.params.newWorkerName.trim() : '';
+
+  // Re-fetch the SAME worker source `showWorkerListForReassign` used, then
+  // narrow to the ids actually shown on screen (ctx stores ids only).
+  const allWorkers = await findUsersByName('');
+  const onScreenWorkers = onScreenWorkerIds
+    .map((id) => allWorkers.find((w) => w.id === id))
+    .filter((w): w is { id: string; name: string } => Boolean(w));
+
+  let workerId: string | null = null;
+
+  const selfId = resolveSelfReference(newWorkerName || text, user);
+  if (selfId && onScreenWorkers.some((w) => w.id === selfId)) {
+    workerId = selfId;
+  } else if (newWorkerName) {
+    const match = resolveWorkerName(newWorkerName, onScreenWorkers, allWorkers);
+    // Confirm the resolved id was actually one of the ids offered on screen —
+    // a wider-tier match on a worker who wasn't shown is not a valid pick.
+    if (match.status === 'unique' && onScreenWorkers.some((w) => w.id === match.id)) {
+      workerId = match.id;
+    }
+  }
+
+  if (!workerId) {
+    await sendTextMessage({ to: user.phone, text: SMART_ESCAPE_REDISPLAY_HINT });
+    return true;
+  }
+
+  const result = await reassignTask(taskId, workerId, user.id);
+  await clearContext(user.phone);
+  let msg = `המשימה שויכה מחדש. ${result.resetCount} שורות בדיקה אופסו.`;
+  if (result.hadInProgressRows) msg += ' (שורות שכבר בביצוע לא שונו.)';
+  await sendTextMessage({ to: user.phone, text: msg });
+  await auditEvent(user, 'reassign_task', taskId, 'SUCCESS');
+  return true;
+}
+
+/**
+ * Merge handler for correct_task_field_site (Wave-2 E) — CONSERVATIVE per the
+ * contract: only re-resolves when the LLM extracted a fresh `task_reference`,
+ * routing it through the SAME `resolveAndShowSiteFieldMenu` entry point the
+ * fresh-intent path uses (so ambiguous/no-match handling stays identical). No
+ * value-extraction is attempted here — that path already exists at
+ * `correct_site_await_value` / `correct_site_confirm_extracted`. No task
+ * reference in the parsed intent → `false` (legacy net).
+ */
+async function mergeCorrectSite(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  intent: AIIntentResult,
+): Promise<boolean> {
+  const ref = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
+  if (!ref) return false;
+  await resolveAndShowSiteFieldMenu(user, ctx.intent ?? intent, ref);
+  return true;
+}
+
+/**
+ * Merge handler for correct_inspection_type (Wave-2 E) — same conservative
+ * shape as `mergeCorrectSite`: a fresh `task_reference` re-runs
+ * `resolveAndShowTypeList`; otherwise `false` (legacy net).
+ */
+async function mergeCorrectType(
+  user: ResolvedUser,
+  text: string,
+  ctx: ConversationState,
+  intent: AIIntentResult,
+): Promise<boolean> {
+  const ref = typeof intent.task_reference === 'string' ? intent.task_reference.trim() : '';
+  if (!ref) return false;
+  await resolveAndShowTypeList(user, ctx.intent ?? intent, ref);
   return true;
 }
 
