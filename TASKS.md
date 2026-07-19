@@ -4263,3 +4263,53 @@ goLive/owntracksConfig/greenapiWebhook/trackingRoute — 59/59 ירוקים (bui
 4. חיבור Outlook לבוט (חד-פעמי, /microsoft/oauth/start) למי שרוצה כלי יומן.
 5. עתידי: אינטנט "קישור קולי" בוואטסאפ; כפתור בעמוד ה-CRM; TTS-תשובות קוליות
    בוואטסאפ עם eleven_v3.
+
+---
+
+## UX-T1 — Smart Picker Escape: universal free-text flexibility across the bot (2026-07-19)
+
+**Status:** DONE (main — commits 8209b79, 00231bc, 7910439, f15852d, ff9c928)
+
+**What to do:** Make everything doable via the numbered menus also doable in free
+text, and stop free text mid-flow from wiping the in-progress selection. The 18
+`NUMERIC_PICKER_AWAITING` states used to escape via `clearContext + handleAIMessage`,
+restarting the flow from scratch (Guy went through 4 menu screens to assign one lead).
+
+**Definition of Done:** free text mid-picker merges into the current flow and
+advances; a different high-confidence intent asks to confirm the pivot instead of
+silently resetting; unclear text re-prompts without losing state; the single-shot
+examples resolve in one message to a single confirmation.
+
+**Design / files changed:**
+- `src/ai/nameResolvers.ts` (new) — `resolveSelfReference` (אלי/לי/אותי/עצמי/לעצמי/אליי,
+  whole-token so "אלירן" is never self-ref), `resolveWorkerName`, `resolveLeadReference`
+  (fragment match, on-screen tier beats the wider table).
+- `src/ai/smartPickerEscape.ts` (new) — pure `classifySmartPickerEscape` →
+  merge / pivot / redisplay / passthrough, driven by `FLOW_INTENT_BY_STATE`.
+- `src/ai/intentParser.ts` — self-reference prompt guidance (worker + manager lists).
+- `src/services/conversationContext.ts` — new `pivot_confirm` state + `pendingIntent` /
+  `pivotPrevAwaiting` fields.
+- `src/ai/router.ts` — `trySmartPickerEscape` replaces the old escape hatch; new
+  `pivot_confirm` handler; `mergeIntoCurrentFlow` (assign_lead, schedule, reassign,
+  correct_site, correct_type, mgr worker-pick, mgr lead-pick; `default: return false`
+  → legacy net). Single-shot: `startScheduleTaskFieldFlow` auto-selects a named
+  customer; `startReassignTaskFlow` auto-resolves `newWorkerName` → new
+  `reassign_confirm` (write goes through a confirm on the free-text path);
+  `tryPrePopulateAssignLead` now resolves self-reference.
+- Tests: `nameResolvers.test.ts`, `smartPickerEscape.test.ts`, `intentParser.test.ts`,
+  and extensions to `routerAssignLead` / `routerScheduleTaskField` / `routerCorrections` /
+  `routerManagerMenu` / `routerManagerIntents`. Also fixed two pre-existing
+  `routerManagerMenu.test.ts` bugs (a `getContext` mock-leak that OOM'd the file, and a
+  stale not-found assertion).
+
+**Tests run:** `npx tsc --noEmit` clean; full suite 1954 passed / 7 skipped, 0 failed.
+
+**Orchestration:** Opus orchestrator + 6 Sonnet sub-agents (Wave 1: nameResolvers,
+smartPickerEscape, intentParser+context in parallel; Wave 2 serial on router.ts:
+assign_lead, then schedule/reassign/correct, then manager flows). Orchestrator did the
+single-shot start-flow pass, all QA, and the pre-existing test-bug fixes.
+
+**Deviations / remaining:** correct_site single-shot (field+value in one message) left as
+a follow-up — the intent parser emits no field/value for it, so it needs raw-text
+extraction threading; the mid-picker `mergeCorrectSite` (re-reference a task) is done.
+No `Task.status` writes; reassign uses the documented `Task.ownerId` write only.
