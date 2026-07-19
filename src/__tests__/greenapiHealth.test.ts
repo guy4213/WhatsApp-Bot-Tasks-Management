@@ -118,19 +118,53 @@ describe('handleGreenApiStateChange — transition dedup', () => {
     expect(sendOpsAlertText).not.toHaveBeenCalled();
   });
 
-  it('yellowCard is treated as bad and gets its own pre-ban warning wording', async () => {
+  // Alert-worthy set is {notAuthorized, blocked, sleepMode}. Everything else
+  // is logged only. Rationale: yellowCard is a WhatsApp "slow down" warning,
+  // not a disconnection — sends still deliver. Waking Guy up with a "🚨 הבוט
+  // מנותק" alert for yellowCard trained him to ignore the channel.
+  it('yellowCard is NOT alert-worthy — no WhatsApp alert fires', async () => {
     await handleGreenApiStateChange('yellowCard', 'poll');
-    expect(sendOpsAlertText).toHaveBeenCalled();
-    const first = sendOpsAlertText.mock.calls[0][0] as { text: string };
-    expect(first.text).toContain('yellowCard');
-    expect(first.text).toContain('קדם-חסימה');
+    expect(sendOpsAlertText).not.toHaveBeenCalled();
   });
 
-  it('unknown state (e.g. new value from Green API) is treated as bad and alerts', async () => {
+  it('starting is NOT alert-worthy — transient bootup, no alert', async () => {
+    await handleGreenApiStateChange('starting', 'poll');
+    expect(sendOpsAlertText).not.toHaveBeenCalled();
+  });
+
+  it('unknown state (e.g. Green API schema change) is NOT alert-worthy — log only', async () => {
     await handleGreenApiStateChange('something-brand-new', 'webhook');
+    expect(sendOpsAlertText).not.toHaveBeenCalled();
+  });
+
+  it('yellowCard → authorized does NOT fire a "recovered" alert (no outage was announced)', async () => {
+    await handleGreenApiStateChange('yellowCard', 'poll');
+    await handleGreenApiStateChange('authorized', 'poll');
+    expect(sendOpsAlertText).not.toHaveBeenCalled();
+  });
+
+  it('yellowCard → notAuthorized DOES alert (crossed into the real-outage set)', async () => {
+    await handleGreenApiStateChange('yellowCard', 'poll');
+    expect(sendOpsAlertText).not.toHaveBeenCalled();
+    await handleGreenApiStateChange('notAuthorized', 'poll');
     expect(sendOpsAlertText).toHaveBeenCalled();
     const first = sendOpsAlertText.mock.calls[0][0] as { text: string };
-    expect(first.text).toContain('unknown');
+    expect(first.text).toContain('מנותק');
+    expect(first.text).toContain('notAuthorized');
+  });
+
+  it('sleepMode IS alert-worthy — instance stopped, human must restart', async () => {
+    await handleGreenApiStateChange('sleepMode', 'poll');
+    expect(sendOpsAlertText).toHaveBeenCalled();
+    const first = sendOpsAlertText.mock.calls[0][0] as { text: string };
+    expect(first.text).toContain('sleepMode');
+  });
+
+  it('blocked IS alert-worthy — account banned by WhatsApp', async () => {
+    await handleGreenApiStateChange('blocked', 'poll');
+    expect(sendOpsAlertText).toHaveBeenCalled();
+    const first = sendOpsAlertText.mock.calls[0][0] as { text: string };
+    expect(first.text).toContain('blocked');
   });
 });
 

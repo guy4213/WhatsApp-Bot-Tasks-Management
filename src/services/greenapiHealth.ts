@@ -54,6 +54,32 @@ export type GreenApiState =
 
 const OK_STATE: GreenApiState = 'authorized';
 
+/**
+ * Alert-worthy bad states — states where a human MUST take action to restore
+ * delivery. Kept in sync with the preflight FATAL_STATES in
+ * `services/greenapiPreflight.ts` (same list, same rationale):
+ *
+ *   notAuthorized — QR expired / logged out. Sends never leave.
+ *   blocked       — Banned by WhatsApp. Never delivers.
+ *   sleepMode     — Instance stopped.
+ *
+ * DELIBERATELY EXCLUDED (still logged, but no WhatsApp alert):
+ *   yellowCard    — WhatsApp SOFT warning ("reduce volume"). Sends still
+ *                   deliver. The right response is a console-side tweak of
+ *                   `delaySendMessagesMilliseconds`, NOT a phone-checklist
+ *                   alarm titled "הבוט מנותק". Waking Guy up for yellowCard
+ *                   trained him to ignore real alerts.
+ *   starting      — Transient bootup, self-resolves.
+ *   unknown       — Never-seen schema. Log-only.
+ */
+const ALERT_WORTHY_BAD_STATES: ReadonlySet<GreenApiState> = new Set<GreenApiState>([
+  'notAuthorized', 'blocked', 'sleepMode',
+]);
+
+function isAlertWorthyBad(s: GreenApiState): boolean {
+  return ALERT_WORTHY_BAD_STATES.has(s);
+}
+
 /** Cool down between "still broken" reminders when the state stays bad. */
 const RE_ALERT_INTERVAL_MS = 30 * 60 * 1000; // 30 min
 
@@ -90,24 +116,29 @@ export async function handleGreenApiStateChange(
   // same transition on the next tick.
   lastKnownState = state;
 
-  const isOk       = state === OK_STATE;
-  const wasOk      = prev === OK_STATE || prev === null;
-  const changed    = state !== prev;
+  // Alert decision is driven by ALERT_WORTHY_BAD_STATES, NOT by "anything !=
+  // authorized". yellowCard/starting/unknown are silently logged; only real
+  // "human must act" states trigger the WhatsApp alert.
+  const isBad     = isAlertWorthyBad(state);
+  const wasBad    = prev !== null && isAlertWorthyBad(prev);
+  const changed   = state !== prev;
   const cooldownOk = now - lastAlertAt >= RE_ALERT_INTERVAL_MS;
 
   let shouldAlert = false;
   let reason: 'went_bad' | 'recovered' | 'still_bad' | null = null;
 
-  if (!isOk && wasOk) {
-    // authorized → anything bad, OR first-ever observation of a bad state
+  if (isBad && !wasBad) {
+    // OK-or-soft-warning → alert-worthy bad. First real outage transition.
     shouldAlert = true;
     reason = 'went_bad';
-  } else if (isOk && !wasOk) {
-    // recovery — but only alert if we alerted on the outage in the first place
+  } else if (!isBad && wasBad && state === OK_STATE) {
+    // Alert-worthy bad → authorized. Full recovery — matches the went_bad
+    // side so we do not fire a "recovered" that never had an outage message.
+    // (bad → yellowCard is NOT reported as recovered — wait for authorized.)
     shouldAlert = true;
     reason = 'recovered';
-  } else if (!isOk && !wasOk && (changed || cooldownOk)) {
-    // still bad — re-alert if the specific bad state changed
+  } else if (isBad && wasBad && (changed || cooldownOk)) {
+    // Still alert-worthy bad — re-alert if the specific state changed
     // (notAuthorized → blocked is worth surfacing) OR the cooldown elapsed.
     shouldAlert = true;
     reason = 'still_bad';
