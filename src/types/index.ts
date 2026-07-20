@@ -207,7 +207,12 @@ export type AIIntent =
   | 'day_summary_query'          // worker asks for their day summary via free text
   | 'missing_equipment_free'     // worker reports missing equipment before going out (general, not task-scoped)
   // PROV-T5 (TASKS §4.20): manager enables OwnTracks auto-provisioning for a worker.
-  | 'enable_worker_location_tracking';
+  | 'enable_worker_location_tracking'
+  // CAL-WA: Outlook calendar over WhatsApp text (parity with the voice tools).
+  | 'calendar_list'      // read upcoming calendar events
+  | 'calendar_create'    // create a new calendar event
+  | 'calendar_update'    // update an existing event (subject/time/location)
+  | 'calendar_delete';   // delete an event (confirm before deleting)
 
 // v2 inspector-side sub-enums (SPEC_FIELD_V2 §4, §7, §9). These are the SUBSET
 // of `fieldStatus` transitions a worker can trigger via free text — the office-

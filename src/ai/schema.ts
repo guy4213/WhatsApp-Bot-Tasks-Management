@@ -34,6 +34,14 @@ export const AI_INTENTS = [
   // PROV-T5 (TASKS §4.20): manager triggers OwnTracks auto-provisioning for a
   // worker. `task_reference` (or params.workerHint) carries the worker name.
   'enable_worker_location_tracking',
+  // CAL-WA: Outlook calendar over WhatsApp text (parity with the voice tools).
+  // All four route to crmApi (keyed by user.id → the CRM's stored Outlook
+  // connection). Reads run directly; create/update run directly; delete asks
+  // for a "כן/לא" confirmation first.
+  'calendar_list',    // "מה יש לי ביומן", "פגישות מחר"
+  'calendar_create',  // "קבע פגישה עם X מחר ב-3"
+  'calendar_update',  // "תזיז את הפגישה עם X לשעה 4"
+  'calendar_delete',  // "תבטל את הפגישה עם X" (confirm before deleting)
 ] as const;
 
 // Editable fields the model may target with edit_field.

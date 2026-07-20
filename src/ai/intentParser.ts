@@ -481,6 +481,44 @@ function buildMyInspectionsPastFewShot(todayIsrael: string): string {
   ].join('\n');
 }
 
+// CAL-WA — Outlook calendar intents. Shown to BOTH workers and managers, since
+// any connected user with a linked Outlook account can manage their own calendar
+// over WhatsApp (parity with the voice assistant's calendar tools). Times are
+// resolved to ISO 8601 LOCAL wall time (Asia/Jerusalem, no Z / no offset) — the
+// backend attaches the timezone.
+const CALENDAR_INTENT_LIST = [
+  'CALENDAR INTENTS (Outlook calendar of the CURRENT user — available to every user):',
+  '- calendar_list: user wants to SEE their own calendar / upcoming meetings ("מה יש לי ביומן", "הפגישות שלי מחר", "מה יש לי השבוע ביומן", "יומן"). Optional params.days_ahead (number, default 7). If the user names a specific window resolve it to params.from_iso / params.to_iso (ISO 8601 local, no Z). This reads the OUTLOOK calendar — it is DIFFERENT from list_my_inspections (which lists field-inspection tasks). Prefer calendar_list when the user says "יומן" / "פגישה" / "פגישות" / "פגישות ביומן"; prefer list_my_inspections when they say "בדיקות" / "משימות".',
+  '- calendar_create: user wants to ADD an event to their Outlook calendar ("קבע פגישה עם דנה מחר ב-3", "תוסיף ליומן פגישה עם הלקוח ביום ראשון ב-10 בבוקר"). REQUIRED: params.subject (string) and params.start_iso (ISO 8601 LOCAL wall time, e.g. "2026-07-20T15:00:00"). Optional: params.end_iso, params.duration_minutes (default 60 when no end), params.location, params.notes. If the subject or the start time is missing, still emit calendar_create but add the missing key(s) to missing_fields and write a Hebrew clarification.',
+  '- calendar_update: user wants to CHANGE an existing event ("תזיז את הפגישה עם דנה ל-4", "עדכן את המיקום של הפגישה עם הלקוח לתל אביב", "שנה את הנושא של הפגישה מחר"). Identify the target with params.match (free text from the event subject) OR params.event_id if the user is replying about a specific event. Put the changed fields in params: subject, start_iso, end_iso, location, notes. If you cannot tell WHICH event, set params.match to your best guess (the backend disambiguates / asks).',
+  '- calendar_delete: user wants to REMOVE / CANCEL an event ("תבטל את הפגישה עם דנה", "מחק מהיומן את הפגישה מחר", "תבטל את הפגישה עם הלקוח"). Identify the target with params.match (subject text) or params.event_id. The backend ALWAYS asks the user to confirm ("כן/לא") before deleting — you do NOT need requires_confirmation, just emit the intent with the match.',
+].join('\n');
+
+const CALENDAR_FEW_SHOT = [
+  'HEBREW EXAMPLES — CALENDAR (Outlook). Today is used to resolve relative dates.',
+  '',
+  '// calendar_list',
+  '- "מה יש לי ביומן" → calendar_list, params.days_ahead=7.',
+  '- "מה יש לי ביומן מחר" / "הפגישות שלי מחר" → calendar_list, params.days_ahead=1.',
+  '- "מה יש לי היום ביומן" → calendar_list, params.days_ahead=1.',
+  '- "הפגישות שלי השבוע" → calendar_list, params.days_ahead=7.',
+  '- "תראה לי את היומן" → calendar_list, params.days_ahead=7.',
+  '',
+  '// calendar_create',
+  '- "קבע פגישה עם דנה מחר בשלוש" → calendar_create, params.subject="פגישה עם דנה", params.start_iso="<tomorrow>T15:00:00".',
+  '- "תוסיף ליומן פגישה עם הלקוח ביום ראשון ב-10 בבוקר בתל אביב" → calendar_create, params.subject="פגישה עם הלקוח", params.start_iso="<sunday>T10:00:00", params.location="תל אביב".',
+  '- "קבע לי פגישה מחר ב-9 לשעתיים" → calendar_create, params.subject="פגישה", params.start_iso="<tomorrow>T09:00:00", params.duration_minutes=120.',
+  '- "תקבע פגישה" (no subject/time) → calendar_create, missing_fields=["subject","start_iso"], clarification="עם מי הפגישה ומתי?".',
+  '',
+  '// calendar_update',
+  '- "תזיז את הפגישה עם דנה ל-4" → calendar_update, params.match="דנה", params.start_iso="<same day>T16:00:00".',
+  '- "עדכן את המיקום של הפגישה עם הלקוח לרעננה" → calendar_update, params.match="הלקוח", params.location="רעננה".',
+  '',
+  '// calendar_delete',
+  '- "תבטל את הפגישה עם דנה" → calendar_delete, params.match="דנה".',
+  '- "מחק מהיומן את הפגישה מחר" → calendar_delete, params.match="מחר".',
+].join('\n');
+
 export function buildSystemPrompt(ctx: ParseContext, message?: string): string {
   const todayIsrael = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -598,7 +636,12 @@ export function buildSystemPrompt(ctx: ParseContext, message?: string): string {
     '',
     isMgr ? MANAGER_INTENT_LIST : WORKER_INTENT_LIST,
     '',
+    // CAL-WA: calendar intents are available to every connected user (both roles).
+    CALENDAR_INTENT_LIST,
+    '',
     isMgr ? MANAGER_FEW_SHOT : WORKER_FEW_SHOT,
+    '',
+    CALENDAR_FEW_SHOT,
     '',
     buildMyInspectionsPastFewShot(todayIsrael),
     '',

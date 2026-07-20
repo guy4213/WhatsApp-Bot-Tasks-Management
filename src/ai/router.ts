@@ -93,6 +93,16 @@ import { getEmployeeEndOfDay, getCompanyEndOfDay } from '../services/tasks';
 import { formatEmployeeEndOfDay, formatManagerEndOfDay } from '../whatsapp/digestContent';
 // D3-T6: Sasha lead-assignment via WhatsApp.
 import { canAssignLeads } from '../services/specialUsers';
+// CAL-WA: Outlook calendar over WhatsApp text — delegates to the CRM's stored
+// Outlook connection keyed by user.id (same path the voice tools use).
+import {
+  crmApiConfigured,
+  listCrmCalendarEvents,
+  createCrmCalendarEvent,
+  updateCrmCalendarEvent,
+  deleteCrmCalendarEvent,
+  type CrmCalendarEvent,
+} from '../services/crmApi';
 // Manager menu: unified 7-item manager menu view queries.
 import {
   getManagementSnapshot,
@@ -780,6 +790,12 @@ async function continueConversation(
     if (pivoted) return;
   }
 
+  // ── CAL-WA: delete-confirm (yes/no before removing a calendar event) ──────
+  if (ctx.awaiting === 'calendar_delete_confirm') {
+    await handleCalendarDeleteConfirmReply(user, trimmed, ctx);
+    return;
+  }
+
   // ── Numbered menu + digest-settings flows (these states carry NO AI intent) ──
   if (ctx.awaiting === 'menu') {
     await handleMenuReply(user, trimmed);
@@ -1306,6 +1322,138 @@ async function executeIntent(
     case 'enable_worker_location_tracking':
       await startEnableWorkerLocationTracking(user, intent);
       return;
+
+    // ── CAL-WA: Outlook calendar over WhatsApp text ─────────────────────────
+    // Available to every connected user; delegates to the CRM's stored Outlook
+    // connection via crmApi (keyed by user.id). Reads + create + update run
+    // directly; delete asks for a "כן/לא" confirmation first.
+    case 'calendar_list': {
+      if (!crmApiConfigured()) {
+        await sendTextMessage({ to: user.phone, text: 'חיבור היומן אינו מוגדר כרגע.' });
+        return;
+      }
+      const daysAhead = typeof intent.params?.days_ahead === 'number'
+        ? Math.min(Math.max(intent.params.days_ahead, 1), 60) : 7;
+      const now = Date.now();
+      const startIso = typeof intent.params?.from_iso === 'string'
+        ? intent.params.from_iso : new Date(now).toISOString();
+      const endIso = typeof intent.params?.to_iso === 'string'
+        ? intent.params.to_iso : new Date(now + daysAhead * 86_400_000).toISOString();
+      try {
+        const events = await listCrmCalendarEvents(user.id, { startIso, endIso, top: 25 });
+        if (events.length === 0) {
+          await sendTextMessage({ to: user.phone, text: 'היומן פנוי בתקופה הזו.' });
+          return;
+        }
+        const shown = events.slice(0, 12);
+        const lines = shown.map((e, i) => {
+          const loc = e.location ? ` — ${e.location}` : '';
+          return `${i + 1}. ${e.subject ?? 'ללא נושא'} — ${fmtCalendarWhen(e.start?.dateTime ?? null)}${loc}`;
+        });
+        const more = events.length > shown.length ? `\n(ועוד ${events.length - shown.length}…)` : '';
+        await sendTextMessage({ to: user.phone, text: `📅 היומן שלך:\n${lines.join('\n')}${more}` });
+      } catch (err) {
+        await sendTextMessage({ to: user.phone, text: calendarErrorText(err) });
+      }
+      return;
+    }
+
+    case 'calendar_create': {
+      if (!crmApiConfigured()) {
+        await sendTextMessage({ to: user.phone, text: 'חיבור היומן אינו מוגדר כרגע.' });
+        return;
+      }
+      const subject = typeof intent.params?.subject === 'string' ? intent.params.subject.trim() : '';
+      const startIso = typeof intent.params?.start_iso === 'string' ? intent.params.start_iso.trim() : '';
+      if (!subject || !startIso) {
+        await sendTextMessage({ to: user.phone, text: intent.clarification ?? 'עם מי הפגישה ומתי? (חסר נושא או מועד)' });
+        return;
+      }
+      // end = explicit end_iso, else start + duration_minutes (default 60).
+      let endIso = typeof intent.params?.end_iso === 'string' ? intent.params.end_iso.trim() : '';
+      if (!endIso) {
+        const durationMin = typeof intent.params?.duration_minutes === 'number'
+          ? intent.params.duration_minutes : 60;
+        const startDate = new Date(startIso);
+        if (Number.isNaN(startDate.getTime())) {
+          await sendTextMessage({ to: user.phone, text: 'לא הצלחתי להבין את המועד. נסה שוב עם תאריך ושעה.' });
+          return;
+        }
+        // Keep local wall-time semantics: add minutes to the parsed instant and
+        // re-emit an ISO local string (no Z) matching the CRM's expectation.
+        endIso = new Date(startDate.getTime() + durationMin * 60_000).toISOString().replace(/\.\d{3}Z$/, '');
+      }
+      const location = typeof intent.params?.location === 'string' ? intent.params.location.trim() : undefined;
+      const notes = typeof intent.params?.notes === 'string' ? intent.params.notes.trim() : undefined;
+      try {
+        await createCrmCalendarEvent(user.id, {
+          subject, start: startIso, end: endIso, timeZone: 'Asia/Jerusalem',
+          ...(location ? { location } : {}),
+          ...(notes ? { body: notes } : {}),
+        });
+        await sendTextMessage({
+          to: user.phone,
+          text: `✅ נקבע ביומן: "${subject}" ל-${fmtCalendarWhen(startIso)}.`,
+        });
+      } catch (err) {
+        await sendTextMessage({ to: user.phone, text: calendarErrorText(err) });
+      }
+      return;
+    }
+
+    case 'calendar_update': {
+      if (!crmApiConfigured()) {
+        await sendTextMessage({ to: user.phone, text: 'חיבור היומן אינו מוגדר כרגע.' });
+        return;
+      }
+      const resolved = await resolveCalendarEventForRouter(user.id, intent.params);
+      if (!resolved.ok) {
+        await sendTextMessage({ to: user.phone, text: resolved.message });
+        return;
+      }
+      const patch: {
+        subject?: string; start?: string; end?: string; location?: string; body?: string;
+      } = {};
+      if (typeof intent.params?.subject === 'string' && intent.params.subject.trim()) patch.subject = intent.params.subject.trim();
+      if (typeof intent.params?.start_iso === 'string' && intent.params.start_iso.trim()) patch.start = intent.params.start_iso.trim();
+      if (typeof intent.params?.end_iso === 'string' && intent.params.end_iso.trim()) patch.end = intent.params.end_iso.trim();
+      if (typeof intent.params?.location === 'string' && intent.params.location.trim()) patch.location = intent.params.location.trim();
+      if (typeof intent.params?.notes === 'string' && intent.params.notes.trim()) patch.body = intent.params.notes.trim();
+      if (Object.keys(patch).length === 0) {
+        await sendTextMessage({ to: user.phone, text: `מה לעדכן באירוע "${resolved.subject}"? (נושא / מועד / מיקום)` });
+        return;
+      }
+      try {
+        await updateCrmCalendarEvent(user.id, resolved.eventId, { ...patch, timeZone: 'Asia/Jerusalem' });
+        await sendTextMessage({ to: user.phone, text: `✏️ האירוע "${resolved.subject}" עודכן ביומן.` });
+      } catch (err) {
+        await sendTextMessage({ to: user.phone, text: calendarErrorText(err) });
+      }
+      return;
+    }
+
+    case 'calendar_delete': {
+      if (!crmApiConfigured()) {
+        await sendTextMessage({ to: user.phone, text: 'חיבור היומן אינו מוגדר כרגע.' });
+        return;
+      }
+      const resolved = await resolveCalendarEventForRouter(user.id, intent.params);
+      if (!resolved.ok) {
+        await sendTextMessage({ to: user.phone, text: resolved.message });
+        return;
+      }
+      // Confirm before deleting — store the resolved event and await "כן/לא".
+      await setContext(user.phone, {
+        awaiting: 'calendar_delete_confirm',
+        calendarDeleteEventId: resolved.eventId,
+        calendarDeleteSubject: resolved.subject,
+      });
+      await sendTextMessage({
+        to: user.phone,
+        text: `למחוק מהיומן את "${resolved.subject}"? השב "כן" למחיקה או "לא" לביטול.`,
+      });
+      return;
+    }
 
     // ── Manager-facing intents (role-aware) ─────────────────────────────────
     // All require isManagerMenuUser(user). Workers get a rejection.
@@ -3585,6 +3733,109 @@ async function safePriorities(): Promise<string[]> {
     return await getAllowedPriorities();
   } catch {
     return [];
+  }
+}
+
+// ── CAL-WA: Outlook calendar helpers ─────────────────────────────────────────
+
+/** Human Hebrew date+time for a calendar event start ("יום ב׳, 20/07 15:00"). */
+function fmtCalendarWhen(dt: string | null): string {
+  if (!dt) return 'ללא מועד';
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return dt;
+  return new Intl.DateTimeFormat('he-IL', {
+    timeZone: 'Asia/Jerusalem',
+    weekday: 'short', day: '2-digit', month: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  }).format(d);
+}
+
+/** Friendly Hebrew mapping for the "not connected" error the CRM returns. */
+function calendarErrorText(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes('מחובר') || msg.includes('Outlook')
+    ? 'חשבון ה-Outlook שלך עדיין לא מחובר. יש להתחבר פעם אחת דרך ה-CRM (הגדרות → Outlook).'
+    : msg || 'הפעולה מול היומן נכשלה.';
+}
+
+/**
+ * Resolve which calendar event an update/delete targets. Mirrors the voice
+ * assistant's `resolveCalendarEvent` (voiceTools.ts): explicit event_id →
+ * fuzzy subject match over the user's events (7 days back, 60 ahead).
+ * On ambiguity / miss it returns a ready-to-send Hebrew message string.
+ */
+async function resolveCalendarEventForRouter(
+  userId: string,
+  params: Record<string, unknown> | undefined,
+): Promise<
+  | { ok: true; eventId: string; subject: string }
+  | { ok: false; message: string }
+> {
+  const explicitId = typeof params?.event_id === 'string' ? params.event_id.trim() : '';
+  const match = typeof params?.match === 'string' ? params.match.trim() : '';
+
+  let events: CrmCalendarEvent[];
+  try {
+    const now = Date.now();
+    events = await listCrmCalendarEvents(userId, {
+      startIso: new Date(now - 7 * 86_400_000).toISOString(),
+      endIso: new Date(now + 60 * 86_400_000).toISOString(),
+      top: 50,
+    });
+  } catch (err) {
+    return { ok: false, message: calendarErrorText(err) };
+  }
+
+  if (explicitId) {
+    const found = events.find((e) => e.id === explicitId);
+    return { ok: true, eventId: explicitId, subject: found?.subject ?? 'האירוע' };
+  }
+  if (!match) {
+    return { ok: false, message: 'לאיזה אירוע להתייחס? אפשר לומר חלק מהנושא.' };
+  }
+
+  const q = match.toLowerCase();
+  const hits = events.filter((e) => (e.subject ?? '').toLowerCase().includes(q));
+  if (hits.length === 0) {
+    return { ok: false, message: `לא מצאתי ביומן אירוע שמתאים ל"${match}".` };
+  }
+  if (hits.length > 1) {
+    const lines = hits.slice(0, 6).map((e, i) =>
+      `${i + 1}. ${e.subject ?? 'ללא נושא'} — ${fmtCalendarWhen(e.start?.dateTime ?? null)}`);
+    return {
+      ok: false,
+      message: `יש כמה אירועים שמתאימים ל"${match}". איזה מהם? אפשר לנסח מדויק יותר:\n${lines.join('\n')}`,
+    };
+  }
+  return { ok: true, eventId: hits[0].id, subject: hits[0].subject ?? 'האירוע' };
+}
+
+/**
+ * CAL-WA — handle the yes/no reply after a `calendar_delete` confirmation.
+ * "כן"/"yes"/"אישור" → delete; anything else → cancel. Clears context either way.
+ */
+async function handleCalendarDeleteConfirmReply(
+  user: ResolvedUser,
+  trimmed: string,
+  ctx: ConversationState,
+): Promise<void> {
+  await clearContext(user.phone);
+  const eventId = ctx.calendarDeleteEventId;
+  const subject = ctx.calendarDeleteSubject ?? 'האירוע';
+  const yes = /^(כן|yes|אישור|מחק|למחוק|בטוח)\b/i.test(trimmed);
+  if (!yes) {
+    await sendTextMessage({ to: user.phone, text: `בוטל — "${subject}" נשאר ביומן.` });
+    return;
+  }
+  if (!eventId) {
+    await sendTextMessage({ to: user.phone, text: 'משהו השתבש — נסה שוב לבקש למחוק את האירוע.' });
+    return;
+  }
+  try {
+    await deleteCrmCalendarEvent(user.id, eventId);
+    await sendTextMessage({ to: user.phone, text: `🗑️ האירוע "${subject}" נמחק מהיומן.` });
+  } catch (err) {
+    await sendTextMessage({ to: user.phone, text: calendarErrorText(err) });
   }
 }
 

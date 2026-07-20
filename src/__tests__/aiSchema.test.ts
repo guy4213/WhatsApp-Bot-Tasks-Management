@@ -72,9 +72,13 @@ describe('AI_INTENTS — v2 field-inspector kinds', () => {
   it('contains the known active intents (X-T2 removed legacy CRM kinds; new intents added by later tasks)', () => {
     // Original 6 (X-T2) plus later additions: D2-T11 schedule_task_field,
     // D2-T12/13/14 correction intents, D3-T6 assign_lead,
-    // and 7 manager-facing intents.
+    // 7 manager-facing intents, and CAL-WA calendar intents (Outlook over WhatsApp).
     const expected = [
       'assign_lead',
+      'calendar_create',
+      'calendar_delete',
+      'calendar_list',
+      'calendar_update',
       'correct_inspection_type',
       'correct_task_field_site',
       'day_summary_query',

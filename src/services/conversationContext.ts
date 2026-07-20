@@ -108,7 +108,10 @@ export type AwaitingKind =
   // without naming the worker — the next inbound text is the worker name.
   | 'enable_tracking_pick_worker'
   // UX-T1: mid-flow pivot yes/no confirmation
-  | 'pivot_confirm';
+  | 'pivot_confirm'
+  // CAL-WA: worker asked to delete a calendar event; the bot resolved exactly
+  // one matching event and now awaits a "כן/לא" confirmation before deleting.
+  | 'calendar_delete_confirm';
 
 /**
  * Active-task pointer (Phase 1). Stored inside the conversation-context `state`
@@ -232,6 +235,10 @@ export interface ConversationState {
   pendingIntent?: AIIntentResult;
   /** UX-T1: the awaiting state to restore if the user declines the pivot. */
   pivotPrevAwaiting?: AwaitingKind;
+  // CAL-WA: calendar_delete_confirm state — the resolved event awaiting a
+  // yes/no confirmation before the DELETE is issued.
+  calendarDeleteEventId?: string;
+  calendarDeleteSubject?: string;
 }
 
 export async function getContext(phone: string): Promise<ConversationState | null> {

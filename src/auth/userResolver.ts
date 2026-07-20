@@ -37,7 +37,11 @@ export async function resolveUserByPhone(rawPhone: string): Promise<AuthResult> 
     return { ok: false, reason: 'UNKNOWN_NUMBER' };
   }
 
-  // Try several phone column formats stored in the DB
+  // Match on the primary "User"."phone" OR any secondary number in "UserPhone"
+  // (one user may message from several devices — same userId, so tasks and the
+  // Outlook calendar stay shared). "UserPhone"."phoneDigits" is stored already
+  // normalized (972XXXXXXXXX) and is UNIQUE, so a number can never map to two
+  // people. Primary "phone" is ordered first so it wins on any overlap.
   const result = await pool.query<{
     id: string;
     name: string;
@@ -48,13 +52,16 @@ export async function resolveUserByPhone(rawPhone: string): Promise<AuthResult> 
     can_manage_users: boolean;
     can_manage_permissions: boolean;
   }>(
-    `SELECT id, name, phone, role, status,
-            "canViewAllRecords"     AS can_view_all_records,
-            "canManageUsers"        AS can_manage_users,
-            "canManagePermissions"  AS can_manage_permissions
-     FROM "User"
-     WHERE regexp_replace(phone, '[^0-9]', '', 'g') = $1
-        OR regexp_replace(phone, '[^0-9]', '', 'g') = $2
+    `SELECT u.id, u.name, u.phone, u.role, u.status,
+            u."canViewAllRecords"     AS can_view_all_records,
+            u."canManageUsers"        AS can_manage_users,
+            u."canManagePermissions"  AS can_manage_permissions
+     FROM "User" u
+     LEFT JOIN "UserPhone" up ON up."userId" = u.id
+     WHERE regexp_replace(u.phone, '[^0-9]', '', 'g') = $1
+        OR regexp_replace(u.phone, '[^0-9]', '', 'g') = $2
+        OR up."phoneDigits" = $1
+     ORDER BY (regexp_replace(u.phone, '[^0-9]', '', 'g') IN ($1, $2)) DESC
      LIMIT 1`,
     [canonical, canonical.replace(/^972/, '0')],
   );
