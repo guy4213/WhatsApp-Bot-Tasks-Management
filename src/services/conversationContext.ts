@@ -111,7 +111,10 @@ export type AwaitingKind =
   | 'pivot_confirm'
   // CAL-WA: worker asked to delete a calendar event; the bot resolved exactly
   // one matching event and now awaits a "כן/לא" confirmation before deleting.
-  | 'calendar_delete_confirm';
+  | 'calendar_delete_confirm'
+  // AI-native agent: a destructive tool call (e.g. calendar delete) is pending
+  // the user's yes/no confirmation. The pending call rides in `pendingAgentTool`.
+  | 'agent_confirm';
 
 /**
  * Active-task pointer (Phase 1). Stored inside the conversation-context `state`
@@ -239,6 +242,13 @@ export interface ConversationState {
   // yes/no confirmation before the DELETE is issued.
   calendarDeleteEventId?: string;
   calendarDeleteSubject?: string;
+  // AI-native agent: a destructive tool call held for yes/no confirmation
+  // (state `agent_confirm`). Serializable subset — no AI-layer types imported.
+  pendingAgentTool?: {
+    name: string;
+    input: Record<string, unknown>;
+    summary: string; // Hebrew one-line description shown in the confirm prompt
+  };
 }
 
 export async function getContext(phone: string): Promise<ConversationState | null> {

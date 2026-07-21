@@ -348,7 +348,17 @@ export async function getEventAsUser(
   return normalizeEvent(data);
 }
 
-// ── createEventAsUser ─────────────────────────────────────────────────────────
+// ── WRITE operations (create / update / delete) ─────────────────────────────────
+//
+// The WRITE half of the Outlook calendar service. Same per-user token as the
+// read paths (`getAccessToken(userId)` → the caller's own /me/... calendar).
+// The linked Microsoft account must carry the `Calendars.ReadWrite` scope; a
+// 403 surfaces the same "reconnect to grant calendar permission" Hebrew message.
+// Tokens are never logged. Only status codes / event ids are logged.
+//
+// `createEventAsUser` (VOICE-3) is the canonical creator shared by the voice/
+// text calendar flows AND the AI-native agent — its input uses startIso/endIso.
+// `updateEventAsUser` / `deleteEventAsUser` were added for the agent.
 
 export interface CreateEventInput {
   subject: string;
@@ -363,6 +373,26 @@ export interface CreateEventInput {
   body?: string | null;
 }
 
+const DEFAULT_TZ = 'Asia/Jerusalem';
+
+/** Shared 403/404/!ok handling for the write calls — mirrors the read paths. */
+async function ensureGraphOk(res: Response, op: string): Promise<void> {
+  if (res.status === 403) {
+    logger.error({ status: 403, op }, 'Graph calendar write forbidden');
+    throw new Error(
+      'אין הרשאת יומן ל-Outlook — יש להתחבר מחדש כדי לאשר את הרשאת היומן (Calendars.ReadWrite)',
+    );
+  }
+  if (res.status === 404) {
+    logger.error({ status: 404, op }, 'Graph calendar event not found');
+    throw new Error('האירוע לא נמצא ביומן');
+  }
+  if (!res.ok) {
+    logger.error({ status: res.status, op }, 'Graph calendar write failed');
+    throw new Error(`Graph API request failed with status ${res.status}`);
+  }
+}
+
 /**
  * VOICE-3: Create a calendar event on the linked Outlook account of `userId`.
  * POST /me/events with the same token helper the read paths use — requires the
@@ -373,7 +403,7 @@ export async function createEventAsUser(
   input: CreateEventInput,
 ): Promise<NormalizedEvent> {
   const token = await getAccessToken(userId);
-  const tz = input.timeZone ?? 'Asia/Jerusalem';
+  const tz = input.timeZone ?? DEFAULT_TZ;
 
   const res = await fetch(`${GRAPH_BASE}/me/events`, {
     method: 'POST',
@@ -391,18 +421,82 @@ export async function createEventAsUser(
     }),
   });
 
-  if (res.status === 403) {
-    logger.error({ status: 403 }, 'Graph calendar create forbidden');
-    throw new Error(
-      'אין הרשאת יומן ל-Outlook — יש להתחבר מחדש כדי לאשר את הרשאת היומן (Calendars.ReadWrite)',
-    );
-  }
-
-  if (!res.ok) {
-    logger.error({ status: res.status }, 'Graph calendar create failed');
-    throw new Error(`Graph API request failed with status ${res.status}`);
-  }
-
+  await ensureGraphOk(res, 'create');
   const data = await res.json();
+  logger.info({ op: 'create' }, 'Graph calendar event created');
   return normalizeEvent(data);
+}
+
+/** Partial update to an existing event. Only provided fields are sent to Graph (PATCH). */
+export interface UpdateEventInput {
+  subject?: string;
+  startDateTime?: string;
+  endDateTime?: string;
+  timeZone?: string;
+  body?: string;
+  location?: string;
+}
+
+/**
+ * Update (PATCH) an existing calendar event by its Graph id. Only the fields
+ * present in `input` are changed. Returns the updated event (normalized).
+ */
+export async function updateEventAsUser(
+  userId: string,
+  eventId: string,
+  input: UpdateEventInput,
+): Promise<NormalizedEvent> {
+  const token = await getAccessToken(userId);
+  const tz = input.timeZone ?? DEFAULT_TZ;
+
+  const graphBody: Record<string, unknown> = {};
+  if (input.subject !== undefined) graphBody.subject = input.subject;
+  if (input.startDateTime !== undefined) {
+    graphBody.start = { dateTime: input.startDateTime, timeZone: tz };
+  }
+  if (input.endDateTime !== undefined) {
+    graphBody.end = { dateTime: input.endDateTime, timeZone: tz };
+  }
+  if (input.body !== undefined) {
+    graphBody.body = { contentType: 'text', content: input.body };
+  }
+  if (input.location !== undefined) {
+    graphBody.location = { displayName: input.location };
+  }
+
+  const res = await fetch(`${GRAPH_BASE}/me/events/${encodeURIComponent(eventId)}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(graphBody),
+  });
+
+  await ensureGraphOk(res, 'update');
+  const data = await res.json();
+  logger.info({ op: 'update' }, 'Graph calendar event updated');
+  return normalizeEvent(data);
+}
+
+/**
+ * Delete a calendar event by its Graph id. Returns void on success (Graph
+ * returns 204). Callers MUST confirm with the user before invoking this — the
+ * service itself performs no confirmation.
+ */
+export async function deleteEventAsUser(userId: string, eventId: string): Promise<void> {
+  const token = await getAccessToken(userId);
+
+  const res = await fetch(`${GRAPH_BASE}/me/events/${encodeURIComponent(eventId)}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+
+  // 204 No Content is the success case; ensureGraphOk treats any 2xx as ok.
+  await ensureGraphOk(res, 'delete');
+  logger.info({ op: 'delete' }, 'Graph calendar event deleted');
 }

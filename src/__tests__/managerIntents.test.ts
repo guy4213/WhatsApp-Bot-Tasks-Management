@@ -25,6 +25,7 @@ function mockProvider(
   return {
     name,
     emitStructured: vi.fn().mockResolvedValue(returnValue),
+    runLoop: vi.fn().mockResolvedValue({ text: '', toolCallCount: 0 }),
   };
 }
 

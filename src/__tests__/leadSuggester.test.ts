@@ -8,7 +8,11 @@ function mockProvider(
   impl: (req: StructuredRequest) => Promise<Record<string, unknown>>,
   name = 'mock',
 ): LLMProvider {
-  return { name, emitStructured: impl };
+  return {
+    name,
+    emitStructured: impl,
+    runLoop: async () => ({ text: '', toolCallCount: 0 }),
+  };
 }
 
 describe('suggestWorkerForLead', () => {

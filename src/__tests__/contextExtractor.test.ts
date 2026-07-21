@@ -27,7 +27,11 @@ function mockProvider(
   impl: (req: StructuredRequest) => Promise<Record<string, unknown>>,
   name = 'mock',
 ): LLMProvider {
-  return { name, emitStructured: impl };
+  return {
+    name,
+    emitStructured: impl,
+    runLoop: async () => ({ text: '', toolCallCount: 0 }),
+  };
 }
 
 function highConfidenceProvider(values: Record<string, unknown>, confidence = 0.95): LLMProvider {
@@ -495,6 +499,7 @@ describe('extractFromContext — inspection_action', () => {
           clarification: null,
         };
       },
+      runLoop: async () => ({ text: '', toolCallCount: 0 }),
     };
     await extractFromContext(
       {
@@ -757,6 +762,7 @@ describe('extractInspectionActions — multi-action extraction', () => {
         seenSystem = req.system;
         return { actions: [], confidence: 0.1, clarification: null };
       },
+      runLoop: async () => ({ text: '', toolCallCount: 0 }),
     };
     await extractInspectionActions('שנה', sampleCtxValues, undefined, provider);
     expect(seenSystem).toContain('רונית לוי');

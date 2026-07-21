@@ -4313,3 +4313,57 @@ single-shot start-flow pass, all QA, and the pre-existing test-bug fixes.
 a follow-up — the intent parser emits no field/value for it, so it needs raw-text
 extraction threading; the mid-picker `mergeCorrectSite` (re-reference a task) is done.
 No `Task.status` writes; reassign uses the documented `Task.ownerId` write only.
+
+## AI-NATIVE — Free-text conversational agent loop
+
+**Status:** DONE (local, uncommitted)
+
+**What to do:** Make the bot AI-native — fully free-text conversation instead of
+a single-intent classifier. When the user asks e.g. "מה המשימות שלי היום", the
+agent pulls the data from the DB itself; calendar requests go to Outlook. One
+system prompt + a set of tools (same approach as the voice bot). The numbered
+menu is unchanged and still sent on its trigger.
+
+**Definition of Done:** fresh free-text is handled by a multi-turn tool-calling
+loop; reads/status/calendar work through tools that reuse existing services;
+destructive calendar delete asks for confirmation; permission gates enforced in
+code; no forbidden CRM writes; menu + all deterministic fast-paths untouched.
+
+**Files changed:**
+- `src/ai/provider.ts` — added `runLoop()` multi-turn tool-calling to the
+  `LLMProvider` interface + both OpenAI and Anthropic adapters (alongside the
+  existing single-shot `emitStructured`, untouched).
+- `src/services/graphCalendar.ts` — added `createEventAsUser` / `updateEventAsUser`
+  / `deleteEventAsUser` (Microsoft Graph WRITE, per-user token; was read-only).
+- `src/ai/agent/tools.ts` (new) — tool registry wrapping existing services
+  (list_my_inspections, list_tasks, get_task_details, set_field_status,
+  report_problem, report_missing_info, calendar_list/create/update/delete),
+  each with an in-code permission gate; calendar delete flagged destructive.
+- `src/ai/agent/index.ts` (new) — the loop entry: one Hebrew system prompt,
+  history, destructive-confirmation gating, WhatsApp send. `AI_AGENT_LOOP` flag
+  (default on; =0 falls back to the legacy intent router).
+- `src/services/conversationContext.ts` — added `agent_confirm` AwaitingKind +
+  `pendingAgentTool` state payload for the destructive-confirm flow.
+- `src/ai/router.ts` — TWO insertions only: route `agent_confirm` context to
+  `handleAgentConfirm`; divert fresh free-text to `runAgentLoop` when the flag
+  is on (legacy path preserved below it). No other router logic changed.
+- Test mock providers updated for the new interface method:
+  `managerIntents.test.ts`, `contextExtractor.test.ts`, `leadSuggester.test.ts`.
+
+**Tests:** `src/__tests__/agentTools.test.ts` (new — permission gates, §6.6
+forbidden-write invariant, status ownership gate, hint resolution, scope
+gating, calendar tools), `src/__tests__/agentLoop.test.ts` (new — flag,
+plain-answer flow, destructive confirmation gating, "כן"/"לא"/garbage replies).
+`npx tsc --noEmit` clean.
+
+**Deviations from spec:** lead-assignment and manager-dashboard intents were NOT
+yet turned into agent tools — the first toolset is read + field-status +
+calendar (per the user's scoped request). The legacy intent router still serves
+those via `AI_AGENT_LOOP=0` if needed, and they are the obvious next tools to add.
+
+**Known risk / follow-up:** the loop replaces the classifier for ALL fresh
+free-text — the legacy intents not yet re-exposed as tools (assign_lead,
+management_snapshot, exceptions, workers overview, search, schedule, corrections,
+tracking-provision) are currently reachable only via the menu or the flag-off
+path. Add them as tools next. Calendar tools require the user to have linked
+their Microsoft account (per-user Graph token).

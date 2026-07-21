@@ -42,6 +42,7 @@ import { notify } from '../whatsapp/templates';
 import { createProvisioning, buildInlineConfigLink, hasActiveProvisioning } from '../services/owntracksProvisioning';
 import { writeAuditLog } from '../utils/auditLog';
 import { moduleLogger } from '../utils/logger';
+import { agentLoopEnabled, runAgentLoop, handleAgentConfirm } from './agent';
 import {
   MENU_TRIGGER_RE, menuItemsFor, renderMenu, type MenuRoute,
   problemTypeMenu, renderProblemTypeMenu,
@@ -522,6 +523,12 @@ export async function handleAIMessage(user: ResolvedUser, text: string, quotedWa
   // message flows through fresh intent parsing; the pointer is read later by
   // `runAdvanceStatusDirect` via getActiveInspection.
   const ctx = await getContext(user.phone);
+  // AI-native agent: a destructive tool call is awaiting the user's yes/no.
+  // Resolve it here, ahead of the legacy clarification machinery.
+  if (ctx && ctx.awaiting === 'agent_confirm') {
+    const handled = await handleAgentConfirm(user, text);
+    if (handled) return;
+  }
   if (ctx && ctx.awaiting !== 'idle_active_inspection') {
     await continueConversation(user, text, ctx, quotedWamid);
     return;
@@ -595,6 +602,17 @@ export async function handleAIMessage(user: ResolvedUser, text: string, quotedWa
   if (/^[1-7]$/.test(effectiveGuardText) && !isManagerMenuUser(user)) {
     await showMenu(user);
     await continueConversation(user, effectiveGuardText, { awaiting: 'menu' });
+    return;
+  }
+
+  // ── AI-native agent loop ─────────────────────────────────────────────────────
+  // When enabled (default), fresh free-text goes to the conversational tool-
+  // calling agent instead of the single-intent classifier. All the deterministic
+  // fast-paths above (button taps, menu trigger, "הבדיקות שלי", bare-digit guards,
+  // mid-conversation context) still run FIRST and are unaffected. Set
+  // AI_AGENT_LOOP=0 to fall back to the legacy intent router below.
+  if (agentLoopEnabled()) {
+    await runAgentLoop(user, text);
     return;
   }
 
